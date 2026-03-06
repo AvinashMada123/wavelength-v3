@@ -20,6 +20,9 @@ alembic>=1.14.0,<2
 # HTTP client (for GHL API calls — pipecat requires >=3.11.12)
 aiohttp>=3.11.12,<4
 
+# Form parsing (Plivo webhooks)
+python-multipart>=0.0.9
+
 # Settings
 pydantic-settings>=2.7.0,<3
 
