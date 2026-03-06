@@ -1,0 +1,39 @@
+steps:
+  # Build Docker image
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/wavelength/voice-agent:${SHORT_SHA}
+      - .
+
+  # Push to Artifact Registry
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/wavelength/voice-agent:${SHORT_SHA}
+
+  # Deploy to Cloud Run
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - wavelength-voice-agent
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/wavelength/voice-agent:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --min-instances=1
+      - --max-instances=20
+      - --concurrency=20
+      - --timeout=3600
+      - --cpu=2
+      - --memory=2Gi
+      - --no-cpu-throttling
+      - --session-affinity
+
+substitutions:
+  _REGION: asia-south1
+
+options:
+  logging: CLOUD_LOGGING_ONLY
