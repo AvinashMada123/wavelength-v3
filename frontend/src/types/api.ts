@@ -8,7 +8,9 @@ export interface BotConfig {
   event_time: string | null;
   tts_voice: string;
   tts_style_prompt: string | null;
+  language: string;
   system_prompt_template: string;
+  context_variables: Record<string, string>;
   silence_timeout_secs: number;
   ghl_webhook_url: string | null;
   plivo_caller_id: string;
@@ -26,7 +28,9 @@ export interface CreateBotConfigRequest {
   event_time?: string | null;
   tts_voice?: string;
   tts_style_prompt?: string | null;
+  language?: string;
   system_prompt_template: string;
+  context_variables?: Record<string, string>;
   silence_timeout_secs?: number;
   ghl_webhook_url?: string | null;
   plivo_auth_id: string;
@@ -43,7 +47,9 @@ export interface UpdateBotConfigRequest {
   event_time?: string | null;
   tts_voice?: string | null;
   tts_style_prompt?: string | null;
+  language?: string | null;
   system_prompt_template?: string | null;
+  context_variables?: Record<string, string> | null;
   silence_timeout_secs?: number | null;
   ghl_webhook_url?: string | null;
   plivo_auth_id?: string | null;
@@ -65,6 +71,13 @@ export interface TriggerCallResponse {
   status: string;
 }
 
+export interface CallLogMetadata {
+  transcript?: Array<{ role: "user" | "assistant"; content: string }>;
+  interest_level?: "high" | "medium" | "low";
+  recording_path?: string;
+  call_metrics?: { turn_count: number; total_duration_s?: number };
+}
+
 export interface CallLog {
   id: string;
   bot_id: string;
@@ -79,4 +92,5 @@ export interface CallLog {
   started_at: string | null;
   ended_at: string | null;
   created_at: string;
+  metadata: CallLogMetadata | null;
 }

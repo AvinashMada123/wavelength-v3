@@ -5,17 +5,19 @@ import { motion } from "framer-motion";
 import {
   Phone,
   PhoneCall,
-  Bot,
   Activity,
   CheckCircle2,
   XCircle,
   Clock,
-  Loader2,
   Search,
+  Download,
   X,
+  Calendar,
   ChevronLeft,
   ChevronRight,
+  RefreshCw,
   FileText,
+  PhoneOff,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/layout/header";
@@ -29,7 +31,6 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -56,9 +57,12 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { fetchBots, fetchCallLogs, triggerCall, checkHealth, getRecordingUrl } from "@/lib/api";
+import { fetchBots, fetchCallLogs, getRecordingUrl } from "@/lib/api";
+import { exportCallsCSV } from "@/lib/call-logs-export";
 import { formatDate, formatDuration, formatPhoneNumber, timeAgo, cn } from "@/lib/utils";
 import type { BotConfig, CallLog } from "@/types/api";
+
+// ---------- Status config ----------
 
 const STATUS_CONFIG: Record<
   string,
@@ -116,39 +120,42 @@ function InterestBadge({ level }: { level: string }) {
   );
 }
 
-const PAGE_SIZE = 20;
+// ---------- Page ----------
 
-export default function CallsPage() {
+const PAGE_SIZE = 25;
+
+export default function CallLogsPage() {
   const [bots, setBots] = useState<BotConfig[]>([]);
   const [calls, setCalls] = useState<CallLog[]>([]);
-  const [healthOk, setHealthOk] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // Trigger form
-  const [selectedBotId, setSelectedBotId] = useState("");
-  const [contactName, setContactName] = useState("");
-  const [contactPhone, setContactPhone] = useState("");
-  const [triggering, setTriggering] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Filters
-  const [filterBotId, setFilterBotId] = useState<string>("all");
-  const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [filterBotId, setFilterBotId] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(0);
+
+  // Selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Detail modal
   const [selectedCall, setSelectedCall] = useState<CallLog | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // ---------- Data loading ----------
+
   const loadCalls = useCallback(async () => {
     try {
       const data = await fetchCallLogs(
-        filterBotId && filterBotId !== "all" ? filterBotId : undefined
+        filterBotId !== "all" ? filterBotId : undefined
       );
       setCalls(data);
     } catch {
-      // silent polling
+      // silent
     } finally {
       setLoading(false);
     }
@@ -156,9 +163,6 @@ export default function CallsPage() {
 
   useEffect(() => {
     fetchBots().then(setBots).catch(() => {});
-    checkHealth()
-      .then(() => setHealthOk(true))
-      .catch(() => setHealthOk(false));
   }, []);
 
   useEffect(() => {
@@ -172,21 +176,37 @@ export default function CallsPage() {
       ["initiated", "ringing", "in-progress"].includes(c.status)
     );
     const interval = hasActive ? 3000 : 30000;
-
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(loadCalls, interval);
-
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [calls, loadCalls]);
 
-  // Filtered + searched calls
+  async function handleRefresh() {
+    setRefreshing(true);
+    await loadCalls();
+    setRefreshing(false);
+    toast.success("Refreshed");
+  }
+
+  // ---------- Bot name lookup ----------
+
+  const botNameMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const b of bots) m.set(b.id, b.agent_name);
+    return m;
+  }, [bots]);
+
+  // ---------- Filtering ----------
+
   const filteredCalls = useMemo(() => {
     let result = calls;
+
     if (filterStatus !== "all") {
       result = result.filter((c) => c.status === filterStatus);
     }
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(
@@ -196,8 +216,21 @@ export default function CallsPage() {
           (c.summary && c.summary.toLowerCase().includes(q))
       );
     }
+
+    if (dateFrom) {
+      const from = new Date(dateFrom);
+      from.setHours(0, 0, 0, 0);
+      result = result.filter((c) => new Date(c.created_at) >= from);
+    }
+
+    if (dateTo) {
+      const to = new Date(dateTo);
+      to.setHours(23, 59, 59, 999);
+      result = result.filter((c) => new Date(c.created_at) <= to);
+    }
+
     return result;
-  }, [calls, filterStatus, searchQuery]);
+  }, [calls, filterStatus, searchQuery, dateFrom, dateTo]);
 
   const totalPages = Math.ceil(filteredCalls.length / PAGE_SIZE);
   const paginatedCalls = filteredCalls.slice(
@@ -208,146 +241,122 @@ export default function CallsPage() {
   // Reset page when filters change
   useEffect(() => {
     setPage(0);
-  }, [filterBotId, filterStatus, searchQuery]);
+    setSelectedIds(new Set());
+  }, [filterBotId, filterStatus, searchQuery, dateFrom, dateTo]);
 
-  async function handleTrigger() {
-    if (!selectedBotId || !contactName || !contactPhone) {
-      toast.error("Fill in all fields");
-      return;
-    }
-    setTriggering(true);
-    try {
-      const res = await triggerCall({
-        bot_id: selectedBotId,
-        contact_name: contactName,
-        contact_phone: contactPhone,
-      });
-      toast.success(`Call triggered: ${res.call_sid.slice(0, 8)}...`);
-      setContactName("");
-      setContactPhone("");
-      loadCalls();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to trigger call");
-    } finally {
-      setTriggering(false);
+  // ---------- Selection ----------
+
+  const allOnPageSelected =
+    paginatedCalls.length > 0 &&
+    paginatedCalls.every((c) => selectedIds.has(c.id));
+  const someOnPageSelected =
+    paginatedCalls.some((c) => selectedIds.has(c.id)) && !allOnPageSelected;
+
+  function toggleSelectAll() {
+    if (allOnPageSelected) {
+      const next = new Set(selectedIds);
+      for (const c of paginatedCalls) next.delete(c.id);
+      setSelectedIds(next);
+    } else {
+      const next = new Set(selectedIds);
+      for (const c of paginatedCalls) next.add(c.id);
+      setSelectedIds(next);
     }
   }
 
-  const activeBots = bots.filter((b) => b.is_active).length;
-  const activeCalls = calls.filter((c) =>
-    ["initiated", "ringing", "in-progress"].includes(c.status)
-  ).length;
+  function toggleSelect(id: string) {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
+  }
+
+  // ---------- Export ----------
+
+  function handleExport() {
+    const toExport =
+      selectedIds.size > 0
+        ? filteredCalls.filter((c) => selectedIds.has(c.id))
+        : filteredCalls;
+    exportCallsCSV(toExport);
+    toast.success(`Exported ${toExport.length} calls`);
+  }
+
+  // ---------- Filter state ----------
+
+  const hasFilters =
+    searchQuery ||
+    filterStatus !== "all" ||
+    filterBotId !== "all" ||
+    dateFrom ||
+    dateTo;
+
+  function clearFilters() {
+    setSearchQuery("");
+    setFilterStatus("all");
+    setFilterBotId("all");
+    setDateFrom("");
+    setDateTo("");
+  }
+
+  // ---------- Pagination helpers ----------
+
+  function getPageNumbers(): (number | "ellipsis")[] {
+    const p = page + 1; // 1-based for display
+    const pages: (number | "ellipsis")[] = [];
+    if (totalPages <= 5) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      pages.push(1);
+      if (p > 3) pages.push("ellipsis");
+      const rangeStart = Math.max(2, p - 1);
+      const rangeEnd = Math.min(totalPages - 1, p + 1);
+      for (let i = rangeStart; i <= rangeEnd; i++) pages.push(i);
+      if (p < totalPages - 2) pages.push("ellipsis");
+      pages.push(totalPages);
+    }
+    return pages;
+  }
 
   return (
     <>
-      <Header title="Calls" />
+      <Header title="Call Logs" />
       <PageTransition>
         <div className="space-y-6 p-6">
-          {/* Stats bar */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            {[
-              { icon: Bot, label: "Active Bots", value: activeBots, gradient: "from-violet-500 to-indigo-500" },
-              { icon: Phone, label: "Total Calls", value: calls.length, gradient: "from-emerald-500 to-green-500" },
-              { icon: Activity, label: "Active Now", value: activeCalls, gradient: "from-amber-500 to-orange-500" },
-              { icon: Activity, label: "API Health", value: healthOk === null ? "..." : healthOk ? "OK" : "Down", gradient: "from-rose-500 to-pink-500" },
-            ].map((stat, i) => (
-              <motion.div
-                key={stat.label}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.06 }}
-              >
-                <Card>
-                  <CardContent className="flex items-center gap-3 pt-6">
-                    <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${stat.gradient} text-white`}>
-                      <stat.icon className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <p className="text-xl font-bold">{stat.value}</p>
-                      <p className="text-xs text-muted-foreground">{stat.label}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ))}
+          {/* Header row */}
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-semibold">Call Logs</h2>
+              <p className="text-sm text-muted-foreground">
+                View, filter, and export your complete call history
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={refreshing}
+            >
+              <RefreshCw
+                className={cn("h-3.5 w-3.5 mr-1.5", refreshing && "animate-spin")}
+              />
+              {refreshing ? "Refreshing..." : "Refresh"}
+            </Button>
           </div>
 
-          {/* Trigger call form */}
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Trigger Call</CardTitle>
-              <CardDescription>Start an outbound call to a contact</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                <div className="space-y-2">
-                  <Label>Bot</Label>
-                  <Select value={selectedBotId} onValueChange={setSelectedBotId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select bot..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {bots.filter((b) => b.is_active).map((bot) => (
-                        <SelectItem key={bot.id} value={bot.id}>
-                          {bot.agent_name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Contact Name</Label>
-                  <Input
-                    value={contactName}
-                    onChange={(e) => setContactName(e.target.value)}
-                    placeholder="John Doe"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Phone</Label>
-                  <Input
-                    value={contactPhone}
-                    onChange={(e) => setContactPhone(e.target.value)}
-                    placeholder="+919052034075"
-                  />
-                </div>
-                <div className="flex items-end">
-                  <Button
-                    onClick={handleTrigger}
-                    disabled={triggering}
-                    className="w-full"
-                  >
-                    {triggering ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <PhoneCall className="mr-2 h-4 w-4" />
-                    )}
-                    {triggering ? "Calling..." : "Trigger"}
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Call logs with filters */}
-          <Card>
-            <CardHeader>
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                  <CardTitle className="text-base">Call History</CardTitle>
-                  <CardDescription>
-                    {filteredCalls.length} call{filteredCalls.length !== 1 ? "s" : ""}
-                  </CardDescription>
-                </div>
+            <CardHeader className="pb-4">
+              {/* Toolbar */}
+              <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
                   {/* Search */}
-                  <div className="relative">
-                    <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <div className="relative flex-1 min-w-[200px]">
+                    <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search..."
-                      className="pl-8 w-48"
+                      placeholder="Search by name, phone, or summary..."
+                      className="pl-8 h-9"
                     />
                     {searchQuery && (
                       <Button
@@ -360,23 +369,10 @@ export default function CallsPage() {
                       </Button>
                     )}
                   </div>
-                  {/* Bot filter */}
-                  <Select value={filterBotId} onValueChange={setFilterBotId}>
-                    <SelectTrigger className="w-40">
-                      <SelectValue placeholder="All bots" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All bots</SelectItem>
-                      {bots.map((bot) => (
-                        <SelectItem key={bot.id} value={bot.id}>
-                          {bot.agent_name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+
                   {/* Status filter */}
                   <Select value={filterStatus} onValueChange={setFilterStatus}>
-                    <SelectTrigger className="w-36">
+                    <SelectTrigger className="w-36 h-9">
                       <SelectValue placeholder="All statuses" />
                     </SelectTrigger>
                     <SelectContent>
@@ -388,43 +384,184 @@ export default function CallsPage() {
                       ))}
                     </SelectContent>
                   </Select>
+
+                  {/* Bot filter */}
+                  <Select value={filterBotId} onValueChange={setFilterBotId}>
+                    <SelectTrigger className="w-40 h-9">
+                      <SelectValue placeholder="All bots" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All bots</SelectItem>
+                      {bots.map((bot) => (
+                        <SelectItem key={bot.id} value={bot.id}>
+                          {bot.agent_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  {/* Date from */}
+                  <div className="relative">
+                    <Calendar className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <Input
+                      type="date"
+                      value={dateFrom}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                      className="pl-8 h-9 w-[150px] text-xs"
+                      title="From date"
+                    />
+                  </div>
+
+                  {/* Date to */}
+                  <div className="relative">
+                    <Calendar className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <Input
+                      type="date"
+                      value={dateTo}
+                      onChange={(e) => setDateTo(e.target.value)}
+                      className="pl-8 h-9 w-[150px] text-xs"
+                      title="To date"
+                    />
+                  </div>
+
+                  {/* Clear filters */}
+                  {hasFilters && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={clearFilters}
+                      className="text-xs gap-1"
+                    >
+                      <X className="h-3 w-3" />
+                      Clear
+                    </Button>
+                  )}
+
+                  {/* Export */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleExport}
+                    className="gap-1.5 ml-auto"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    {selectedIds.size > 0
+                      ? `Export ${selectedIds.size} selected`
+                      : "Export CSV"}
+                  </Button>
                 </div>
+
+                {/* Selection + count indicator */}
+                {(selectedIds.size > 0 ||
+                  (hasFilters && filteredCalls.length !== calls.length)) && (
+                  <div className="flex items-center gap-3">
+                    {selectedIds.size > 0 && (
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-violet-400 font-medium">
+                          {selectedIds.size} selected
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-xs px-2"
+                          onClick={() =>
+                            setSelectedIds(
+                              new Set(filteredCalls.map((c) => c.id))
+                            )
+                          }
+                        >
+                          Select all {filteredCalls.length}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-xs px-2"
+                          onClick={() => setSelectedIds(new Set())}
+                        >
+                          Clear
+                        </Button>
+                      </div>
+                    )}
+                    {hasFilters &&
+                      filteredCalls.length !== calls.length &&
+                      selectedIds.size === 0 && (
+                        <p className="text-xs text-muted-foreground">
+                          Showing {filteredCalls.length} of {calls.length} calls
+                        </p>
+                      )}
+                  </div>
+                )}
               </div>
             </CardHeader>
-            <CardContent>
+
+            <CardContent className="space-y-4">
               {loading ? (
                 <div className="space-y-3">
-                  {Array.from({ length: 5 }).map((_, i) => (
+                  {Array.from({ length: 6 }).map((_, i) => (
                     <Skeleton key={i} className="h-12 w-full" />
                   ))}
                 </div>
               ) : filteredCalls.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                  <Phone className="mb-3 h-10 w-10 opacity-30" />
-                  <p className="text-sm">No calls found</p>
+                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                  <PhoneOff className="mb-3 h-12 w-12 opacity-30" />
+                  <p className="font-medium">
+                    {calls.length === 0 ? "No calls yet" : "No matching calls"}
+                  </p>
+                  <p className="text-sm mt-1">
+                    {calls.length === 0
+                      ? "Initiate your first call to see logs here."
+                      : "Try adjusting your filters."}
+                  </p>
                 </div>
               ) : (
                 <>
                   <Table>
                     <TableHeader>
                       <TableRow>
+                        <TableHead className="w-10">
+                          <input
+                            type="checkbox"
+                            checked={allOnPageSelected}
+                            ref={(el) => {
+                              if (el) el.indeterminate = someOnPageSelected;
+                            }}
+                            onChange={toggleSelectAll}
+                            className="h-4 w-4 rounded border-muted-foreground/40 accent-violet-500 cursor-pointer"
+                          />
+                        </TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Contact</TableHead>
                         <TableHead>Phone</TableHead>
+                        <TableHead>Bot</TableHead>
                         <TableHead>Duration</TableHead>
                         <TableHead>Outcome</TableHead>
+                        <TableHead>Interest</TableHead>
                         <TableHead>Summary</TableHead>
                         <TableHead>Time</TableHead>
-                        <TableHead className="w-10"></TableHead>
+                        <TableHead className="w-10" />
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {paginatedCalls.map((call) => (
-                        <TableRow
+                      {paginatedCalls.map((call, index) => (
+                        <motion.tr
                           key={call.id}
-                          className="cursor-pointer"
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.15, delay: index * 0.02 }}
+                          className={cn(
+                            "hover:bg-muted/50 border-b transition-colors cursor-pointer",
+                            selectedIds.has(call.id) && "bg-violet-500/5"
+                          )}
                           onClick={() => setSelectedCall(call)}
                         >
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(call.id)}
+                              onChange={() => toggleSelect(call.id)}
+                              className="h-4 w-4 rounded border-muted-foreground/40 accent-violet-500 cursor-pointer"
+                            />
+                          </TableCell>
                           <TableCell>
                             <StatusBadge status={call.status} />
                           </TableCell>
@@ -435,17 +572,44 @@ export default function CallsPage() {
                             {formatPhoneNumber(call.contact_phone)}
                           </TableCell>
                           <TableCell>
-                            {formatDuration(call.call_duration)}
+                            {botNameMap.get(call.bot_id) ? (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] font-normal"
+                              >
+                                {botNameMap.get(call.bot_id)}
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground text-xs">
+                                -
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {call.call_duration
+                              ? formatDuration(call.call_duration)
+                              : "-"}
                           </TableCell>
                           <TableCell>
-                            {call.outcome && (
-                              <Badge variant="outline">{call.outcome}</Badge>
+                            {call.outcome ? (
+                              <Badge variant="outline" className="text-xs">
+                                {call.outcome}
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {call.metadata?.interest_level ? (
+                              <InterestBadge level={call.metadata.interest_level} />
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
                             )}
                           </TableCell>
                           <TableCell className="max-w-[200px] truncate text-sm text-muted-foreground">
                             {call.summary || "-"}
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                          <TableCell className="text-muted-foreground whitespace-nowrap text-sm">
                             {timeAgo(call.created_at)}
                           </TableCell>
                           <TableCell>
@@ -461,29 +625,53 @@ export default function CallsPage() {
                               <FileText className="h-3.5 w-3.5" />
                             </Button>
                           </TableCell>
-                        </TableRow>
+                        </motion.tr>
                       ))}
                     </TableBody>
                   </Table>
 
                   {/* Pagination */}
                   {totalPages > 1 && (
-                    <div className="flex items-center justify-between mt-4 pt-4 border-t">
+                    <div className="flex items-center justify-between pt-2">
                       <p className="text-sm text-muted-foreground">
-                        Page {page + 1} of {totalPages}
+                        Showing {page * PAGE_SIZE + 1}-
+                        {Math.min((page + 1) * PAGE_SIZE, filteredCalls.length)}{" "}
+                        of {filteredCalls.length} calls
                       </p>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1">
                         <Button
                           variant="outline"
-                          size="sm"
+                          size="icon"
+                          className="h-8 w-8"
                           disabled={page === 0}
                           onClick={() => setPage((p) => p - 1)}
                         >
                           <ChevronLeft className="h-4 w-4" />
                         </Button>
+                        {getPageNumbers().map((pn, idx) =>
+                          pn === "ellipsis" ? (
+                            <span
+                              key={`e-${idx}`}
+                              className="px-2 text-sm text-muted-foreground"
+                            >
+                              ...
+                            </span>
+                          ) : (
+                            <Button
+                              key={pn}
+                              variant={pn === page + 1 ? "default" : "outline"}
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => setPage(pn - 1)}
+                            >
+                              {pn}
+                            </Button>
+                          )
+                        )}
                         <Button
                           variant="outline"
-                          size="sm"
+                          size="icon"
+                          className="h-8 w-8"
                           disabled={page >= totalPages - 1}
                           onClick={() => setPage((p) => p + 1)}
                         >
@@ -553,8 +741,15 @@ export default function CallsPage() {
                   </TabsTrigger>
                 </TabsList>
 
+                {/* Details Tab */}
                 <TabsContent value="details" className="mt-4">
                   <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="text-muted-foreground">Bot</p>
+                      <p className="font-medium">
+                        {botNameMap.get(selectedCall.bot_id) || "-"}
+                      </p>
+                    </div>
                     <div>
                       <p className="text-muted-foreground">Duration</p>
                       <p className="font-medium">
@@ -579,6 +774,12 @@ export default function CallsPage() {
                       <p className="text-muted-foreground">Turns</p>
                       <p className="font-medium">
                         {selectedCall.metadata?.call_metrics?.turn_count ?? "-"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Created</p>
+                      <p className="font-medium">
+                        {formatDate(selectedCall.created_at)}
                       </p>
                     </div>
                     <div>
@@ -618,6 +819,7 @@ export default function CallsPage() {
                   )}
                 </TabsContent>
 
+                {/* Transcript Tab */}
                 <TabsContent value="transcript" className="mt-4">
                   <ScrollArea className="h-[400px] rounded-md border">
                     <Table>
@@ -652,6 +854,7 @@ export default function CallsPage() {
                   </ScrollArea>
                 </TabsContent>
 
+                {/* Recording Tab */}
                 <TabsContent value="recording" className="mt-4">
                   <div className="space-y-3 py-2">
                     <audio

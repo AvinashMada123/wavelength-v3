@@ -8,7 +8,10 @@ Plivo webhook and WebSocket routes.
 
 from __future__ import annotations
 
+import asyncio
+import wave
 from datetime import datetime, timezone
+from pathlib import Path
 
 import structlog
 from fastapi import APIRouter, Depends, Request, WebSocket
@@ -57,6 +60,7 @@ async def _update_call_status(
     call_duration: int | None = None,
     started_at: datetime | None = None,
     ended_at: datetime | None = None,
+    metadata: dict | None = None,
 ):
     values: dict = {}
     if status is not None:
@@ -71,6 +75,8 @@ async def _update_call_status(
         values["started_at"] = started_at
     if ended_at is not None:
         values["ended_at"] = ended_at
+    if metadata is not None:
+        values["metadata_"] = metadata
 
     if not values:
         return
@@ -85,6 +91,7 @@ async def _post_ghl_outcome(
     outcome: str,
     summary: str | None = None,
     error: str | None = None,
+    metadata: dict | None = None,
 ):
     if not ctx.ghl_webhook_url or ghl_client is None:
         return
@@ -100,8 +107,59 @@ async def _post_ghl_outcome(
         outcome_data["summary"] = summary
     if error:
         outcome_data["error"] = error
+    if metadata:
+        outcome_data["interest_level"] = metadata.get("interest_level")
+        outcome_data["call_metrics"] = metadata.get("call_metrics")
+        # Transcript excluded from webhook (payload size risk) — available via API
+        if metadata.get("recording_path"):
+            outcome_data["recording_url"] = (
+                f"{settings.PUBLIC_BASE_URL}/api/calls/{ctx.call_sid}/recording"
+            )
 
     await ghl_client.post_call_outcome(ctx.ghl_webhook_url, outcome_data)
+
+
+def _merge_recording_sync(bot_wav_path: str, user_wav_path: str, output_path: str) -> bool:
+    """Merge bot (left) + user (right) mono WAVs into a stereo WAV. Runs in executor."""
+    try:
+        # Read both mono WAV files
+        with wave.open(bot_wav_path, "rb") as bf:
+            bot_data = bf.readframes(bf.getnframes())
+        with wave.open(user_wav_path, "rb") as uf:
+            user_data = uf.readframes(uf.getnframes())
+
+        # Pad shorter track to match longer (16-bit = 2 bytes per sample)
+        max_len = max(len(bot_data), len(user_data))
+        bot_data = bot_data.ljust(max_len, b"\x00")
+        user_data = user_data.ljust(max_len, b"\x00")
+
+        # Interleave: left=bot, right=user (2 bytes per sample per channel)
+        stereo = bytearray(max_len * 2)
+        for i in range(0, max_len, 2):
+            stereo[i * 2 : i * 2 + 2] = bot_data[i : i + 2]
+            stereo[i * 2 + 2 : i * 2 + 4] = user_data[i : i + 2]
+
+        with wave.open(output_path, "wb") as out:
+            out.setnchannels(2)
+            out.setsampwidth(2)
+            out.setframerate(16000)
+            out.writeframes(bytes(stereo))
+
+        return True
+    except Exception:
+        logger.error("recording_merge_failed", exc_info=True)
+        return False
+
+
+async def _merge_recording(bot_wav: str, user_wav: str, call_sid: str) -> str | None:
+    """Merge bot + user WAVs into stereo. Keeps mono files for debugging."""
+    output_path = f"recordings/{call_sid}.wav"
+    loop = asyncio.get_running_loop()
+    ok = await loop.run_in_executor(None, _merge_recording_sync, bot_wav, user_wav, output_path)
+    if ok:
+        logger.info("recording_merged", call_sid=call_sid, path=output_path)
+        return output_path
+    return None
 
 
 def _map_plivo_status(plivo_status: str | None) -> str:
@@ -169,17 +227,45 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         await _update_call_status(call_sid, status="in_progress", started_at=datetime.now(timezone.utc))
         logger.info("pipeline_call_started", call_sid=call_sid)
 
-        # Run pipeline — returns conversation history
-        conversation_messages = await run_pipeline(websocket, ctx, bot_config)
+        # Run pipeline — returns conversation history + recording paths
+        pipeline_result = await run_pipeline(websocket, ctx, bot_config)
+        conversation_messages = pipeline_result["messages"]
+        recording_paths = pipeline_result["recording_paths"]
 
-        # Generate LLM summary
-        summary = await generate_call_summary(ctx, conversation_messages)
+        # Build transcript entries (filter system messages)
+        transcript_entries = [
+            {"role": m["role"], "content": m.get("content", "")}
+            for m in conversation_messages
+            if m.get("role") in ("user", "assistant")
+        ]
 
-        # Update call log with outcome
-        await _update_call_status(call_sid, outcome="completed", summary=summary)
+        # Generate LLM summary + interest classification
+        summary, interest_level = await generate_call_summary(ctx, conversation_messages)
 
-        # Post outcome to GHL
-        await _post_ghl_outcome(ctx, outcome="completed", summary=summary)
+        # Merge recording (runs in executor)
+        recording_path = None
+        if recording_paths:
+            recording_path = await _merge_recording(*recording_paths, call_sid)
+
+        # Build metadata
+        turn_count = sum(1 for t in transcript_entries if t["role"] == "user")
+        call_metadata = {
+            "transcript": transcript_entries,
+            "interest_level": interest_level,
+            "call_metrics": {"turn_count": turn_count},
+        }
+        if recording_path:
+            call_metadata["recording_path"] = recording_path
+
+        # Update call log with outcome + metadata
+        await _update_call_status(
+            call_sid, outcome="completed", summary=summary, metadata=call_metadata
+        )
+
+        # Post enriched outcome to GHL
+        await _post_ghl_outcome(
+            ctx, outcome="completed", summary=summary, metadata=call_metadata
+        )
 
     except Exception as e:
         logger.error("pipeline_error", call_sid=call_sid, error=str(e))
@@ -197,17 +283,24 @@ async def plivo_event(call_sid: str, request: Request):
     logger.info("plivo_event", call_sid=call_sid, status=call_status, duration=duration)
 
     mapped_status = _map_plivo_status(call_status)
+    duration_val = int(duration) if duration else None
     await _update_call_status(
         call_sid,
         status=mapped_status,
-        call_duration=int(duration) if duration else None,
+        call_duration=duration_val,
         ended_at=datetime.now(timezone.utc),
     )
 
-    # Backup GHL outcome posting — if pipeline didn't post (e.g. crash)
+    # Update metadata with actual duration from Plivo
     async with get_db_session() as db:
         call_log = await _get_call_log(db, call_sid)
 
+    if call_log and call_log.metadata_ and duration_val:
+        updated_meta = dict(call_log.metadata_)
+        updated_meta.setdefault("call_metrics", {})["total_duration_s"] = duration_val
+        await _update_call_status(call_sid, metadata=updated_meta)
+
+    # Backup GHL outcome posting — if pipeline didn't post (e.g. crash)
     if call_log and call_log.context_data and not call_log.outcome:
         bot_config = await bot_config_loader.get(call_log.context_data["bot_id"])
         if bot_config:

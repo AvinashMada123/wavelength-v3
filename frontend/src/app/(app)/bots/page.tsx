@@ -1,12 +1,27 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { Plus, Pencil, Trash2, Copy, Check } from "lucide-react";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import { motion } from "framer-motion";
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  Copy,
+  Check,
+  Bot,
+  Volume2,
+  Clock,
+  Globe,
+  Languages,
+  MoreVertical,
+  Variable,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/layout/header";
 import { PageTransition } from "@/components/layout/page-transition";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -15,22 +30,33 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
 import { fetchBots, createBot, updateBot, deleteBot } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
+import { VOICE_GROUPS, LANGUAGE_OPTIONS, BUILTIN_VARIABLES } from "@/lib/constants";
 import type { BotConfig } from "@/types/api";
+
+// ---------- Form types ----------
 
 interface BotForm {
   agent_name: string;
@@ -41,7 +67,9 @@ interface BotForm {
   event_time: string;
   tts_voice: string;
   tts_style_prompt: string;
+  language: string;
   system_prompt_template: string;
+  context_variables: Record<string, string>;
   silence_timeout_secs: number;
   ghl_webhook_url: string;
   plivo_auth_id: string;
@@ -58,13 +86,25 @@ const EMPTY_FORM: BotForm = {
   event_time: "",
   tts_voice: "Kore",
   tts_style_prompt: "",
+  language: "en-IN",
   system_prompt_template: "",
+  context_variables: {},
   silence_timeout_secs: 5,
   ghl_webhook_url: "",
   plivo_auth_id: "",
   plivo_auth_token: "",
   plivo_caller_id: "",
 };
+
+// Extract {variable_name} from a template string
+function extractVariables(template: string): string[] {
+  const matches = template.match(/\{(\w+)\}/g);
+  if (!matches) return [];
+  const names = [...new Set(matches.map((m) => m.slice(1, -1)))];
+  return names;
+}
+
+// ---------- Page ----------
 
 export default function BotsPage() {
   const [bots, setBots] = useState<BotConfig[]>([]);
@@ -75,6 +115,9 @@ export default function BotsPage() {
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // New custom variable being added
+  const [newVarName, setNewVarName] = useState("");
 
   const loadBots = useCallback(async () => {
     try {
@@ -95,6 +138,47 @@ export default function BotsPage() {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  // Variables detected in the current prompt
+  const detectedVars = useMemo(
+    () => extractVariables(form.system_prompt_template),
+    [form.system_prompt_template]
+  );
+
+  // Custom variables = detected vars that aren't built-in, plus any in context_variables
+  const customVarNames = useMemo(() => {
+    const fromPrompt = detectedVars.filter(
+      (v) => !BUILTIN_VARIABLES.includes(v)
+    );
+    const fromSaved = Object.keys(form.context_variables);
+    return [...new Set([...fromPrompt, ...fromSaved])];
+  }, [detectedVars, form.context_variables]);
+
+  function setContextVar(name: string, value: string) {
+    setForm((prev) => ({
+      ...prev,
+      context_variables: { ...prev.context_variables, [name]: value },
+    }));
+  }
+
+  function removeContextVar(name: string) {
+    setForm((prev) => {
+      const next = { ...prev.context_variables };
+      delete next[name];
+      return { ...prev, context_variables: next };
+    });
+  }
+
+  function addCustomVariable() {
+    const name = newVarName.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+    if (!name) return;
+    if (BUILTIN_VARIABLES.includes(name)) {
+      toast.error(`"${name}" is a built-in variable`);
+      return;
+    }
+    setContextVar(name, "");
+    setNewVarName("");
+  }
+
   function openCreate() {
     setEditingBot(null);
     setForm(EMPTY_FORM);
@@ -112,7 +196,9 @@ export default function BotsPage() {
       event_time: bot.event_time || "",
       tts_voice: bot.tts_voice,
       tts_style_prompt: bot.tts_style_prompt || "",
+      language: bot.language || "en-IN",
       system_prompt_template: bot.system_prompt_template,
+      context_variables: bot.context_variables || {},
       silence_timeout_secs: bot.silence_timeout_secs,
       ghl_webhook_url: bot.ghl_webhook_url || "",
       plivo_auth_id: "",
@@ -134,11 +220,11 @@ export default function BotsPage() {
 
     setSaving(true);
     try {
-      // Strip empty strings to null for optional fields
       const payload: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(form)) {
-        if (typeof v === "string" && v === "" && k !== "agent_name" && k !== "company_name" && k !== "system_prompt_template") {
-          // skip empty optional strings — backend treats absent as no-change for updates
+        if (k === "context_variables") {
+          payload[k] = v;
+        } else if (typeof v === "string" && v === "" && k !== "agent_name" && k !== "company_name" && k !== "system_prompt_template") {
           if (!editingBot) payload[k] = null;
         } else {
           payload[k] = v;
@@ -146,7 +232,6 @@ export default function BotsPage() {
       }
 
       if (editingBot) {
-        // Only send changed fields
         await updateBot(editingBot.id, payload);
         toast.success("Bot updated");
       } else {
@@ -176,110 +261,128 @@ export default function BotsPage() {
   function copyId(id: string) {
     navigator.clipboard.writeText(id);
     setCopiedId(id);
+    toast.success("Bot ID copied");
     setTimeout(() => setCopiedId(null), 2000);
   }
+
+  const langLabel = (code: string) =>
+    LANGUAGE_OPTIONS.find((l) => l.value === code)?.label || code;
 
   return (
     <>
       <Header title="Bots" />
       <PageTransition>
         <div className="p-6">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Bot Configurations</CardTitle>
-              <Button onClick={openCreate} size="sm">
-                <Plus className="mr-2 h-4 w-4" />
-                New Bot
-              </Button>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <div className="flex items-center justify-center py-12 text-muted-foreground">
-                  Loading...
-                </div>
-              ) : bots.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                  <p>No bots configured yet.</p>
-                  <Button variant="link" onClick={openCreate}>
-                    Create your first bot
-                  </Button>
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Agent</TableHead>
-                      <TableHead>Company</TableHead>
-                      <TableHead>Voice</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Created</TableHead>
-                      <TableHead>ID</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {bots.map((bot) => (
-                      <TableRow key={bot.id}>
-                        <TableCell className="font-medium">{bot.agent_name}</TableCell>
-                        <TableCell>{bot.company_name}</TableCell>
-                        <TableCell className="font-mono text-xs">{bot.tts_voice}</TableCell>
-                        <TableCell>
-                          <Badge variant={bot.is_active ? "default" : "secondary"}>
-                            {bot.is_active ? "Active" : "Inactive"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground text-sm">
-                          {formatDate(bot.created_at)}
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 gap-1 font-mono text-xs text-muted-foreground"
-                            onClick={() => copyId(bot.id)}
-                          >
-                            {bot.id.slice(0, 8)}...
-                            {copiedId === bot.id ? (
-                              <Check className="h-3 w-3 text-green-500" />
-                            ) : (
-                              <Copy className="h-3 w-3" />
-                            )}
-                          </Button>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button variant="ghost" size="icon" onClick={() => openEdit(bot)}>
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            {deleteConfirm === bot.id ? (
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                onClick={() => handleDelete(bot.id)}
-                              >
-                                Confirm
-                              </Button>
-                            ) : (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => setDeleteConfirm(bot.id)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            )}
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-xl font-semibold">Bot Configurations</h2>
+              <p className="text-sm text-muted-foreground">
+                Manage your voice agents
+              </p>
+            </div>
+            <Button onClick={openCreate}>
+              <Plus className="mr-2 h-4 w-4" />
+              New Bot
+            </Button>
+          </div>
+
+          {loading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-48" />
+              ))}
+            </div>
+          ) : bots.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-16">
+                <Bot className="mb-3 h-12 w-12 text-muted-foreground/30" />
+                <p className="text-muted-foreground mb-2">No bots configured yet</p>
+                <Button variant="link" onClick={openCreate}>
+                  Create your first bot
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {bots.map((bot, i) => (
+                <motion.div
+                  key={bot.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.06 }}
+                >
+                  <Card className="group relative transition-colors hover:border-violet-500/50">
+                    <CardContent className="pt-6">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 text-white font-bold text-sm">
+                            {bot.agent_name.slice(0, 2).toUpperCase()}
                           </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
+                          <div>
+                            <h3 className="font-semibold">{bot.agent_name}</h3>
+                            <p className="text-sm text-muted-foreground">{bot.company_name}</p>
+                          </div>
+                        </div>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => openEdit(bot)}>
+                              <Pencil className="mr-2 h-4 w-4" /> Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => copyId(bot.id)}>
+                              {copiedId === bot.id ? <Check className="mr-2 h-4 w-4 text-green-500" /> : <Copy className="mr-2 h-4 w-4" />}
+                              Copy ID
+                            </DropdownMenuItem>
+                            <DropdownMenuItem className="text-destructive" onClick={() => deleteConfirm === bot.id ? handleDelete(bot.id) : setDeleteConfirm(bot.id)}>
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              {deleteConfirm === bot.id ? "Click to confirm" : "Delete"}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 mb-4">
+                        <Badge variant="outline" className="gap-1 text-xs">
+                          <Volume2 className="h-3 w-3" /> {bot.tts_voice}
+                        </Badge>
+                        <Badge variant="outline" className="gap-1 text-xs">
+                          <Languages className="h-3 w-3" /> {langLabel(bot.language)}
+                        </Badge>
+                        <Badge variant="outline" className="gap-1 text-xs">
+                          <Clock className="h-3 w-3" /> {bot.silence_timeout_secs}s
+                        </Badge>
+                        {bot.location && (
+                          <Badge variant="outline" className="gap-1 text-xs">
+                            <Globe className="h-3 w-3" /> {bot.location}
+                          </Badge>
+                        )}
+                      </div>
+
+                      <p className="text-xs text-muted-foreground line-clamp-2 mb-4">
+                        {bot.system_prompt_template.slice(0, 120)}
+                        {bot.system_prompt_template.length > 120 ? "..." : ""}
+                      </p>
+
+                      <div className="flex items-center justify-between pt-3 border-t">
+                        <Badge variant={bot.is_active ? "default" : "secondary"} className="text-[10px]">
+                          {bot.is_active ? "Active" : "Inactive"}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">{formatDate(bot.created_at)}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              ))}
+            </div>
+          )}
         </div>
       </PageTransition>
 
+      {/* Create/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
           <DialogHeader>
@@ -287,85 +390,80 @@ export default function BotsPage() {
           </DialogHeader>
           <ScrollArea className="flex-1 pr-4">
             <div className="space-y-6 pb-4">
-              {/* Agent Info */}
+
+              {/* ---- Agent Info ---- */}
               <div className="space-y-4">
                 <h3 className="text-sm font-medium text-muted-foreground">Agent Info</h3>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="agent_name">Agent Name *</Label>
-                    <Input
-                      id="agent_name"
-                      value={form.agent_name}
-                      onChange={(e) => setField("agent_name", e.target.value)}
-                      placeholder="Priya"
-                    />
+                    <Input id="agent_name" value={form.agent_name} onChange={(e) => setField("agent_name", e.target.value)} placeholder="Priya" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="company_name">Company Name *</Label>
-                    <Input
-                      id="company_name"
-                      value={form.company_name}
-                      onChange={(e) => setField("company_name", e.target.value)}
-                      placeholder="Wavelength"
-                    />
+                    <Input id="company_name" value={form.company_name} onChange={(e) => setField("company_name", e.target.value)} placeholder="Wavelength" />
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="location">Location</Label>
-                    <Input
-                      id="location"
-                      value={form.location}
-                      onChange={(e) => setField("location", e.target.value)}
-                      placeholder="Mumbai"
-                    />
+                    <Input id="location" value={form.location} onChange={(e) => setField("location", e.target.value)} placeholder="Mumbai" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="event_name">Event Name</Label>
-                    <Input
-                      id="event_name"
-                      value={form.event_name}
-                      onChange={(e) => setField("event_name", e.target.value)}
-                      placeholder="AI Workshop"
-                    />
+                    <Input id="event_name" value={form.event_name} onChange={(e) => setField("event_name", e.target.value)} placeholder="AI Workshop" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="event_date">Event Date</Label>
-                    <Input
-                      id="event_date"
-                      value={form.event_date}
-                      onChange={(e) => setField("event_date", e.target.value)}
-                      placeholder="2026-03-15"
-                    />
+                    <Input id="event_date" value={form.event_date} onChange={(e) => setField("event_date", e.target.value)} placeholder="2026-03-15" />
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="event_time">Event Time</Label>
-                  <Input
-                    id="event_time"
-                    value={form.event_time}
-                    onChange={(e) => setField("event_time", e.target.value)}
-                    placeholder="10:00 AM"
-                    className="w-48"
-                  />
+                  <Input id="event_time" value={form.event_time} onChange={(e) => setField("event_time", e.target.value)} placeholder="10:00 AM" className="w-48" />
                 </div>
               </div>
 
               <Separator />
 
-              {/* Voice & Behavior */}
+              {/* ---- Voice & Language ---- */}
               <div className="space-y-4">
-                <h3 className="text-sm font-medium text-muted-foreground">Voice & Behavior</h3>
-                <div className="grid grid-cols-2 gap-4">
+                <h3 className="text-sm font-medium text-muted-foreground">Voice & Language</h3>
+                <div className="grid grid-cols-3 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="tts_voice">TTS Voice</Label>
-                    <Input
-                      id="tts_voice"
-                      value={form.tts_voice}
-                      onChange={(e) => setField("tts_voice", e.target.value)}
-                      placeholder="Kore"
-                      className="font-mono text-sm"
-                    />
+                    <Label>Voice</Label>
+                    <Select value={form.tts_voice} onValueChange={(v) => setField("tts_voice", v)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select voice..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {VOICE_GROUPS.map((group) => (
+                          <SelectGroup key={group.label}>
+                            <SelectLabel>{group.label}</SelectLabel>
+                            {group.voices.map((v) => (
+                              <SelectItem key={v.value} value={v.value}>
+                                {v.label}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Language</Label>
+                    <Select value={form.language} onValueChange={(v) => setField("language", v)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select language..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {LANGUAGE_OPTIONS.map((l) => (
+                          <SelectItem key={l.value} value={l.value}>
+                            {l.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="silence_timeout_secs">Silence Timeout (sec)</Label>
@@ -380,7 +478,7 @@ export default function BotsPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="tts_style_prompt">TTS Style Prompt</Label>
+                  <Label htmlFor="tts_style_prompt">Style Prompt</Label>
                   <Textarea
                     id="tts_style_prompt"
                     value={form.tts_style_prompt}
@@ -392,8 +490,15 @@ export default function BotsPage() {
                     Controls how the TTS voice sounds. Leave empty for default style.
                   </p>
                 </div>
+              </div>
+
+              <Separator />
+
+              {/* ---- System Prompt ---- */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-medium text-muted-foreground">System Prompt</h3>
                 <div className="space-y-2">
-                  <Label htmlFor="system_prompt_template">System Prompt Template *</Label>
+                  <Label htmlFor="system_prompt_template">Prompt Template *</Label>
                   <Textarea
                     id="system_prompt_template"
                     value={form.system_prompt_template}
@@ -401,77 +506,137 @@ export default function BotsPage() {
                     placeholder="You are {agent_name} from {company_name}. You are calling {contact_name}..."
                     className="min-h-[160px] font-mono text-sm"
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Available variables: {"{contact_name}"}, {"{agent_name}"}, {"{company_name}"}, {"{location}"}, {"{event_name}"}, {"{event_date}"}, {"{event_time}"}
-                  </p>
+                  {detectedVars.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      <span className="text-xs text-muted-foreground mr-1">Variables:</span>
+                      {detectedVars.map((v) => (
+                        <Badge
+                          key={v}
+                          variant={BUILTIN_VARIABLES.includes(v) ? "secondary" : "outline"}
+                          className="text-[10px] font-mono"
+                        >
+                          {`{${v}}`}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
               <Separator />
 
-              {/* Integrations */}
+              {/* ---- Context Variables ---- */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-medium text-muted-foreground">Context Variables</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Set default values for custom {"{variables}"} in your prompt
+                  </p>
+                </div>
+
+                {/* Built-in variables (read-only info) */}
+                {detectedVars.some((v) => BUILTIN_VARIABLES.includes(v)) && (
+                  <div className="rounded-lg border p-3 bg-muted/30">
+                    <p className="text-xs font-medium text-muted-foreground mb-2">
+                      Built-in (auto-filled at call time)
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {detectedVars
+                        .filter((v) => BUILTIN_VARIABLES.includes(v))
+                        .map((v) => (
+                          <Badge key={v} variant="secondary" className="text-xs font-mono gap-1">
+                            <Variable className="h-3 w-3" />
+                            {v}
+                          </Badge>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Custom variables with default values */}
+                {customVarNames.length > 0 && (
+                  <div className="space-y-2">
+                    {customVarNames.map((varName) => (
+                      <div key={varName} className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-xs font-mono shrink-0 gap-1">
+                          <Variable className="h-3 w-3" />
+                          {`{${varName}}`}
+                        </Badge>
+                        <Input
+                          value={form.context_variables[varName] || ""}
+                          onChange={(e) => setContextVar(varName, e.target.value)}
+                          placeholder="Default value..."
+                          className="h-8 text-sm flex-1"
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          onClick={() => removeContextVar(varName)}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Add new variable */}
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={newVarName}
+                    onChange={(e) => setNewVarName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && addCustomVariable()}
+                    placeholder="new_variable_name"
+                    className="h-8 text-sm font-mono flex-1"
+                  />
+                  <Button variant="outline" size="sm" onClick={addCustomVariable} disabled={!newVarName.trim()}>
+                    <Plus className="h-3.5 w-3.5 mr-1" />
+                    Add Variable
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Use {"{variable_name}"} in your prompt. Custom variables can be overridden at call time via <code className="text-[10px] bg-muted px-1 rounded">extra_vars</code> in the API.
+                </p>
+              </div>
+
+              <Separator />
+
+              {/* ---- Plivo Credentials ---- */}
               <div className="space-y-4">
                 <h3 className="text-sm font-medium text-muted-foreground">Plivo Credentials</h3>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="plivo_auth_id">Auth ID {!editingBot && "*"}</Label>
-                    <Input
-                      id="plivo_auth_id"
-                      value={form.plivo_auth_id}
-                      onChange={(e) => setField("plivo_auth_id", e.target.value)}
-                      placeholder={editingBot ? "(unchanged)" : ""}
-                      className="font-mono text-sm"
-                    />
+                    <Input id="plivo_auth_id" value={form.plivo_auth_id} onChange={(e) => setField("plivo_auth_id", e.target.value)} placeholder={editingBot ? "(unchanged)" : ""} className="font-mono text-sm" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="plivo_auth_token">Auth Token {!editingBot && "*"}</Label>
-                    <Input
-                      id="plivo_auth_token"
-                      type="password"
-                      value={form.plivo_auth_token}
-                      onChange={(e) => setField("plivo_auth_token", e.target.value)}
-                      placeholder={editingBot ? "(unchanged)" : ""}
-                      className="font-mono text-sm"
-                    />
+                    <Input id="plivo_auth_token" type="password" value={form.plivo_auth_token} onChange={(e) => setField("plivo_auth_token", e.target.value)} placeholder={editingBot ? "(unchanged)" : ""} className="font-mono text-sm" />
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="plivo_caller_id">Caller ID {!editingBot && "*"}</Label>
-                  <Input
-                    id="plivo_caller_id"
-                    value={form.plivo_caller_id}
-                    onChange={(e) => setField("plivo_caller_id", e.target.value)}
-                    placeholder="+14155551234"
-                    className="font-mono text-sm w-64"
-                  />
+                  <Input id="plivo_caller_id" value={form.plivo_caller_id} onChange={(e) => setField("plivo_caller_id", e.target.value)} placeholder="+14155551234" className="font-mono text-sm w-64" />
                 </div>
               </div>
 
               <Separator />
 
-              {/* GHL */}
+              {/* ---- GHL ---- */}
               <div className="space-y-4">
                 <h3 className="text-sm font-medium text-muted-foreground">GoHighLevel (optional)</h3>
                 <div className="space-y-2">
                   <Label htmlFor="ghl_webhook_url">Webhook URL</Label>
-                  <Input
-                    id="ghl_webhook_url"
-                    value={form.ghl_webhook_url}
-                    onChange={(e) => setField("ghl_webhook_url", e.target.value)}
-                    placeholder="https://services.leadconnectorhq.com/hooks/..."
-                    className="font-mono text-sm"
-                  />
+                  <Input id="ghl_webhook_url" value={form.ghl_webhook_url} onChange={(e) => setField("ghl_webhook_url", e.target.value)} placeholder="https://services.leadconnectorhq.com/hooks/..." className="font-mono text-sm" />
                 </div>
               </div>
+
             </div>
           </ScrollArea>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleSave} disabled={saving}>
-              {saving ? "Saving..." : "Save"}
-            </Button>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -2,12 +2,14 @@
 Pipeline runner and post-call summary generation.
 
 run_pipeline() starts and manages the Pipecat pipeline for a single call.
-generate_call_summary() makes a non-streaming Gemini call to summarize the conversation.
+generate_call_summary() makes a non-streaming Gemini call to summarize the conversation
+and classify the lead's interest level.
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 
 import structlog
 from pipecat.frames.frames import LLMMessagesAppendFrame, TTSSpeakFrame
@@ -26,21 +28,21 @@ async def run_pipeline(
     websocket: WebSocket,
     ctx: CallContext,
     bot_config: BotConfig,
-) -> list[dict]:
+) -> dict:
     """
     Build and run the Pipecat pipeline for a single call.
 
-    Returns the conversation message history (list of {role, content} dicts)
-    for post-call summary generation.
+    Returns dict with:
+      - "messages": conversation message history (list of {role, content} dicts)
+      - "recording_paths": (bot_wav, user_wav) tuple or None
     """
-    task, transport, context = await build_pipeline(bot_config, ctx, websocket)
+    task, transport, context, serializer = await build_pipeline(bot_config, ctx, websocket)
 
     logger.info("pipeline_starting", call_sid=ctx.call_sid, voice=ctx.tts_voice)
 
     runner = PipelineRunner()
 
     # Send a fixed greeting directly via TTS (bypasses LLM — instant, no interruptions).
-    # The greeting text is derived from the bot config's prompt template.
     greeting_text = f"Hi {ctx.contact_name}, this is {bot_config.agent_name} calling from {bot_config.company_name}. How are you doing today?"
 
     async def send_initial_greeting():
@@ -50,22 +52,33 @@ async def run_pipeline(
 
     asyncio.create_task(send_initial_greeting())
 
-    await runner.run(task)
+    try:
+        await runner.run(task)
+    finally:
+        serializer.close_wav()
 
     logger.info("pipeline_ended", call_sid=ctx.call_sid)
 
-    return context.messages
+    return {
+        "messages": context.messages,
+        "recording_paths": serializer.get_recording_paths(),
+    }
 
 
-async def generate_call_summary(ctx: CallContext, messages: list[dict]) -> str | None:
+_INTEREST_RE = re.compile(r"INTEREST:\s*(high|medium|low)", re.IGNORECASE)
+
+
+async def generate_call_summary(
+    ctx: CallContext, messages: list[dict]
+) -> tuple[str | None, str | None]:
     """
-    Non-streaming Gemini call to summarize the conversation.
-    Called OUTSIDE the pipeline in the WebSocket handler's cleanup phase.
+    Non-streaming Gemini call to summarize the conversation and classify interest.
+
+    Returns (summary, interest_level). interest_level is "high"/"medium"/"low" or None.
     """
-    # Filter to only user/assistant messages (skip system prompt)
     conversation = [m for m in messages if m.get("role") in ("user", "assistant")]
     if not conversation:
-        return None
+        return None, None
 
     try:
         import google.generativeai as genai
@@ -76,14 +89,40 @@ async def generate_call_summary(ctx: CallContext, messages: list[dict]) -> str |
         conv_text = "\n".join(f"{m['role'].upper()}: {m['content']}" for m in conversation)
 
         response = await model.generate_content_async(
-            f"Summarize this phone conversation in 2-3 sentences. "
-            f"Include the key outcome (e.g., confirmed attendance, requested callback, "
-            f"declined, no clear outcome). Be factual and concise.\n\n{conv_text}",
-            generation_config={"max_output_tokens": 150, "temperature": 0.3},
+            "Analyze this phone conversation and provide:\n"
+            "1. SUMMARY: A 2-3 sentence summary including the key outcome "
+            "(e.g., confirmed attendance, requested callback, declined, no clear outcome). "
+            "Be factual and concise.\n"
+            "2. INTEREST: Classify the lead's interest level as high, medium, or low "
+            "based on their actual engagement and intent expressed in the conversation.\n\n"
+            "Format your response exactly as:\n"
+            "SUMMARY: <your summary>\n"
+            "INTEREST: <high|medium|low>\n\n"
+            f"{conv_text}",
+            generation_config={"max_output_tokens": 250, "temperature": 0.3},
         )
-        summary = response.text.strip()
-        logger.info("call_summary_generated", call_sid=ctx.call_sid, summary_length=len(summary))
-        return summary
+        raw = response.text.strip()
+
+        # Parse interest level
+        interest_match = _INTEREST_RE.search(raw)
+        interest_level = interest_match.group(1).lower() if interest_match else None
+
+        # Parse summary — everything after "SUMMARY:" up to "INTEREST:" (or end)
+        summary = raw
+        if "SUMMARY:" in raw.upper():
+            after_summary = raw[raw.upper().index("SUMMARY:") + 8:]
+            if "INTEREST:" in after_summary.upper():
+                summary = after_summary[: after_summary.upper().index("INTEREST:")].strip()
+            else:
+                summary = after_summary.strip()
+
+        logger.info(
+            "call_summary_generated",
+            call_sid=ctx.call_sid,
+            summary_length=len(summary),
+            interest_level=interest_level,
+        )
+        return summary, interest_level
     except Exception as e:
         logger.error("call_summary_generation_failed", call_sid=ctx.call_sid, error=str(e))
-        return None
+        return None, None

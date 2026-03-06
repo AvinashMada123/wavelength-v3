@@ -101,6 +101,7 @@ class CallLogResponse(BaseModel):
     started_at: datetime | None
     ended_at: datetime | None
     created_at: datetime
+    metadata: dict | None = Field(default=None, validation_alias="metadata_")
 
     model_config = {"from_attributes": True}
 

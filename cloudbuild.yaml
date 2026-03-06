@@ -29,13 +29,13 @@ steps:
       - --allow-unauthenticated
       - --port=8080
       - --cpu=1
-      - --memory=512Mi
+      - --memory=1Gi
       - --min-instances=1
       - --max-instances=3
       - --concurrency=20
       - --timeout=3600
       - --session-affinity
-      - --set-secrets=DATABASE_URL=DATABASE_URL:latest,DEEPGRAM_API_KEY=DEEPGRAM_API_KEY:latest,GOOGLE_AI_API_KEY=GOOGLE_AI_API_KEY:latest,TTS_PROVIDER=TTS_PROVIDER:latest,GOOGLE_CLOUD_PROJECT=GOOGLE_CLOUD_PROJECT:latest
+      - --set-secrets=DATABASE_URL=DATABASE_URL:latest,DEEPGRAM_API_KEY=DEEPGRAM_API_KEY:latest,GOOGLE_AI_API_KEY=GOOGLE_AI_API_KEY:latest,TTS_PROVIDER=TTS_PROVIDER:latest,GOOGLE_CLOUD_PROJECT=GOOGLE_CLOUD_PROJECT:latest,PUBLIC_BASE_URL=PUBLIC_BASE_URL:latest,PUBLIC_HOST=PUBLIC_HOST:latest
       - --add-cloudsql-instances=ai-calling-9238e:us-central1:wavelength-db
 
 images:

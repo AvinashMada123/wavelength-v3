@@ -56,3 +56,7 @@ export function fetchCallLogs(botId?: string): Promise<CallLog[]> {
 export async function checkHealth(): Promise<{ status: string }> {
   return apiFetch("/health");
 }
+
+export function getRecordingUrl(callSid: string): string {
+  return `/api/calls/${callSid}/recording`;
+}

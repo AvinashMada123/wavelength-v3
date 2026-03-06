@@ -168,7 +168,7 @@ async def build_pipeline(
     bot_config: BotConfig,
     call_context: CallContext,
     websocket: WebSocket,
-) -> tuple[PipelineTask, FastAPIWebsocketTransport, OpenAILLMContext]:
+) -> tuple[PipelineTask, FastAPIWebsocketTransport, OpenAILLMContext, PlivoPCMFrameSerializer]:
     """
     Construct an isolated Pipecat pipeline for a single call.
 
@@ -178,8 +178,14 @@ async def build_pipeline(
         websocket: The accepted FastAPI WebSocket connection from Plivo.
 
     Returns:
-        (task, transport, context) — context is needed to extract messages after pipeline ends.
+        (task, transport, context, serializer) — context for messages, serializer for recordings.
     """
+
+    # --- Serializer (extracted for post-call recording access) ---
+    serializer = PlivoPCMFrameSerializer(
+        stream_id=call_context.call_sid,
+        record=True,
+    )
 
     # --- Transport ---
     # VAD and turn analyzer go on transport params in pipecat 0.0.104.
@@ -190,9 +196,7 @@ async def build_pipeline(
             audio_out_sample_rate=16000,
             audio_out_10ms_chunks=2,
             add_wav_header=False,
-            serializer=PlivoPCMFrameSerializer(
-                stream_id=call_context.stream_id or call_context.call_sid,
-            ),
+            serializer=serializer,
             vad_enabled=True,
             vad_audio_passthrough=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
@@ -310,4 +314,4 @@ async def build_pipeline(
         ),
     )
 
-    return task, transport, context
+    return task, transport, context, serializer
