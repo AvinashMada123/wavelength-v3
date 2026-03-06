@@ -59,7 +59,8 @@ async def trigger_call(req: TriggerCallRequest, db: AsyncSession = Depends(get_d
 
     # 2. Fill system prompt template
     # Merge: context_variables defaults < extra_vars (overrides)
-    template_vars = dict(bot_config.context_variables or {})
+    ctx_vars = bot_config.context_variables or {}
+    template_vars = ctx_vars if isinstance(ctx_vars, dict) else {}
     template_vars.update(
         contact_name=req.contact_name,
         agent_name=bot_config.agent_name,
