@@ -4,14 +4,17 @@ steps:
     args:
       - build
       - -t
-      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/wavelength/voice-agent:${SHORT_SHA}
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/wavelength/backend:${SHORT_SHA}
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/wavelength/backend:latest
       - .
 
   # Push to Artifact Registry
   - name: gcr.io/cloud-builders/docker
     args:
       - push
-      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/wavelength/voice-agent:${SHORT_SHA}
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/wavelength/backend
 
   # Deploy to Cloud Run
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
@@ -19,21 +22,30 @@ steps:
     args:
       - run
       - deploy
-      - wavelength-voice-agent
-      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/wavelength/voice-agent:${SHORT_SHA}
+      - wavelength-backend
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/wavelength/backend:${SHORT_SHA}
       - --region=${_REGION}
       - --platform=managed
+      - --allow-unauthenticated
+      - --port=8080
+      - --cpu=1
+      - --memory=512Mi
       - --min-instances=1
-      - --max-instances=20
+      - --max-instances=3
       - --concurrency=20
       - --timeout=3600
-      - --cpu=2
-      - --memory=2Gi
-      - --no-cpu-throttling
       - --session-affinity
+      - --set-secrets=DATABASE_URL=DATABASE_URL:latest,DEEPGRAM_API_KEY=DEEPGRAM_API_KEY:latest,GOOGLE_AI_API_KEY=GOOGLE_AI_API_KEY:latest,TTS_PROVIDER=TTS_PROVIDER:latest,GOOGLE_CLOUD_PROJECT=GOOGLE_CLOUD_PROJECT:latest
+      - --add-cloudsql-instances=ai-calling-9238e:us-central1:wavelength-db
+
+images:
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/wavelength/backend:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/wavelength/backend:latest
 
 substitutions:
-  _REGION: asia-south1
+  _REGION: us-central1
 
 options:
   logging: CLOUD_LOGGING_ONLY
+
+timeout: '1200s'

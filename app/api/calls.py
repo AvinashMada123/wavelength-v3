@@ -56,8 +56,9 @@ async def trigger_call(req: TriggerCallRequest, db: AsyncSession = Depends(get_d
         raise HTTPException(status_code=404, detail="Bot config not found")
 
     # 2. Fill system prompt template
-    filled_prompt = fill_prompt_template(
-        bot_config.system_prompt_template,
+    # Merge: context_variables defaults < extra_vars (overrides)
+    template_vars = dict(bot_config.context_variables or {})
+    template_vars.update(
         contact_name=req.contact_name,
         agent_name=bot_config.agent_name,
         company_name=bot_config.company_name,
@@ -65,7 +66,12 @@ async def trigger_call(req: TriggerCallRequest, db: AsyncSession = Depends(get_d
         event_name=bot_config.event_name or "",
         event_date=bot_config.event_date or "",
         event_time=bot_config.event_time or "",
-        **req.extra_vars,
+    )
+    template_vars.update(req.extra_vars)
+
+    filled_prompt = fill_prompt_template(
+        bot_config.system_prompt_template,
+        **template_vars,
     )
 
     # 3. Create call_sid and call_log
@@ -85,6 +91,7 @@ async def trigger_call(req: TriggerCallRequest, db: AsyncSession = Depends(get_d
             "ghl_webhook_url": bot_config.ghl_webhook_url,
             "tts_voice": bot_config.tts_voice,
             "tts_style_prompt": bot_config.tts_style_prompt,
+            "language": bot_config.language,
             "silence_timeout_secs": bot_config.silence_timeout_secs,
         },
     )

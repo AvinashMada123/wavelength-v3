@@ -26,7 +26,9 @@ class CreateBotConfigRequest(BaseModel):
     event_time: str | None = None
     tts_voice: str = "Kore"
     tts_style_prompt: str | None = None
+    language: str = "en-IN"
     system_prompt_template: str
+    context_variables: dict[str, str] = Field(default_factory=dict)
     silence_timeout_secs: int = 5
     ghl_webhook_url: str | None = None
     plivo_auth_id: str
@@ -43,7 +45,9 @@ class UpdateBotConfigRequest(BaseModel):
     event_time: str | None = None
     tts_voice: str | None = None
     tts_style_prompt: str | None = None
+    language: str | None = None
     system_prompt_template: str | None = None
+    context_variables: dict[str, str] | None = None
     silence_timeout_secs: int | None = None
     ghl_webhook_url: str | None = None
     plivo_auth_id: str | None = None
@@ -70,7 +74,9 @@ class BotConfigResponse(BaseModel):
     event_time: str | None
     tts_voice: str
     tts_style_prompt: str | None
+    language: str
     system_prompt_template: str
+    context_variables: dict[str, str]
     silence_timeout_secs: int
     ghl_webhook_url: str | None
     plivo_caller_id: str
@@ -114,6 +120,7 @@ class CallContext:
         ghl_webhook_url: str | None,
         tts_voice: str,
         tts_style_prompt: str | None,
+        language: str,
         silence_timeout_secs: int,
         bot_id: str,
         # Set by WebSocket handler before pipeline start
@@ -129,6 +136,7 @@ class CallContext:
         self.ghl_webhook_url = ghl_webhook_url
         self.tts_voice = tts_voice
         self.tts_style_prompt = tts_style_prompt
+        self.language = language
         self.silence_timeout_secs = silence_timeout_secs
         self.bot_id = bot_id
         self.websocket = websocket
@@ -147,6 +155,7 @@ class CallContext:
             ghl_webhook_url=cd.get("ghl_webhook_url"),
             tts_voice=cd.get("tts_voice", "Kore"),
             tts_style_prompt=cd.get("tts_style_prompt"),
+            language=cd.get("language", "en-IN"),
             silence_timeout_secs=cd.get("silence_timeout_secs", 5),
             bot_id=cd.get("bot_id", str(call_log.bot_id)),
             bot_config=bot_config,

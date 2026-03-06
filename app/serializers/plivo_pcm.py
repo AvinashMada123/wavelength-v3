@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import base64
 import json
+import wave
+from pathlib import Path
 
 from loguru import logger
 
@@ -32,11 +34,22 @@ class PlivoPCMFrameSerializer(FrameSerializer):
     TTS must output PCM at 16kHz to match.
     """
 
-    def __init__(self, stream_id: str, **kwargs):
+    def __init__(self, stream_id: str, *, debug_wav: bool = False, **kwargs):
         super().__init__(**kwargs)
         self._stream_id = stream_id
         self._plivo_stream_id: str = ""
         self._audio_chunks_sent = 0
+        self._total_bytes_serialized = 0
+        self._wav_file: wave.Wave_write | None = None
+        if debug_wav:
+            wav_dir = Path("debug_audio")
+            wav_dir.mkdir(exist_ok=True)
+            wav_path = wav_dir / f"{stream_id}.wav"
+            self._wav_file = wave.open(str(wav_path), "wb")
+            self._wav_file.setnchannels(1)
+            self._wav_file.setsampwidth(2)  # 16-bit
+            self._wav_file.setframerate(PLIVO_SAMPLE_RATE)
+            logger.info(f"PlivoPCM: recording outbound audio to {wav_path}")
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         if isinstance(frame, InterruptionFrame):
@@ -47,11 +60,14 @@ class PlivoPCMFrameSerializer(FrameSerializer):
         if isinstance(frame, AudioRawFrame):
             payload = base64.b64encode(frame.audio).decode("utf-8")
             self._audio_chunks_sent += 1
-            if self._audio_chunks_sent <= 3:
-                logger.debug(
-                    f"PlivoPCM: sending audio chunk #{self._audio_chunks_sent}, "
-                    f"size={len(frame.audio)}, rate={frame.sample_rate}"
+            self._total_bytes_serialized += len(frame.audio)
+            if self._audio_chunks_sent <= 5 or self._audio_chunks_sent % 100 == 0:
+                logger.info(
+                    f"PlivoPCM: serialize frame #{self._audio_chunks_sent}, "
+                    f"bytes={len(frame.audio)}, total_bytes={self._total_bytes_serialized}"
                 )
+            if self._wav_file:
+                self._wav_file.writeframes(frame.audio)
             return json.dumps({
                 "event": "playAudio",
                 "media": {
@@ -68,6 +84,17 @@ class PlivoPCMFrameSerializer(FrameSerializer):
 
         return None
 
+    def close_wav(self):
+        logger.warning(
+            f"PlivoPCM: SERIALIZE TOTAL — frames={self._audio_chunks_sent}, "
+            f"bytes={self._total_bytes_serialized}, "
+            f"ms={self._total_bytes_serialized / (16000 * 2) * 1000:.0f}"
+        )
+        if self._wav_file:
+            self._wav_file.close()
+            self._wav_file = None
+            logger.info(f"PlivoPCM: WAV recording closed ({self._audio_chunks_sent} chunks)")
+
     async def deserialize(self, data: str | bytes) -> Frame | None:
         try:
             message = json.loads(data)
@@ -80,6 +107,10 @@ class PlivoPCMFrameSerializer(FrameSerializer):
         if event == "start":
             self._plivo_stream_id = message.get("start", {}).get("streamId", "")
             logger.info(f"PlivoPCM: stream started, streamId={self._plivo_stream_id}")
+            return None
+
+        if event == "stop":
+            self.close_wav()
             return None
 
         if event == "media":

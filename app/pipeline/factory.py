@@ -8,10 +8,17 @@ from __future__ import annotations
 
 import time
 
+import pipecat.transports.base_output as _base_output
 import structlog
 from deepgram import LiveOptions
+
+# Increase from 0.35s default to survive inter-sentence TTS gaps (worst TTFB: 1.943s).
+# Safe: no pipeline component depends on BotStoppedSpeakingFrame timing for turn-taking.
+_base_output.BOT_VAD_STOP_SECS = 2.5
+
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.audio.interruptions.min_words_interruption_strategy import MinWordsInterruptionStrategy
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
@@ -49,6 +56,20 @@ _DEFAULT_STYLE_PROMPT = (
     "Speak warmly in Indian English. Natural, calm, conversational tone. "
     "Never robotic."
 )
+
+# Map BCP-47 language codes → pipecat Language enum names
+_LANG_CODE_TO_ENUM = {
+    "en-IN": "EN_IN",
+    "en-US": "EN_US",
+    "en-GB": "EN_GB",
+    "hi-IN": "HI_IN",
+    "ta-IN": "TA_IN",
+    "te-IN": "TE_IN",
+    "bn-IN": "BN_IN",
+    "kn-IN": "KN_IN",
+    "ml-IN": "ML_IN",
+    "gu-IN": "GU_IN",
+}
 
 
 class LatencyTracker(FrameProcessor):
@@ -123,6 +144,26 @@ class LatencyTracker(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
+def _get_gemini_tts_class():
+    """Return a GeminiTTSService subclass with 100ms chunk buffering.
+
+    Imported lazily to avoid pulling in google TTS at module load.
+    """
+    from pipecat.services.google.tts import GeminiTTSService
+
+    class SmallChunkGeminiTTS(GeminiTTSService):
+        """GeminiTTSService with 100ms chunk buffering instead of 500ms.
+
+        Reduces inter-sentence audio gaps and smooths frame delivery to Plivo.
+        """
+
+        @property
+        def chunk_size(self) -> int:
+            return int(self.sample_rate * 0.1 * 2)  # 100ms, 2 bytes/sample
+
+    return SmallChunkGeminiTTS
+
+
 async def build_pipeline(
     bot_config: BotConfig,
     call_context: CallContext,
@@ -162,11 +203,12 @@ async def build_pipeline(
     )
 
     # --- STT ---
+    stt_language = getattr(call_context, "language", "en-IN") or "en-IN"
     stt = DeepgramSTTService(
         api_key=settings.DEEPGRAM_API_KEY,
         live_options=LiveOptions(
             model="nova-2-general",
-            language="en-IN",
+            language=stt_language,
             interim_results=True,
             utterance_end_ms="1000",
             punctuate=True,
@@ -177,7 +219,7 @@ async def build_pipeline(
     # --- LLM ---
     llm = GoogleLLMService(
         api_key=settings.GOOGLE_AI_API_KEY,
-        model="gemini-2.5-flash",
+        model="gemini-2.0-flash",
         params=GoogleLLMService.InputParams(
             temperature=0.7,
             max_tokens=256,
@@ -193,11 +235,17 @@ async def build_pipeline(
             call_context.tts_voice, call_context.tts_voice
         )
 
-        tts = GeminiTTSService(
+        GeminiTTS = _get_gemini_tts_class()
+
+        # Resolve language enum from BCP-47 code
+        lang_enum_name = _LANG_CODE_TO_ENUM.get(stt_language, "EN_IN")
+        tts_language = getattr(Language, lang_enum_name, Language.EN_IN)
+
+        tts = GeminiTTS(
             model="gemini-2.5-flash-tts",
             voice_id=voice_id,
             params=GeminiTTSService.InputParams(
-                language=Language.EN_IN,
+                language=tts_language,
             ),
         )
     else:
@@ -205,7 +253,7 @@ async def build_pipeline(
 
         tts = GoogleCloudGRPCTTSService(
             voice_name=call_context.tts_voice,
-            language_code="en-IN",
+            language_code=stt_language,
             sample_rate=16000,
             audio_encoding="PCM",
         )
@@ -256,6 +304,7 @@ async def build_pipeline(
         pipeline,
         params=PipelineParams(
             allow_interruptions=True,
+            interruption_strategies=[MinWordsInterruptionStrategy(min_words=1)],
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
