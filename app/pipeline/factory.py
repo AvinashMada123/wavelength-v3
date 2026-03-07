@@ -19,6 +19,7 @@ _base_output.BOT_VAD_STOP_SECS = 3.0
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.audio.interruptions.min_words_interruption_strategy import MinWordsInterruptionStrategy
+from pipecat.frames.frames import EndFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
@@ -268,6 +269,36 @@ def _build_workflow_tools(bot_config: BotConfig, call_context: CallContext):
     return tools, handle_trigger_workflow
 
 
+def _build_end_call_tool():
+    """Build the end_call LLM tool definition. Handler is created separately since it needs the task ref."""
+    return {
+        "type": "function",
+        "function": {
+            "name": "end_call",
+            "description": (
+                "End the phone call. Call this IMMEDIATELY when:\n"
+                "1) Both you AND the customer have said goodbye/bye/take care — call end_call with NO additional text.\n"
+                "2) The customer says 'not interested', 'don't call me', 'wrong number', or any clear rejection "
+                "after you've attempted to address their concern.\n"
+                "3) The customer explicitly asks to hang up or end the call.\n\n"
+                "IMPORTANT: If you already said goodbye and the customer responds with "
+                "'bye'/'okay bye'/'thanks bye', call end_call IMMEDIATELY without saying anything else. "
+                "Do NOT say goodbye twice."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "description": "Brief reason for ending the call (e.g., 'mutual_goodbye', 'not_interested', 'wrong_number')",
+                    }
+                },
+                "required": ["reason"],
+            },
+        },
+    }
+
+
 async def build_pipeline(
     bot_config: BotConfig,
     call_context: CallContext,
@@ -347,6 +378,19 @@ async def build_pipeline(
         ),
     )
 
+    # --- End-call tool ---
+    # Task ref is set after PipelineTask creation (handler needs it to queue EndFrame)
+    _task_ref: list[PipelineTask | None] = [None]
+
+    async def handle_end_call(params):
+        reason = params.arguments.get("reason", "conversation_ended")
+        logger.info("end_call_triggered", call_sid=call_context.call_sid, reason=reason)
+        await params.result_callback("Call ending now. Do not say anything else.")
+        if _task_ref[0]:
+            await _task_ref[0].queue_frame(EndFrame())
+
+    llm.register_function("end_call", handle_end_call)
+
     # --- During-call workflow tools ---
     workflow_tools, workflow_handler = _build_workflow_tools(bot_config, call_context)
     if workflow_handler:
@@ -385,12 +429,12 @@ async def build_pipeline(
         )
 
     # --- Context ---
-    context_kwargs = {}
+    all_tools = [_build_end_call_tool()]
     if workflow_tools:
-        context_kwargs["tools"] = workflow_tools
+        all_tools.extend(workflow_tools)
     context = OpenAILLMContext(
         messages=[{"role": "system", "content": call_context.filled_prompt}],
-        **context_kwargs,
+        tools=all_tools,
     )
 
     # --- Context aggregator ---
@@ -439,5 +483,8 @@ async def build_pipeline(
             enable_usage_metrics=True,
         ),
     )
+
+    # Set task ref so end_call handler can queue EndFrame
+    _task_ref[0] = task
 
     return task, transport, context, recorder
