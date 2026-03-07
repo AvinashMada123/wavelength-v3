@@ -24,6 +24,7 @@ class CreateBotConfigRequest(BaseModel):
     event_name: str | None = None
     event_date: str | None = None
     event_time: str | None = None
+    tts_provider: str = "gemini"
     tts_voice: str = "Kore"
     tts_style_prompt: str | None = None
     language: str = "en-IN"
@@ -52,6 +53,7 @@ class UpdateBotConfigRequest(BaseModel):
     event_name: str | None = None
     event_date: str | None = None
     event_time: str | None = None
+    tts_provider: str | None = None
     tts_voice: str | None = None
     tts_style_prompt: str | None = None
     language: str | None = None
@@ -90,6 +92,7 @@ class BotConfigResponse(BaseModel):
     event_name: str | None
     event_date: str | None
     event_time: str | None
+    tts_provider: str
     tts_voice: str
     tts_style_prompt: str | None
     language: str
@@ -144,6 +147,7 @@ class CallContext:
         contact_name: str,
         ghl_contact_id: str | None,
         ghl_webhook_url: str | None,
+        tts_provider: str,
         tts_voice: str,
         tts_style_prompt: str | None,
         language: str,
@@ -160,6 +164,7 @@ class CallContext:
         self.contact_name = contact_name
         self.ghl_contact_id = ghl_contact_id
         self.ghl_webhook_url = ghl_webhook_url
+        self.tts_provider = tts_provider
         self.tts_voice = tts_voice
         self.tts_style_prompt = tts_style_prompt
         self.language = language
@@ -179,6 +184,7 @@ class CallContext:
             contact_name=cd.get("contact_name", call_log.contact_name),
             ghl_contact_id=cd.get("ghl_contact_id", call_log.ghl_contact_id),
             ghl_webhook_url=cd.get("ghl_webhook_url"),
+            tts_provider=cd.get("tts_provider", "gemini"),
             tts_voice=cd.get("tts_voice", "Kore"),
             tts_style_prompt=cd.get("tts_style_prompt"),
             language=cd.get("language", "en-IN"),

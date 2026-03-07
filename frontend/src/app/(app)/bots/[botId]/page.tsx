@@ -43,7 +43,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 import { fetchBot, createBot, updateBot } from "@/lib/api";
-import { VOICE_GROUPS, LANGUAGE_OPTIONS, BUILTIN_VARIABLES } from "@/lib/constants";
+import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS } from "@/lib/constants";
 import type { BotConfig, GHLWorkflow } from "@/types/api";
 
 // ---------------------------------------------------------------------------
@@ -57,6 +57,7 @@ interface BotForm {
   event_name: string;
   event_date: string;
   event_time: string;
+  tts_provider: "gemini" | "sarvam";
   tts_voice: string;
   tts_style_prompt: string;
   language: string;
@@ -85,6 +86,7 @@ const EMPTY_FORM: BotForm = {
   event_name: "",
   event_date: "",
   event_time: "",
+  tts_provider: "gemini",
   tts_voice: "Kore",
   tts_style_prompt: "",
   language: "en-IN",
@@ -130,6 +132,7 @@ function botToForm(bot: BotConfig): BotForm {
     event_name: bot.event_name || "",
     event_date: bot.event_date || "",
     event_time: bot.event_time || "",
+    tts_provider: bot.tts_provider || "gemini",
     tts_voice: bot.tts_voice,
     tts_style_prompt: bot.tts_style_prompt || "",
     language: bot.language || "en-IN",
@@ -576,9 +579,31 @@ export default function BotEditorPage() {
                       <CardContent className="pt-6 space-y-8">
                         <Section
                           title="Voice & Language"
-                          description="Choose the voice personality and language for your agent."
+                          description="Choose the TTS provider, voice personality, and language for your agent."
                         >
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div className="space-y-2">
+                              <Label>TTS Provider</Label>
+                              <Select
+                                value={form.tts_provider}
+                                onValueChange={(v) => {
+                                  setField("tts_provider", v as "gemini" | "sarvam");
+                                  // Reset voice to provider default
+                                  setField("tts_voice", v === "sarvam" ? "priya" : "Kore");
+                                }}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select provider..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {TTS_PROVIDER_OPTIONS.map((p) => (
+                                    <SelectItem key={p.value} value={p.value}>
+                                      {p.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
                             <div className="space-y-2">
                               <Label>Voice</Label>
                               <Select
@@ -591,7 +616,7 @@ export default function BotEditorPage() {
                                   <SelectValue placeholder="Select voice..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {VOICE_GROUPS.map((group) => (
+                                  {(form.tts_provider === "sarvam" ? SARVAM_VOICE_GROUPS : GEMINI_VOICE_GROUPS).map((group) => (
                                     <SelectGroup key={group.label}>
                                       <SelectLabel>{group.label}</SelectLabel>
                                       {group.voices.map((v) => (

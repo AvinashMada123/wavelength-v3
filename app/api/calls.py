@@ -92,6 +92,7 @@ async def trigger_call(req: TriggerCallRequest, db: AsyncSession = Depends(get_d
             "contact_name": req.contact_name,
             "ghl_contact_id": req.ghl_contact_id,
             "ghl_webhook_url": bot_config.ghl_webhook_url,
+            "tts_provider": bot_config.tts_provider,
             "tts_voice": bot_config.tts_voice,
             "tts_style_prompt": bot_config.tts_style_prompt,
             "language": bot_config.language,

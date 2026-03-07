@@ -28,8 +28,8 @@ class Settings(BaseSettings):
     # GCP
     GOOGLE_CLOUD_PROJECT: str = ""
 
-    # TTS provider toggle: "gemini" or "chirp"
-    TTS_PROVIDER: str = "gemini"
+    # Sarvam AI TTS
+    SARVAM_API_KEY: str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

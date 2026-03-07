@@ -424,7 +424,23 @@ async def build_pipeline(
         llm.register_function("trigger_crm_workflow", workflow_handler)
 
     # --- TTS ---
-    if settings.TTS_PROVIDER == "gemini":
+    tts_provider = getattr(bot_config, "tts_provider", "gemini")
+
+    if tts_provider == "sarvam":
+        from pipecat.services.sarvam.tts import SarvamTTSService
+
+        tts = SarvamTTSService(
+            api_key=settings.SARVAM_API_KEY,
+            model="bulbul:v3",
+            voice_id=call_context.tts_voice,
+            sample_rate=16000,
+            params=SarvamTTSService.InputParams(
+                language=stt_language,
+            ),
+        )
+        logger.info("tts_sarvam_init", voice=call_context.tts_voice, model="bulbul:v3")
+
+    elif tts_provider == "gemini":
         from pipecat.services.google.tts import GeminiTTSService
         from pipecat.transcriptions.language import Language
 

@@ -8,7 +8,7 @@ export interface VoiceGroup {
   voices: VoiceOption[];
 }
 
-export const VOICE_GROUPS: VoiceGroup[] = [
+export const GEMINI_VOICE_GROUPS: VoiceGroup[] = [
   {
     label: "Female",
     voices: [
@@ -51,7 +51,60 @@ export const VOICE_GROUPS: VoiceGroup[] = [
   },
 ];
 
-export const ALL_VOICES: VoiceOption[] = VOICE_GROUPS.flatMap((g) => g.voices);
+export const SARVAM_VOICE_GROUPS: VoiceGroup[] = [
+  {
+    label: "Female",
+    voices: [
+      { value: "priya", label: "Priya" },
+      { value: "ritu", label: "Ritu" },
+      { value: "neha", label: "Neha" },
+      { value: "pooja", label: "Pooja" },
+      { value: "simran", label: "Simran" },
+      { value: "kavya", label: "Kavya" },
+      { value: "ishita", label: "Ishita" },
+      { value: "shreya", label: "Shreya" },
+      { value: "roopa", label: "Roopa" },
+      { value: "tanya", label: "Tanya" },
+      { value: "shruti", label: "Shruti" },
+      { value: "rupali", label: "Rupali" },
+      { value: "amelia", label: "Amelia" },
+      { value: "sophia", label: "Sophia" },
+    ],
+  },
+  {
+    label: "Male",
+    voices: [
+      { value: "shubh", label: "Shubh" },
+      { value: "aditya", label: "Aditya" },
+      { value: "rahul", label: "Rahul" },
+      { value: "rohan", label: "Rohan" },
+      { value: "amit", label: "Amit" },
+      { value: "dev", label: "Dev" },
+      { value: "varun", label: "Varun" },
+      { value: "kabir", label: "Kabir" },
+      { value: "advait", label: "Advait" },
+      { value: "ashutosh", label: "Ashutosh" },
+      { value: "ratan", label: "Ratan" },
+      { value: "manan", label: "Manan" },
+      { value: "sumit", label: "Sumit" },
+      { value: "aayan", label: "Aayan" },
+      { value: "tarun", label: "Tarun" },
+      { value: "sunny", label: "Sunny" },
+      { value: "vijay", label: "Vijay" },
+      { value: "mohit", label: "Mohit" },
+    ],
+  },
+];
+
+// Backward compat: default VOICE_GROUPS = Gemini
+export const VOICE_GROUPS = GEMINI_VOICE_GROUPS;
+
+export const ALL_VOICES: VoiceOption[] = GEMINI_VOICE_GROUPS.flatMap((g) => g.voices);
+
+export const TTS_PROVIDER_OPTIONS = [
+  { value: "gemini", label: "Gemini" },
+  { value: "sarvam", label: "Sarvam AI" },
+] as const;
 
 export const LANGUAGE_OPTIONS = [
   { value: "en-IN", label: "English (India)" },
