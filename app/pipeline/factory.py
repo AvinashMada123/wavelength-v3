@@ -201,7 +201,7 @@ async def build_pipeline(
             vad_audio_passthrough=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
             turn_analyzer=LocalSmartTurnAnalyzerV3(
-                params=SmartTurnParams(stop_secs=0.8),
+                params=SmartTurnParams(stop_secs=0.5),
             ),
         ),
     )
@@ -223,7 +223,7 @@ async def build_pipeline(
     # --- LLM ---
     llm = GoogleLLMService(
         api_key=settings.GOOGLE_AI_API_KEY,
-        model="gemini-2.5-flash",
+        model="gemini-2.5-flash-lite",
         params=GoogleLLMService.InputParams(
             temperature=0.7,
             max_tokens=256,
