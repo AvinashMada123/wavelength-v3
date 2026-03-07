@@ -475,12 +475,38 @@ async def build_pipeline(
         )
 
     # --- Context ---
-    # NOTE: Tools removed — OpenAILLMContext converts Google-native Tool objects
-    # to OpenAI format, which Google's SDK then rejects. Call ends via hangup,
-    # idle timeout, or max duration instead.
     system_prompt = call_context.filled_prompt + _CONVERSATION_RULES
+
+    # Define tools in OpenAI format (Pipecat's GoogleLLMService converts to Google format)
+    end_call_tool = {
+        "type": "function",
+        "function": {
+            "name": "end_call",
+            "description": (
+                "End the phone call. Call this IMMEDIATELY when: "
+                "1) Both you AND the customer have said goodbye/bye/take care. "
+                "2) The customer says 'not interested', 'don't call me', 'wrong number', or any clear rejection. "
+                "3) The customer explicitly asks to hang up or end the call. "
+                "IMPORTANT: If you already said goodbye and the customer responds with bye, "
+                "call end_call IMMEDIATELY without saying anything else."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "description": "Brief reason for ending the call (e.g., 'mutual_goodbye', 'not_interested', 'wrong_number')",
+                    }
+                },
+                "required": ["reason"],
+            },
+        },
+    }
+
+    context_tools = [end_call_tool]
     context = OpenAILLMContext(
         messages=[{"role": "system", "content": system_prompt}],
+        tools=context_tools,
     )
 
     # --- Context aggregator ---
