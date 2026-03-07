@@ -52,9 +52,29 @@ async def run_pipeline(
 
     asyncio.create_task(send_initial_greeting())
 
+    # Watchdog: detect WebSocket closure and stop pipeline
+    async def ws_watchdog():
+        """Monitor WebSocket state and cancel pipeline when connection drops."""
+        from pipecat.frames.frames import EndFrame
+        while True:
+            await asyncio.sleep(1)
+            try:
+                # Starlette WebSocket: client_state becomes DISCONNECTED on close
+                if websocket.client_state.name == "DISCONNECTED":
+                    logger.info("ws_watchdog_disconnect", call_sid=ctx.call_sid)
+                    await task.queue_frame(EndFrame())
+                    return
+            except Exception:
+                logger.info("ws_watchdog_disconnect_exception", call_sid=ctx.call_sid)
+                await task.queue_frame(EndFrame())
+                return
+
+    watchdog_task = asyncio.create_task(ws_watchdog())
+
     try:
         await runner.run(task)
     finally:
+        watchdog_task.cancel()
         serializer.close_wav()
 
     logger.info("pipeline_ended", call_sid=ctx.call_sid)
