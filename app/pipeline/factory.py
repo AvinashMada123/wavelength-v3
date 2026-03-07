@@ -297,36 +297,36 @@ def _build_workflow_tools(bot_config: BotConfig, call_context: CallContext):
 
 
 def _build_end_call_tool():
-    """Build the end_call LLM tool definition in OpenAI format.
+    """Build the end_call LLM tool definition in Google-native format."""
+    from google.genai import types
 
-    The LLM adapter on the context will convert this to Google-native format automatically.
-    """
-    return {
-        "type": "function",
-        "function": {
-            "name": "end_call",
-            "description": (
-                "End the phone call. Call this IMMEDIATELY when:\n"
-                "1) Both you AND the customer have said goodbye/bye/take care — call end_call with NO additional text.\n"
-                "2) The customer says 'not interested', 'don't call me', 'wrong number', or any clear rejection "
-                "after you've attempted to address their concern.\n"
-                "3) The customer explicitly asks to hang up or end the call.\n\n"
-                "IMPORTANT: If you already said goodbye and the customer responds with "
-                "'bye'/'okay bye'/'thanks bye', call end_call IMMEDIATELY without saying anything else. "
-                "Do NOT say goodbye twice."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "reason": {
-                        "type": "string",
-                        "description": "Brief reason for ending the call (e.g., 'mutual_goodbye', 'not_interested', 'wrong_number')",
-                    }
-                },
-                "required": ["reason"],
-            },
-        },
-    }
+    return types.Tool(
+        function_declarations=[
+            types.FunctionDeclaration(
+                name="end_call",
+                description=(
+                    "End the phone call. Call this IMMEDIATELY when:\n"
+                    "1) Both you AND the customer have said goodbye/bye/take care — call end_call with NO additional text.\n"
+                    "2) The customer says 'not interested', 'don't call me', 'wrong number', or any clear rejection "
+                    "after you've attempted to address their concern.\n"
+                    "3) The customer explicitly asks to hang up or end the call.\n\n"
+                    "IMPORTANT: If you already said goodbye and the customer responds with "
+                    "'bye'/'okay bye'/'thanks bye', call end_call IMMEDIATELY without saying anything else. "
+                    "Do NOT say goodbye twice."
+                ),
+                parameters=types.Schema(
+                    type="OBJECT",
+                    properties={
+                        "reason": types.Schema(
+                            type="STRING",
+                            description="Brief reason for ending the call (e.g., 'mutual_goodbye', 'not_interested', 'wrong_number')",
+                        )
+                    },
+                    required=["reason"],
+                ),
+            )
+        ]
+    )
 
 
 async def build_pipeline(
@@ -480,7 +480,7 @@ async def build_pipeline(
         messages=[{"role": "system", "content": system_prompt}],
     )
 
-    # Set tools in OpenAI format — the LLM adapter converts to Google-native automatically
+    # Set tools in Google-native format (context.tools property has no setter, use set_tools)
     context.set_tools([_build_end_call_tool()])
 
     # --- Context aggregator ---
