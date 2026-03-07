@@ -16,6 +16,9 @@ import {
   Link2,
   Settings,
   Info,
+  Copy,
+  Check,
+  Webhook,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -194,6 +197,7 @@ export default function BotEditorPage() {
   const [form, setForm] = useState<BotForm>(EMPTY_FORM);
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
+  const [copiedCurl, setCopiedCurl] = useState(false);
   const [newVarName, setNewVarName] = useState("");
 
   // ---- Data loading ----
@@ -1257,6 +1261,71 @@ export default function BotEditorPage() {
                         ))}
                       </CardContent>
                     </Card>
+
+                    {/* API Trigger */}
+                    {!isNew && (
+                      <Card>
+                        <CardContent className="pt-6">
+                          <Section
+                            title="API Trigger"
+                            description="Use this cURL to trigger calls from external systems like GoHighLevel."
+                          >
+                            <div className="space-y-3">
+                              <div className="relative">
+                                <pre className="bg-muted rounded-lg p-4 text-xs overflow-x-auto whitespace-pre-wrap break-all font-mono">
+                                  {`curl -X POST '${typeof window !== "undefined" ? window.location.origin : ""}/api/webhook/trigger-call' \\
+  -H 'Content-Type: application/json' \\
+  -H 'x-api-key: YOUR_WEBHOOK_API_KEY' \\
+  -d '${JSON.stringify(
+    {
+      phoneNumber: "+1234567890",
+      contactName: "John Doe",
+      botConfigId: botId,
+      customVariableOverrides: {
+        agent_name: form.agent_name,
+        company_name: form.company_name,
+        ...(form.event_name ? { event_name: form.event_name } : {}),
+        ...(form.location ? { location: form.location } : {}),
+        ...Object.fromEntries(
+          form.ghl_workflows
+            .filter((w: GHLWorkflow) => w.name)
+            .map(() => [] as string[])
+        ),
+      },
+    },
+    null,
+    2,
+  )}'`}
+                                </pre>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="absolute top-2 right-2 h-7 gap-1 text-xs"
+                                  onClick={() => {
+                                    const curl = `curl -X POST '${window.location.origin}/api/webhook/trigger-call' \\\n  -H 'Content-Type: application/json' \\\n  -H 'x-api-key: YOUR_WEBHOOK_API_KEY' \\\n  -d '${JSON.stringify({ phoneNumber: "+1234567890", contactName: "John Doe", botConfigId: botId, customVariableOverrides: { agent_name: form.agent_name, company_name: form.company_name } }, null, 2)}'`;
+                                    navigator.clipboard.writeText(curl);
+                                    setCopiedCurl(true);
+                                    toast.success("cURL copied");
+                                    setTimeout(() => setCopiedCurl(false), 2000);
+                                  }}
+                                >
+                                  {copiedCurl ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                                  {copiedCurl ? "Copied" : "Copy"}
+                                </Button>
+                              </div>
+                              <div className="space-y-1.5 text-sm text-muted-foreground">
+                                <p><strong className="text-foreground">phoneNumber</strong> — Contact phone number with country code</p>
+                                <p><strong className="text-foreground">contactName</strong> — Contact&apos;s name</p>
+                                <p><strong className="text-foreground">customVariableOverrides</strong> — Override prompt variables per call</p>
+                              </div>
+                              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200">
+                                Replace <code className="font-mono bg-muted px-1 rounded">YOUR_WEBHOOK_API_KEY</code> with your server&apos;s <code className="font-mono bg-muted px-1 rounded">WEBHOOK_API_KEY</code> env variable.
+                              </div>
+                            </div>
+                          </Section>
+                        </CardContent>
+                      </Card>
+                    )}
                   </div>
                 </TabsContent>
 
