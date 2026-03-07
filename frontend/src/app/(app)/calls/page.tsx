@@ -55,7 +55,6 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { fetchBots, fetchCallLogs, triggerCall, checkHealth, getRecordingUrl } from "@/lib/api";
 import { formatDate, formatDuration, formatPhoneNumber, timeAgo, cn } from "@/lib/utils";
 import type { BotConfig, CallLog } from "@/types/api";
@@ -504,8 +503,7 @@ export default function CallsPage() {
         open={!!selectedCall}
         onOpenChange={(open) => !open && setSelectedCall(null)}
       >
-        <DialogContent className="sm:max-w-2xl max-h-[85vh] !grid-rows-[auto_1fr] overflow-hidden">
-          <div className="overflow-y-auto min-h-0">
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto overflow-x-hidden">
           <DialogHeader>
             <DialogTitle>Call Details</DialogTitle>
           </DialogHeader>
@@ -620,8 +618,8 @@ export default function CallsPage() {
                 </TabsContent>
 
                 <TabsContent value="transcript" className="mt-4">
-                  <ScrollArea className="h-[400px] rounded-md border">
-                    <Table>
+                  <div className="max-h-[400px] overflow-y-auto overflow-x-hidden rounded-md border">
+                    <Table className="table-fixed w-full">
                       <TableHeader>
                         <TableRow>
                           <TableHead className="w-10">#</TableHead>
@@ -643,14 +641,14 @@ export default function CallsPage() {
                                 {entry.role === "assistant" ? "AI" : "User"}
                               </Badge>
                             </TableCell>
-                            <TableCell className="text-sm">
+                            <TableCell className="text-sm break-words">
                               {entry.content}
                             </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
                     </Table>
-                  </ScrollArea>
+                  </div>
                 </TabsContent>
 
                 <TabsContent value="recording" className="mt-4">
@@ -669,7 +667,6 @@ export default function CallsPage() {
               </Tabs>
             </div>
           )}
-          </div>
         </DialogContent>
       </Dialog>
     </>

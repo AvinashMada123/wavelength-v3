@@ -130,15 +130,15 @@ async def generate_call_summary(
         return None, None
 
     try:
-        import google.generativeai as genai
+        from google import genai
 
-        genai.configure(api_key=settings.GOOGLE_AI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        client = genai.Client(api_key=settings.GOOGLE_AI_API_KEY)
 
         conv_text = "\n".join(f"{role.upper()}: {content}" for role, content in conversation)
 
-        response = await model.generate_content_async(
-            "Analyze this phone conversation and provide:\n"
+        response = await client.aio.models.generate_content(
+            model="gemini-2.5-flash",
+            contents="Analyze this phone conversation and provide:\n"
             "1. SUMMARY: A 2-3 sentence summary including the key outcome "
             "(e.g., confirmed attendance, requested callback, declined, no clear outcome). "
             "Be factual and concise.\n"
@@ -148,7 +148,10 @@ async def generate_call_summary(
             "SUMMARY: <your summary>\n"
             "INTEREST: <high|medium|low>\n\n"
             f"{conv_text}",
-            generation_config={"max_output_tokens": 250, "temperature": 0.3},
+            config=genai.types.GenerateContentConfig(
+                max_output_tokens=250,
+                temperature=0.3,
+            ),
         )
         raw = response.text.strip()
 

@@ -183,29 +183,32 @@ def _build_workflow_tools(bot_config: BotConfig, call_context: CallContext):
         for wf in during_call
     )
 
+    from google.genai import types
+
     tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "trigger_crm_workflow",
-                "description": (
-                    "Trigger a CRM workflow to tag the contact. "
-                    "Use this when the conversation matches a workflow's trigger condition.\n\n"
-                    f"Available workflows:\n{wf_descriptions}"
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "workflow_id": {
-                            "type": "string",
-                            "description": "The ID of the workflow to trigger",
-                            "enum": [wf["id"] for wf in during_call],
-                        }
-                    },
-                    "required": ["workflow_id"],
-                },
-            },
-        }
+        types.Tool(
+            function_declarations=[
+                types.FunctionDeclaration(
+                    name="trigger_crm_workflow",
+                    description=(
+                        "Trigger a CRM workflow to tag the contact. "
+                        "Use this when the conversation matches a workflow's trigger condition.\n\n"
+                        f"Available workflows:\n{wf_descriptions}"
+                    ),
+                    parameters=types.Schema(
+                        type="OBJECT",
+                        properties={
+                            "workflow_id": types.Schema(
+                                type="STRING",
+                                description="The ID of the workflow to trigger",
+                                enum=[wf["id"] for wf in during_call],
+                            )
+                        },
+                        required=["workflow_id"],
+                    ),
+                )
+            ]
+        )
     ]
 
     wf_lookup = {wf["id"]: wf for wf in during_call}
@@ -270,33 +273,36 @@ def _build_workflow_tools(bot_config: BotConfig, call_context: CallContext):
 
 
 def _build_end_call_tool():
-    """Build the end_call LLM tool definition. Handler is created separately since it needs the task ref."""
-    return {
-        "type": "function",
-        "function": {
-            "name": "end_call",
-            "description": (
-                "End the phone call. Call this IMMEDIATELY when:\n"
-                "1) Both you AND the customer have said goodbye/bye/take care — call end_call with NO additional text.\n"
-                "2) The customer says 'not interested', 'don't call me', 'wrong number', or any clear rejection "
-                "after you've attempted to address their concern.\n"
-                "3) The customer explicitly asks to hang up or end the call.\n\n"
-                "IMPORTANT: If you already said goodbye and the customer responds with "
-                "'bye'/'okay bye'/'thanks bye', call end_call IMMEDIATELY without saying anything else. "
-                "Do NOT say goodbye twice."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "reason": {
-                        "type": "string",
-                        "description": "Brief reason for ending the call (e.g., 'mutual_goodbye', 'not_interested', 'wrong_number')",
-                    }
-                },
-                "required": ["reason"],
-            },
-        },
-    }
+    """Build the end_call LLM tool definition in Google-native format."""
+    from google.genai import types
+
+    return types.Tool(
+        function_declarations=[
+            types.FunctionDeclaration(
+                name="end_call",
+                description=(
+                    "End the phone call. Call this IMMEDIATELY when:\n"
+                    "1) Both you AND the customer have said goodbye/bye/take care — call end_call with NO additional text.\n"
+                    "2) The customer says 'not interested', 'don't call me', 'wrong number', or any clear rejection "
+                    "after you've attempted to address their concern.\n"
+                    "3) The customer explicitly asks to hang up or end the call.\n\n"
+                    "IMPORTANT: If you already said goodbye and the customer responds with "
+                    "'bye'/'okay bye'/'thanks bye', call end_call IMMEDIATELY without saying anything else. "
+                    "Do NOT say goodbye twice."
+                ),
+                parameters=types.Schema(
+                    type="OBJECT",
+                    properties={
+                        "reason": types.Schema(
+                            type="STRING",
+                            description="Brief reason for ending the call (e.g., 'mutual_goodbye', 'not_interested', 'wrong_number')",
+                        )
+                    },
+                    required=["reason"],
+                ),
+            )
+        ]
+    )
 
 
 async def build_pipeline(
@@ -429,12 +435,11 @@ async def build_pipeline(
         )
 
     # --- Context ---
-    all_tools = [_build_end_call_tool()]
-    if workflow_tools:
-        all_tools.extend(workflow_tools)
+    # NOTE: Tools removed — OpenAILLMContext converts Google-native Tool objects
+    # to OpenAI format, which Google's SDK then rejects. Call ends via hangup,
+    # idle timeout, or max duration instead.
     context = OpenAILLMContext(
         messages=[{"role": "system", "content": call_context.filled_prompt}],
-        tools=all_tools,
     )
 
     # --- Context aggregator ---

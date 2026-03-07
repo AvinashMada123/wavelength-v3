@@ -181,19 +181,31 @@ def _merge_recording_sync(bot_wav_path: str, user_wav_path: str, output_path: st
         with wave.open(user_wav_path, "rb") as uf:
             user_data = uf.readframes(uf.getnframes())
 
-        # Pad shorter track to match longer (16-bit = 2 bytes per sample)
+        # Ensure even byte count (16-bit = 2 bytes per sample)
         max_len = max(len(bot_data), len(user_data))
-        bot_data = bot_data.ljust(max_len, b"\x00")
-        user_data = user_data.ljust(max_len, b"\x00")
+        max_len = max_len & ~1  # round down to even
+        bot_data = bot_data[:max_len].ljust(max_len, b"\x00")
+        user_data = user_data[:max_len].ljust(max_len, b"\x00")
 
         # Mix: add samples and clamp to int16 range
         n_samples = max_len // 2
-        bot_samples = struct.unpack(f"<{n_samples}h", bot_data[:n_samples * 2])
-        user_samples = struct.unpack(f"<{n_samples}h", user_data[:n_samples * 2])
-        mixed = struct.pack(
-            f"<{n_samples}h",
-            *(max(-32768, min(32767, b + u)) for b, u in zip(bot_samples, user_samples)),
-        )
+        bot_samples = struct.unpack(f"<{n_samples}h", bot_data)
+        user_samples = struct.unpack(f"<{n_samples}h", user_data)
+        mixed_list = [
+            max(-32768, min(32767, b + u))
+            for b, u in zip(bot_samples, user_samples)
+        ]
+
+        # Trim trailing silence (near-zero samples at end, often hangup noise)
+        last_voice = len(mixed_list) - 1
+        while last_voice > 0 and abs(mixed_list[last_voice]) < 50:
+            last_voice -= 1
+        # Keep 0.5s tail after last audible sample, then cut
+        tail_samples = 16000 // 2  # 0.5s at 16kHz
+        end_idx = min(last_voice + tail_samples + 1, len(mixed_list))
+        mixed_list = mixed_list[:end_idx]
+
+        mixed = struct.pack(f"<{len(mixed_list)}h", *mixed_list)
 
         with wave.open(output_path, "wb") as out:
             out.setnchannels(1)
@@ -309,15 +321,26 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
                 return {"role": role, "content": content}
             return None
 
+        # Log raw messages for debugging transcript issues
+        for i, m in enumerate(conversation_messages):
+            if isinstance(m, dict):
+                logger.info("raw_ctx_message", idx=i, role=m.get("role"), preview=m.get("content", "")[:100])
+            else:
+                role = getattr(m, "role", "?")
+                parts = getattr(m, "parts", [])
+                text = parts[0].text[:100] if parts and hasattr(parts[0], "text") else "?"
+                logger.info("raw_ctx_message", idx=i, role=role, preview=text)
+
         transcript_entries = [e for m in conversation_messages if (e := _extract_message(m)) is not None]
-        # First message is always the system prompt injected as "user" role — skip it
-        if transcript_entries and transcript_entries[0]["role"] == "user" and transcript_entries[0]["content"] == ctx.filled_prompt:
-            transcript_entries = transcript_entries[1:]
+        # Filter system prompt (may be stored as "user" or "system" role by Google)
+        transcript_entries = [
+            e for e in transcript_entries
+            if e["content"] != ctx.filled_prompt
+        ]
 
         # Prepend greeting (sent via TTSSpeakFrame, bypasses context aggregator)
         greeting_text = f"Hi {ctx.contact_name}, this is {bot_config.agent_name} calling from {bot_config.company_name}. How are you doing today?"
-        # Remove LLM's duplicate greeting echo — it re-generates a greeting because
-        # context.messages doesn't contain the TTSSpeakFrame greeting
+        # Remove LLM's duplicate greeting echo
         transcript_entries = [
             e for e in transcript_entries
             if not (e["role"] == "assistant" and bot_config.agent_name in e["content"][:60] and "calling from" in e["content"][:80])
