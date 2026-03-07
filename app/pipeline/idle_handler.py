@@ -29,7 +29,7 @@ class IdleEscalationHandler:
         Returns:
             True to keep monitoring, False to stop.
         """
-        logger.info("user_idle_escalation", level=retry_count)
+        logger.info("user_idle_escalation", level=retry_count, timeout=self._silence_timeout)
 
         if retry_count == 1:
             message = {

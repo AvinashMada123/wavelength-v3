@@ -297,9 +297,10 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
 
         transcript_entries = [e for m in conversation_messages if (e := _extract_message(m)) is not None]
         # Filter system prompt (may be stored as "user" or "system" role by Google)
+        # Actual content is filled_prompt + _CONVERSATION_RULES, so use startswith
         transcript_entries = [
             e for e in transcript_entries
-            if e["content"] != ctx.filled_prompt
+            if not e["content"].startswith(ctx.filled_prompt[:200])
         ]
 
         # Prepend greeting (sent via TTSSpeakFrame, bypasses context aggregator)

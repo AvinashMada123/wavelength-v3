@@ -36,7 +36,7 @@ def set_dependencies(loader: BotConfigLoader):
 async def list_calls(
     bot_id: uuid.UUID | None = None,
     status: str | None = None,
-    limit: int = 50,
+    limit: int = 1000,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
 ):
