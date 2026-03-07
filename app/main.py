@@ -28,7 +28,7 @@ if _env_file.exists():
             if key and key not in os.environ:
                 os.environ[key] = value
 
-from app.api import bots, calls, health
+from app.api import bots, calls, health, webhook
 from app.bot_config.loader import BotConfigLoader
 from app.database import close_asyncpg_pool, init_asyncpg_pool
 from app.ghl.client import GHLClient
@@ -54,6 +54,7 @@ async def lifespan(app: FastAPI):
     # Inject dependencies into route modules
     calls.set_dependencies(loader=bot_config_loader)
     bots.set_dependencies(loader=bot_config_loader)
+    webhook.set_dependencies(loader=bot_config_loader)
     plivo_routes.set_dependencies(loader=bot_config_loader, ghl=ghl_client)
     twilio_routes.set_dependencies(loader=bot_config_loader, ghl=ghl_client)
 
@@ -79,5 +80,6 @@ app = FastAPI(
 app.include_router(health.router)
 app.include_router(calls.router)
 app.include_router(bots.router)
+app.include_router(webhook.router)
 app.include_router(plivo_routes.router)
 app.include_router(twilio_routes.router)

@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     # GoHighLevel
     GHL_API_KEY: str = ""
 
+    # Webhook auth (for external triggers like GHL)
+    WEBHOOK_API_KEY: str = ""
+
     # GCP
     GOOGLE_CLOUD_PROJECT: str = ""
 

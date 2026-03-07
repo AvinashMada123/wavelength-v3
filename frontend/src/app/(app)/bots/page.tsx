@@ -15,12 +15,20 @@ import {
   Languages,
   MoreVertical,
   Pencil,
+  Webhook,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/layout/header";
 import { PageTransition } from "@/components/layout/page-transition";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,6 +48,8 @@ export default function BotsPage() {
   const [loading, setLoading] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [apiTriggerBot, setApiTriggerBot] = useState<BotConfig | null>(null);
+  const [copiedCurl, setCopiedCurl] = useState(false);
 
   const loadBots = useCallback(async () => {
     try {
@@ -76,6 +86,44 @@ export default function BotsPage() {
 
   const langLabel = (code: string) =>
     LANGUAGE_OPTIONS.find((l) => l.value === code)?.label || code;
+
+  function buildCurlCommand(bot: BotConfig) {
+    const baseUrl = typeof window !== "undefined" ? window.location.origin : "http://localhost:3002";
+    const contextVars = bot.context_variables || {};
+    const overrides: Record<string, string> = {};
+    // Pre-fill overrides with bot's context variable keys
+    for (const key of Object.keys(contextVars)) {
+      overrides[key] = contextVars[key];
+    }
+    // Add built-in variables
+    overrides["agent_name"] = bot.agent_name;
+    overrides["company_name"] = bot.company_name;
+    if (bot.event_name) overrides["event_name"] = bot.event_name;
+    if (bot.location) overrides["location"] = bot.location;
+
+    const body = JSON.stringify(
+      {
+        phoneNumber: "+1234567890",
+        contactName: "John Doe",
+        botConfigId: bot.id,
+        customVariableOverrides: overrides,
+      },
+      null,
+      2,
+    );
+
+    return `curl -X POST '${baseUrl}/api/webhook/trigger-call' \\
+  -H 'Content-Type: application/json' \\
+  -H 'x-api-key: YOUR_WEBHOOK_API_KEY' \\
+  -d '${body}'`;
+  }
+
+  function copyCurl(bot: BotConfig) {
+    navigator.clipboard.writeText(buildCurlCommand(bot));
+    setCopiedCurl(true);
+    toast.success("cURL copied to clipboard");
+    setTimeout(() => setCopiedCurl(false), 2000);
+  }
 
   return (
     <>
@@ -154,6 +202,9 @@ export default function BotsPage() {
                               {copiedId === bot.id ? <Check className="mr-2 h-4 w-4 text-green-500" /> : <Copy className="mr-2 h-4 w-4" />}
                               Copy ID
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setApiTriggerBot(bot); }}>
+                              <Webhook className="mr-2 h-4 w-4" /> API Trigger
+                            </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-destructive"
                               onClick={(e) => {
@@ -206,6 +257,48 @@ export default function BotsPage() {
             </div>
           )}
         </div>
+
+        {/* API Trigger Dialog */}
+        <Dialog open={!!apiTriggerBot} onOpenChange={(open) => !open && setApiTriggerBot(null)}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>API Trigger — {apiTriggerBot?.agent_name}</DialogTitle>
+              <p className="text-sm text-muted-foreground">
+                Use this cURL to trigger calls from external systems like GoHighLevel.
+              </p>
+            </DialogHeader>
+
+            {apiTriggerBot && (
+              <div className="space-y-4">
+                <div className="relative">
+                  <pre className="bg-muted rounded-lg p-4 text-xs overflow-x-auto whitespace-pre-wrap break-all font-mono">
+                    {buildCurlCommand(apiTriggerBot)}
+                  </pre>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="absolute top-2 right-2 h-7 gap-1 text-xs"
+                    onClick={() => copyCurl(apiTriggerBot)}
+                  >
+                    {copiedCurl ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                    {copiedCurl ? "Copied" : "Copy"}
+                  </Button>
+                </div>
+
+                <div className="space-y-2 text-sm">
+                  <p><strong>phoneNumber</strong> — Contact phone number with country code</p>
+                  <p><strong>contactName</strong> — Contact&apos;s name</p>
+                  <p><strong>botConfigId</strong> — This bot&apos;s ID (pre-filled)</p>
+                  <p><strong>customVariableOverrides</strong> — Variables used in this bot&apos;s prompt (pre-filled with current defaults, override as needed)</p>
+                </div>
+
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200">
+                  Replace <code className="font-mono bg-muted px-1 rounded">YOUR_WEBHOOK_API_KEY</code> with your server&apos;s <code className="font-mono bg-muted px-1 rounded">WEBHOOK_API_KEY</code> environment variable.
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </PageTransition>
     </>
   );
