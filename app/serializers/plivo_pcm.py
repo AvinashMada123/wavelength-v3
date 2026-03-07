@@ -85,8 +85,12 @@ class PlivoPCMFrameSerializer(FrameSerializer):
                 if self._recording_start is None:
                     self._recording_start = now
                 expected = int((now - self._recording_start) * PLIVO_SAMPLE_RATE * 2)
+                # Ensure even byte count (16-bit samples = 2 bytes each)
+                expected = expected & ~1
                 gap = expected - self._bot_bytes_written
-                if gap > 0:
+                # Cap gap at 5s of silence to prevent huge padding on timing glitches
+                max_gap = PLIVO_SAMPLE_RATE * 2 * 5
+                if 0 < gap <= max_gap:
                     self._bot_wav_file.writeframes(b'\x00' * gap)
                     self._bot_bytes_written += gap
                 self._bot_wav_file.writeframes(frame.audio)
@@ -158,8 +162,10 @@ class PlivoPCMFrameSerializer(FrameSerializer):
                 if self._recording_start is None:
                     self._recording_start = now
                 expected = int((now - self._recording_start) * PLIVO_SAMPLE_RATE * 2)
+                expected = expected & ~1  # ensure even byte count
                 gap = expected - self._user_bytes_written
-                if gap > 0:
+                max_gap = PLIVO_SAMPLE_RATE * 2 * 5
+                if 0 < gap <= max_gap:
                     self._user_wav_file.writeframes(b'\x00' * gap)
                     self._user_bytes_written += gap
                 self._user_wav_file.writeframes(audio_bytes)

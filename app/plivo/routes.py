@@ -316,6 +316,12 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
 
         # Prepend greeting (sent via TTSSpeakFrame, bypasses context aggregator)
         greeting_text = f"Hi {ctx.contact_name}, this is {bot_config.agent_name} calling from {bot_config.company_name}. How are you doing today?"
+        # Remove LLM's duplicate greeting echo — it re-generates a greeting because
+        # context.messages doesn't contain the TTSSpeakFrame greeting
+        transcript_entries = [
+            e for e in transcript_entries
+            if not (e["role"] == "assistant" and bot_config.agent_name in e["content"][:60] and "calling from" in e["content"][:80])
+        ]
         transcript_entries.insert(0, {"role": "assistant", "content": greeting_text})
         logger.info("post_call_transcript_built", call_sid=call_sid, entries=len(transcript_entries))
 

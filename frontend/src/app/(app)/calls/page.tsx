@@ -504,7 +504,8 @@ export default function CallsPage() {
         open={!!selectedCall}
         onOpenChange={(open) => !open && setSelectedCall(null)}
       >
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] !grid-rows-[auto_1fr] overflow-hidden">
+          <div className="overflow-y-auto min-h-0">
           <DialogHeader>
             <DialogTitle>Call Details</DialogTitle>
           </DialogHeader>
@@ -668,6 +669,7 @@ export default function CallsPage() {
               </Tabs>
             </div>
           )}
+          </div>
         </DialogContent>
       </Dialog>
     </>
