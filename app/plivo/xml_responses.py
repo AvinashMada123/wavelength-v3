@@ -9,9 +9,20 @@ def build_stream_xml(
     content_type: str = "audio/x-l16;rate=16000",
     stream_timeout: int = 3600,
     keep_call_alive: bool = True,
+    recording_callback_url: str | None = None,
 ) -> str:
-    """Build Plivo <Response><Stream> XML for WebSocket audio streaming."""
+    """Build Plivo <Response><Record><Stream> XML for WebSocket audio streaming."""
     response = Element("Response")
+
+    # Record the entire call server-side (background, non-blocking)
+    if recording_callback_url:
+        record = SubElement(response, "Record")
+        record.set("recordSession", "true")
+        record.set("redirect", "false")
+        record.set("fileFormat", "mp3")
+        record.set("callbackUrl", recording_callback_url)
+        record.set("callbackMethod", "POST")
+
     stream = SubElement(response, "Stream")
     stream.set("bidirectional", str(bidirectional).lower())
     stream.set("contentType", content_type)

@@ -12,7 +12,7 @@ import asyncio
 import re
 
 import structlog
-from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, TTSSpeakFrame
+from pipecat.frames.frames import EndFrame, TTSSpeakFrame
 from pipecat.pipeline.runner import PipelineRunner
 from starlette.websockets import WebSocket
 
@@ -35,9 +35,8 @@ async def run_pipeline(
 
     Returns dict with:
       - "messages": conversation message history (list of {role, content} dicts)
-      - "recording_paths": (bot_wav, user_wav) tuple or None
     """
-    task, transport, context, recorder, guard = await build_pipeline(bot_config, ctx, websocket, provider=provider)
+    task, transport, context, guard = await build_pipeline(bot_config, ctx, websocket, provider=provider)
 
     max_duration = getattr(bot_config, "max_call_duration", 480) or 480
     logger.info("pipeline_starting", call_sid=ctx.call_sid, voice=ctx.tts_voice, max_duration=max_duration)
@@ -88,14 +87,11 @@ async def run_pipeline(
     finally:
         duration_task.cancel()
         watchdog_task.cancel()
-        if recorder:
-            recorder.close_wav()
 
     logger.info("pipeline_ended", call_sid=ctx.call_sid)
 
     return {
         "messages": context.messages,
-        "recording_paths": recorder.get_recording_paths() if recorder else None,
         "end_reason": guard.end_reason,
         "dnd_detected": guard.dnd_detected,
         "dnd_reason": guard.dnd_reason,

@@ -6,9 +6,8 @@ import uuid
 from uuid import uuid4
 
 import structlog
-from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot_config.loader import BotConfigLoader, fill_prompt_template
@@ -141,18 +140,14 @@ async def trigger_call(req: TriggerCallRequest, db: AsyncSession = Depends(get_d
 
 @router.get("/{call_sid}/recording")
 async def get_recording(call_sid: str, db: AsyncSession = Depends(get_db)):
-    """Serve the call recording WAV file. FileResponse handles Range requests for seeking."""
+    """Redirect to Plivo-hosted recording URL."""
     result = await db.execute(select(CallLog).where(CallLog.call_sid == call_sid))
     call_log = result.scalar_one_or_none()
     if not call_log:
         raise HTTPException(status_code=404, detail="Call not found")
 
-    recording_path = (call_log.metadata_ or {}).get("recording_path")
-    if not recording_path or not Path(recording_path).exists():
+    recording_url = (call_log.metadata_ or {}).get("recording_url")
+    if not recording_url:
         raise HTTPException(status_code=404, detail="Recording not available")
 
-    return FileResponse(
-        path=recording_path,
-        media_type="audio/wav",
-        filename=f"{call_sid}.wav",
-    )
+    return RedirectResponse(url=recording_url)

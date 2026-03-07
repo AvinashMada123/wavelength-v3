@@ -26,7 +26,6 @@ from app.pipeline import session_limiter
 from app.pipeline.runner import generate_call_summary, run_pipeline
 from app.plivo.routes import (
     _get_call_log,
-    _merge_recording,
     _post_ghl_outcome,
     _run_ghl_workflows,
     _update_call_status,
@@ -126,7 +125,6 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
         # Run pipeline (provider="twilio" tells factory to use TwilioFrameSerializer)
         pipeline_result = await run_pipeline(websocket, ctx, bot_config, provider="twilio")
         conversation_messages = pipeline_result["messages"]
-        recording_paths = pipeline_result["recording_paths"]
         end_reason = pipeline_result.get("end_reason")
         dnd_detected = pipeline_result.get("dnd_detected", False)
         dnd_reason = pipeline_result.get("dnd_reason")
@@ -156,19 +154,13 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
 
         summary, interest_level = await generate_call_summary(ctx, conversation_messages)
 
-        # Merge recording (if available — Twilio calls may not have recordings yet)
-        recording_path = None
-        if recording_paths:
-            recording_path = await _merge_recording(*recording_paths, call_sid)
-
+        # Recording: Twilio has its own native recording — not implemented yet
         turn_count = sum(1 for t in transcript_entries if t["role"] == "user")
         call_metadata = {
             "transcript": transcript_entries,
             "interest_level": interest_level,
             "call_metrics": {"turn_count": turn_count},
         }
-        if recording_path:
-            call_metadata["recording_path"] = recording_path
         if dnd_detected:
             call_metadata["dnd_detected"] = True
             call_metadata["dnd_reason"] = dnd_reason

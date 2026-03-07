@@ -36,7 +36,7 @@ from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from starlette.websockets import WebSocket
 
-from app.config import settings
+from app.config import gemini_key_pool, settings
 from app.models.bot_config import BotConfig
 from app.models.schemas import CallContext
 from app.pipeline.call_guard import CallGuard
@@ -328,7 +328,7 @@ async def build_pipeline(
     call_context: CallContext,
     websocket: WebSocket,
     provider: str = "plivo",
-) -> tuple[PipelineTask, FastAPIWebsocketTransport, OpenAILLMContext, PlivoPCMFrameSerializer | None, CallGuard]:
+) -> tuple[PipelineTask, FastAPIWebsocketTransport, OpenAILLMContext, CallGuard]:
     """
     Construct an isolated Pipecat pipeline for a single call.
 
@@ -339,11 +339,10 @@ async def build_pipeline(
         provider: "plivo" or "twilio" — determines serializer and audio format.
 
     Returns:
-        (task, transport, context, recorder, call_guard) — recorder is PlivoPCMFrameSerializer or None for Twilio.
+        (task, transport, context, call_guard).
     """
 
     # --- Serializer (provider-specific) ---
-    recorder: PlivoPCMFrameSerializer | None = None
     if provider == "twilio":
         from pipecat.serializers.twilio import TwilioFrameSerializer
 
@@ -352,12 +351,9 @@ async def build_pipeline(
             params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
         )
     else:
-        plivo_serializer = PlivoPCMFrameSerializer(
+        serializer = PlivoPCMFrameSerializer(
             stream_id=call_context.call_sid,
-            record=True,
         )
-        serializer = plivo_serializer
-        recorder = plivo_serializer
 
     # --- Transport ---
     # VAD and turn analyzer go on transport params in pipecat 0.0.104.
@@ -392,9 +388,10 @@ async def build_pipeline(
         ),
     )
 
-    # --- LLM ---
+    # --- LLM (key from round-robin pool) ---
+    call_api_key = gemini_key_pool.get_key()
     llm = GoogleLLMService(
-        api_key=settings.GOOGLE_AI_API_KEY,
+        api_key=call_api_key,
         model="gemini-2.5-flash-lite",
         params=GoogleLLMService.InputParams(
             temperature=0.7,
@@ -515,4 +512,4 @@ async def build_pipeline(
     # Set task ref so end_call handler can queue EndFrame
     _task_ref[0] = task
 
-    return task, transport, context, recorder, call_guard
+    return task, transport, context, call_guard

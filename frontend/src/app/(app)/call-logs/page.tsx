@@ -735,7 +735,7 @@ export default function CallLogsPage() {
                   <TabsTrigger
                     value="recording"
                     className="flex-1"
-                    disabled={!selectedCall.metadata?.recording_path}
+                    disabled={!selectedCall.metadata?.recording_url}
                   >
                     Recording
                   </TabsTrigger>

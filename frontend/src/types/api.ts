@@ -108,7 +108,7 @@ export interface TriggerCallResponse {
 export interface CallLogMetadata {
   transcript?: Array<{ role: "user" | "assistant"; content: string }>;
   interest_level?: "high" | "medium" | "low";
-  recording_path?: string;
+  recording_url?: string;
   call_metrics?: { turn_count: number; total_duration_s?: number };
 }
 
