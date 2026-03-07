@@ -18,6 +18,15 @@ function fmtDate(iso: string | null): string {
   });
 }
 
+function formatTranscript(
+  transcript?: Array<{ role: string; content: string }>
+): string {
+  if (!transcript || transcript.length === 0) return "";
+  return transcript
+    .map((t) => `${t.role === "assistant" ? "AI" : "User"}: ${t.content}`)
+    .join("\n");
+}
+
 const HEADERS = [
   "Contact Name",
   "Phone",
@@ -25,7 +34,9 @@ const HEADERS = [
   "Outcome",
   "Interest Level",
   "Duration (s)",
+  "Turns",
   "Summary",
+  "Transcript",
   "Call SID",
   "Started At",
   "Ended At",
@@ -40,7 +51,9 @@ function callToRow(call: CallLog): string[] {
     call.outcome || "",
     call.metadata?.interest_level || "",
     call.call_duration?.toString() || "",
+    call.metadata?.call_metrics?.turn_count?.toString() || "",
     call.summary || "",
+    formatTranscript(call.metadata?.transcript),
     call.call_sid,
     fmtDate(call.started_at),
     fmtDate(call.ended_at),
