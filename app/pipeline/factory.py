@@ -398,7 +398,7 @@ async def build_pipeline(
     call_api_key = gemini_key_pool.get_key()
     llm = GoogleLLMService(
         api_key=call_api_key,
-        model="gemini-2.5-flash-lite",
+        model="gemini-2.5-flash",
         params=GoogleLLMService.InputParams(
             temperature=0.7,
             max_tokens=256,
