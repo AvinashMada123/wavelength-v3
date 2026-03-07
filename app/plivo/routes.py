@@ -346,7 +346,7 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         # Post enriched outcome to GHL (failures here should not mark call as error)
         try:
             await _post_ghl_outcome(
-                ctx, outcome="completed", summary=summary, metadata=call_metadata
+                ctx, outcome="completed", summary=summary, metadata=existing_meta
             )
             await _run_ghl_workflows(ctx, bot_config, "post_call")
         except Exception as e:

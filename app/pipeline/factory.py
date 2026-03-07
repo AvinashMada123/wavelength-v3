@@ -425,6 +425,9 @@ async def build_pipeline(
 
     # --- TTS ---
     tts_provider = getattr(bot_config, "tts_provider", "gemini")
+    logger.info("tts_provider_debug", tts_provider=tts_provider, voice=call_context.tts_voice,
+                bot_has_attr=hasattr(bot_config, "tts_provider"),
+                bot_raw=getattr(bot_config, "tts_provider", "MISSING"))
 
     if tts_provider == "sarvam":
         from pipecat.services.sarvam.tts import SarvamTTSService
