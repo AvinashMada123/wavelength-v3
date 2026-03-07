@@ -125,9 +125,15 @@ async def _run_ghl_workflows(ctx: CallContext, bot_config, timing: str) -> None:
     api_key = getattr(bot_config, "ghl_api_key", None)
     location_id = getattr(bot_config, "ghl_location_id", None)
     workflows = getattr(bot_config, "ghl_workflows", None) or []
+    if isinstance(workflows, str):
+        import json
+        try:
+            workflows = json.loads(workflows)
+        except (json.JSONDecodeError, TypeError):
+            workflows = []
 
     # Filter enabled workflows for this timing
-    active = [wf for wf in workflows if wf.get("timing") == timing and wf.get("enabled") and wf.get("tag")]
+    active = [wf for wf in workflows if isinstance(wf, dict) and wf.get("timing") == timing and wf.get("enabled") and wf.get("tag")]
     if not active or not api_key or not location_id:
         return
 
