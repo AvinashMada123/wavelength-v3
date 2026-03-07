@@ -119,6 +119,58 @@ async def _post_ghl_outcome(
     await ghl_client.post_call_outcome(ctx.ghl_webhook_url, outcome_data)
 
 
+async def _run_ghl_workflows(ctx: CallContext, bot_config, timing: str) -> None:
+    """Run GHL workflows matching the given timing (pre_call / post_call)."""
+    if not bot_config:
+        return
+    api_key = getattr(bot_config, "ghl_api_key", None)
+    location_id = getattr(bot_config, "ghl_location_id", None)
+    workflows = getattr(bot_config, "ghl_workflows", None) or []
+
+    # Filter enabled workflows for this timing
+    active = [wf for wf in workflows if wf.get("timing") == timing and wf.get("enabled") and wf.get("tag")]
+    if not active or not api_key or not location_id:
+        return
+
+    # Resolve contact_id (from call context or phone lookup)
+    contact_id = ctx.ghl_contact_id
+    if not contact_id:
+        from app.ghl.client import GHLClient
+
+        bot_ghl = GHLClient(api_key=api_key)
+        try:
+            async with get_db_session() as db:
+                call_log = await _get_call_log(db, ctx.call_sid)
+            phone = call_log.contact_phone if call_log else None
+            if not phone:
+                return
+            contact_id = await bot_ghl.find_contact(location_id, phone)
+        finally:
+            await bot_ghl.close()
+
+    if not contact_id:
+        logger.warning("ghl_workflows_skipped_no_contact", call_sid=ctx.call_sid, timing=timing)
+        return
+
+    # Apply tags
+    from app.ghl.client import GHLClient
+
+    bot_ghl = GHLClient(api_key=api_key)
+    try:
+        for wf in active:
+            tag = wf["tag"]
+            ok = await bot_ghl.tag_contact(contact_id, tag)
+            logger.info(
+                "ghl_workflow_executed",
+                call_sid=ctx.call_sid,
+                workflow=wf.get("name", wf.get("id", "?")),
+                tag=tag,
+                success=ok,
+            )
+    finally:
+        await bot_ghl.close()
+
+
 def _merge_recording_sync(bot_wav_path: str, user_wav_path: str, output_path: str) -> bool:
     """Merge bot (left) + user (right) mono WAVs into a stereo WAV. Runs in executor."""
     try:
@@ -231,6 +283,7 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         pipeline_result = await run_pipeline(websocket, ctx, bot_config)
         conversation_messages = pipeline_result["messages"]
         recording_paths = pipeline_result["recording_paths"]
+        logger.info("post_call_pipeline_done", call_sid=call_sid, msg_count=len(conversation_messages), recording_paths=recording_paths)
 
         # Build transcript entries (filter system messages)
         transcript_entries = [
@@ -238,14 +291,24 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
             for m in conversation_messages
             if m.get("role") in ("user", "assistant")
         ]
+        logger.info("post_call_transcript_built", call_sid=call_sid, entries=len(transcript_entries))
 
         # Generate LLM summary + interest classification
-        summary, interest_level = await generate_call_summary(ctx, conversation_messages)
+        try:
+            summary, interest_level = await generate_call_summary(ctx, conversation_messages)
+            logger.info("post_call_summary_done", call_sid=call_sid, interest=interest_level, summary_len=len(summary) if summary else 0)
+        except Exception as e:
+            logger.error("post_call_summary_failed", call_sid=call_sid, error=str(e), exc_info=True)
+            summary, interest_level = None, None
 
         # Merge recording (runs in executor)
         recording_path = None
         if recording_paths:
-            recording_path = await _merge_recording(*recording_paths, call_sid)
+            try:
+                recording_path = await _merge_recording(*recording_paths, call_sid)
+                logger.info("post_call_recording_merged", call_sid=call_sid, path=recording_path)
+            except Exception as e:
+                logger.error("post_call_recording_failed", call_sid=call_sid, error=str(e), exc_info=True)
 
         # Build metadata
         turn_count = sum(1 for t in transcript_entries if t["role"] == "user")
@@ -261,14 +324,18 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         await _update_call_status(
             call_sid, outcome="completed", summary=summary, metadata=call_metadata
         )
+        logger.info("post_call_metadata_saved", call_sid=call_sid, turns=turn_count, has_recording=bool(recording_path))
 
         # Post enriched outcome to GHL
         await _post_ghl_outcome(
             ctx, outcome="completed", summary=summary, metadata=call_metadata
         )
 
+        # Run post-call GHL workflows (tag contacts)
+        await _run_ghl_workflows(ctx, bot_config, "post_call")
+
     except Exception as e:
-        logger.error("pipeline_error", call_sid=call_sid, error=str(e))
+        logger.error("pipeline_error", call_sid=call_sid, error=str(e), exc_info=True)
         await _update_call_status(call_sid, status="error")
         await _post_ghl_outcome(ctx, outcome="error", error=str(e))
 
