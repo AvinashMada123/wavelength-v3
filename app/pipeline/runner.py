@@ -115,7 +115,7 @@ async def generate_call_summary(
             return m.get("role", ""), m.get("content", "")
         role = getattr(m, "role", "")
         parts = getattr(m, "parts", [])
-        content = parts[0].text if parts and hasattr(parts[0], "text") else ""
+        content = (parts[0].text or "") if parts and hasattr(parts[0], "text") else ""
         if role == "model":
             role = "assistant"
         return role, content

@@ -278,7 +278,7 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
                 # Google Content object: .role is "user"/"model", .parts[0].text
                 role = getattr(m, "role", "")
                 parts = getattr(m, "parts", [])
-                content = parts[0].text if parts and hasattr(parts[0], "text") else ""
+                content = (parts[0].text or "") if parts and hasattr(parts[0], "text") else ""
                 if role == "model":
                     role = "assistant"
             if role in ("user", "assistant") and not content.startswith("[SYSTEM:"):
@@ -292,7 +292,7 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
             else:
                 role = getattr(m, "role", "?")
                 parts = getattr(m, "parts", [])
-                text = parts[0].text[:100] if parts and hasattr(parts[0], "text") else "?"
+                text = (parts[0].text or "")[:100] if parts and hasattr(parts[0], "text") else "?"
                 logger.info("raw_ctx_message", idx=i, role=role, preview=text)
 
         transcript_entries = [e for m in conversation_messages if (e := _extract_message(m)) is not None]

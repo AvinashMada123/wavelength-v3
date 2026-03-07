@@ -486,7 +486,10 @@ async def build_pipeline(
     )
 
     # Set tools in Google-native format (context.tools property has no setter, use set_tools)
-    context.set_tools([_build_end_call_tool()])
+    all_tools = [_build_end_call_tool()]
+    if workflow_tools:
+        all_tools.extend(workflow_tools)
+    context.set_tools(all_tools)
 
     # --- Context aggregator ---
     context_aggregator = llm.create_context_aggregator(context)
