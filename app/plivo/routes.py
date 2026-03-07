@@ -172,9 +172,10 @@ async def _run_ghl_workflows(ctx: CallContext, bot_config, timing: str) -> None:
 
 
 def _merge_recording_sync(bot_wav_path: str, user_wav_path: str, output_path: str) -> bool:
-    """Merge bot (left) + user (right) mono WAVs into a stereo WAV. Runs in executor."""
+    """Mix bot + user mono WAVs into a single mono WAV. Runs in executor."""
     try:
-        # Read both mono WAV files
+        import struct
+
         with wave.open(bot_wav_path, "rb") as bf:
             bot_data = bf.readframes(bf.getnframes())
         with wave.open(user_wav_path, "rb") as uf:
@@ -185,17 +186,20 @@ def _merge_recording_sync(bot_wav_path: str, user_wav_path: str, output_path: st
         bot_data = bot_data.ljust(max_len, b"\x00")
         user_data = user_data.ljust(max_len, b"\x00")
 
-        # Interleave: left=bot, right=user (2 bytes per sample per channel)
-        stereo = bytearray(max_len * 2)
-        for i in range(0, max_len, 2):
-            stereo[i * 2 : i * 2 + 2] = bot_data[i : i + 2]
-            stereo[i * 2 + 2 : i * 2 + 4] = user_data[i : i + 2]
+        # Mix: add samples and clamp to int16 range
+        n_samples = max_len // 2
+        bot_samples = struct.unpack(f"<{n_samples}h", bot_data[:n_samples * 2])
+        user_samples = struct.unpack(f"<{n_samples}h", user_data[:n_samples * 2])
+        mixed = struct.pack(
+            f"<{n_samples}h",
+            *(max(-32768, min(32767, b + u)) for b, u in zip(bot_samples, user_samples)),
+        )
 
         with wave.open(output_path, "wb") as out:
-            out.setnchannels(2)
+            out.setnchannels(1)
             out.setsampwidth(2)
             out.setframerate(16000)
-            out.writeframes(bytes(stereo))
+            out.writeframes(mixed)
 
         return True
     except Exception:
@@ -288,7 +292,7 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         recording_paths = pipeline_result["recording_paths"]
         logger.info("post_call_pipeline_done", call_sid=call_sid, msg_count=len(conversation_messages), recording_paths=recording_paths)
 
-        # Build transcript entries (filter system messages)
+        # Build transcript entries (filter system messages and system prompt)
         # context.messages may be Google Content objects (with .role/.parts) or dicts
         def _extract_message(m) -> dict | None:
             if isinstance(m, dict):
@@ -306,6 +310,9 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
             return None
 
         transcript_entries = [e for m in conversation_messages if (e := _extract_message(m)) is not None]
+        # First message is always the system prompt injected as "user" role — skip it
+        if transcript_entries and transcript_entries[0]["role"] == "user" and "You are" in transcript_entries[0]["content"][:20]:
+            transcript_entries = transcript_entries[1:]
         logger.info("post_call_transcript_built", call_sid=call_sid, entries=len(transcript_entries))
 
         # Generate LLM summary + interest classification

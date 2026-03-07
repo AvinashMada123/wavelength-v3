@@ -504,7 +504,7 @@ export default function CallsPage() {
         open={!!selectedCall}
         onOpenChange={(open) => !open && setSelectedCall(null)}
       >
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Call Details</DialogTitle>
           </DialogHeader>
@@ -661,7 +661,7 @@ export default function CallsPage() {
                       className="w-full"
                     />
                     <p className="text-xs text-muted-foreground">
-                      Stereo recording — Left channel: AI, Right channel: User
+                      Call recording — AI + User mixed
                     </p>
                   </div>
                 </TabsContent>
