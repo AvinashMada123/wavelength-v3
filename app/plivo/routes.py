@@ -339,17 +339,18 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
 
         # Update call log with outcome + metadata
         await _update_call_status(
-            call_sid, outcome="completed", summary=summary, metadata=existing_meta
+            call_sid, status="completed", outcome="completed", summary=summary, metadata=existing_meta
         )
         logger.info("post_call_metadata_saved", call_sid=call_sid, turns=turn_count)
 
-        # Post enriched outcome to GHL
-        await _post_ghl_outcome(
-            ctx, outcome="completed", summary=summary, metadata=call_metadata
-        )
-
-        # Run post-call GHL workflows (tag contacts)
-        await _run_ghl_workflows(ctx, bot_config, "post_call")
+        # Post enriched outcome to GHL (failures here should not mark call as error)
+        try:
+            await _post_ghl_outcome(
+                ctx, outcome="completed", summary=summary, metadata=call_metadata
+            )
+            await _run_ghl_workflows(ctx, bot_config, "post_call")
+        except Exception as e:
+            logger.error("post_call_ghl_error", call_sid=call_sid, error=str(e), exc_info=True)
 
     except Exception as e:
         logger.error("pipeline_error", call_sid=call_sid, error=str(e), exc_info=True)
