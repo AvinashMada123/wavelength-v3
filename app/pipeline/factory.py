@@ -201,6 +201,11 @@ def _build_workflow_tools(bot_config: BotConfig, call_context: CallContext):
     if not during_call:
         return None, None
 
+    # Ensure each workflow has an id
+    for i, wf in enumerate(during_call):
+        if "id" not in wf:
+            wf["id"] = f"wf_{i}"
+
     wf_descriptions = "\n".join(
         f"- {wf['id']}: {wf.get('name', 'Unnamed')} — "
         f"{wf.get('trigger_description', 'Tag: ' + wf['tag'])}"
