@@ -1,3 +1,12 @@
+export interface GHLWorkflow {
+  id: string;
+  name: string;
+  tag: string;
+  timing: "pre_call" | "during_call" | "post_call";
+  enabled: boolean;
+  trigger_description?: string;
+}
+
 export interface BotConfig {
   id: string;
   agent_name: string;
@@ -13,7 +22,14 @@ export interface BotConfig {
   context_variables: Record<string, string>;
   silence_timeout_secs: number;
   ghl_webhook_url: string | null;
+  ghl_api_key: string | null;
+  ghl_location_id: string | null;
+  ghl_post_call_tag: string | null;
+  ghl_workflows: GHLWorkflow[];
+  max_call_duration: number;
+  telephony_provider: "plivo" | "twilio";
   plivo_caller_id: string;
+  twilio_phone_number: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -33,9 +49,18 @@ export interface CreateBotConfigRequest {
   context_variables?: Record<string, string>;
   silence_timeout_secs?: number;
   ghl_webhook_url?: string | null;
-  plivo_auth_id: string;
-  plivo_auth_token: string;
-  plivo_caller_id: string;
+  ghl_api_key?: string | null;
+  ghl_location_id?: string | null;
+  ghl_post_call_tag?: string | null;
+  ghl_workflows?: GHLWorkflow[];
+  max_call_duration?: number;
+  telephony_provider?: "plivo" | "twilio";
+  plivo_auth_id?: string;
+  plivo_auth_token?: string;
+  plivo_caller_id?: string;
+  twilio_account_sid?: string | null;
+  twilio_auth_token?: string | null;
+  twilio_phone_number?: string | null;
 }
 
 export interface UpdateBotConfigRequest {
@@ -52,9 +77,18 @@ export interface UpdateBotConfigRequest {
   context_variables?: Record<string, string> | null;
   silence_timeout_secs?: number | null;
   ghl_webhook_url?: string | null;
+  ghl_api_key?: string | null;
+  ghl_location_id?: string | null;
+  ghl_post_call_tag?: string | null;
+  ghl_workflows?: GHLWorkflow[] | null;
+  max_call_duration?: number | null;
+  telephony_provider?: "plivo" | "twilio" | null;
   plivo_auth_id?: string | null;
   plivo_auth_token?: string | null;
   plivo_caller_id?: string | null;
+  twilio_account_sid?: string | null;
+  twilio_auth_token?: string | null;
+  twilio_phone_number?: string | null;
   is_active?: boolean | null;
 }
 

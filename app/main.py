@@ -33,6 +33,7 @@ from app.bot_config.loader import BotConfigLoader
 from app.database import close_asyncpg_pool, init_asyncpg_pool
 from app.ghl.client import GHLClient
 from app.plivo import routes as plivo_routes
+from app.twilio import routes as twilio_routes
 
 logger = structlog.get_logger(__name__)
 
@@ -54,6 +55,7 @@ async def lifespan(app: FastAPI):
     calls.set_dependencies(loader=bot_config_loader)
     bots.set_dependencies(loader=bot_config_loader)
     plivo_routes.set_dependencies(loader=bot_config_loader, ghl=ghl_client)
+    twilio_routes.set_dependencies(loader=bot_config_loader, ghl=ghl_client)
 
     logger.info("app_started")
 
@@ -78,3 +80,4 @@ app.include_router(health.router)
 app.include_router(calls.router)
 app.include_router(bots.router)
 app.include_router(plivo_routes.router)
+app.include_router(twilio_routes.router)

@@ -17,7 +17,8 @@ from app.database import get_db
 from app.models.call_log import CallLog
 from app.models.schemas import CallLogResponse, TriggerCallRequest, TriggerCallResponse
 from sqlalchemy import select
-from app.plivo.client import make_outbound_call
+from app.plivo.client import make_outbound_call as plivo_make_call
+from app.twilio.client import make_outbound_call as twilio_make_call
 
 logger = structlog.get_logger(__name__)
 
@@ -101,28 +102,40 @@ async def trigger_call(req: TriggerCallRequest, db: AsyncSession = Depends(get_d
     db.add(call_log)
     await db.flush()
 
-    # 4. Initiate Plivo outbound call (async wrapper around sync SDK)
+    # 4. Initiate outbound call via configured provider
+    provider = getattr(bot_config, "telephony_provider", "plivo") or "plivo"
     base_url = settings.PUBLIC_BASE_URL
-    plivo_uuid = await make_outbound_call(
-        auth_id=bot_config.plivo_auth_id,
-        auth_token=bot_config.plivo_auth_token,
-        from_number=bot_config.plivo_caller_id,
-        to_number=req.contact_phone,
-        answer_url=f"{base_url}/plivo/answer/{call_sid}",
-        hangup_url=f"{base_url}/plivo/event/{call_sid}",
-    )
 
-    if not plivo_uuid:
+    if provider == "twilio":
+        provider_uuid = await twilio_make_call(
+            account_sid=bot_config.twilio_account_sid,
+            auth_token=bot_config.twilio_auth_token,
+            from_number=bot_config.twilio_phone_number,
+            to_number=req.contact_phone,
+            answer_url=f"{base_url}/twilio/answer/{call_sid}",
+            status_callback_url=f"{base_url}/twilio/event/{call_sid}",
+        )
+    else:
+        provider_uuid = await plivo_make_call(
+            auth_id=bot_config.plivo_auth_id,
+            auth_token=bot_config.plivo_auth_token,
+            from_number=bot_config.plivo_caller_id,
+            to_number=req.contact_phone,
+            answer_url=f"{base_url}/plivo/answer/{call_sid}",
+            hangup_url=f"{base_url}/plivo/event/{call_sid}",
+        )
+
+    if not provider_uuid:
         call_log.status = "failed"
         await db.commit()
-        raise HTTPException(status_code=502, detail="Failed to initiate Plivo call")
+        raise HTTPException(status_code=502, detail=f"Failed to initiate {provider} call")
 
-    # 5. Update call_log with Plivo UUID
-    call_log.plivo_call_uuid = plivo_uuid
+    # 5. Update call_log with provider UUID
+    call_log.plivo_call_uuid = provider_uuid
     call_log.status = "ringing"
     await db.commit()
 
-    logger.info("call_triggered", call_sid=call_sid, plivo_uuid=plivo_uuid, to=req.contact_phone)
+    logger.info("call_triggered", call_sid=call_sid, provider=provider, provider_uuid=provider_uuid, to=req.contact_phone)
     return TriggerCallResponse(call_sid=call_sid, status="ringing")
 
 

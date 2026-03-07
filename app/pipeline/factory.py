@@ -41,6 +41,7 @@ from app.models.schemas import CallContext
 from app.pipeline.idle_handler import IdleEscalationHandler
 
 _timing_logger = structlog.get_logger("pipeline.timing")
+logger = structlog.get_logger(__name__)
 
 # Backward-compat mapping: Chirp3-HD voice names → Gemini TTS voice names
 _CHIRP_TO_GEMINI_VOICE = {
@@ -164,28 +165,144 @@ def _get_gemini_tts_class():
     return SmallChunkGeminiTTS
 
 
+def _build_workflow_tools(bot_config: BotConfig, call_context: CallContext):
+    """Build LLM tool definitions and handler for during-call CRM workflows."""
+    workflows = getattr(bot_config, "ghl_workflows", None) or []
+    during_call = [
+        wf for wf in workflows
+        if wf.get("timing") == "during_call" and wf.get("enabled") and wf.get("tag")
+    ]
+
+    if not during_call:
+        return None, None
+
+    wf_descriptions = "\n".join(
+        f"- {wf['id']}: {wf.get('name', 'Unnamed')} — "
+        f"{wf.get('trigger_description', 'Tag: ' + wf['tag'])}"
+        for wf in during_call
+    )
+
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "trigger_crm_workflow",
+                "description": (
+                    "Trigger a CRM workflow to tag the contact. "
+                    "Use this when the conversation matches a workflow's trigger condition.\n\n"
+                    f"Available workflows:\n{wf_descriptions}"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "workflow_id": {
+                            "type": "string",
+                            "description": "The ID of the workflow to trigger",
+                            "enum": [wf["id"] for wf in during_call],
+                        }
+                    },
+                    "required": ["workflow_id"],
+                },
+            },
+        }
+    ]
+
+    wf_lookup = {wf["id"]: wf for wf in during_call}
+
+    async def handle_trigger_workflow(params):
+        wf_id = params.arguments.get("workflow_id")
+        wf = wf_lookup.get(wf_id)
+        if not wf:
+            await params.result_callback(f"Unknown workflow: {wf_id}")
+            return
+
+        api_key = getattr(bot_config, "ghl_api_key", None)
+        location_id = getattr(bot_config, "ghl_location_id", None)
+        if not api_key or not location_id:
+            await params.result_callback("CRM not configured")
+            return
+
+        contact_id = call_context.ghl_contact_id
+        if not contact_id:
+            from app.database import get_db_session
+            from app.ghl.client import GHLClient
+            from app.models.call_log import CallLog
+            from sqlalchemy import select
+
+            ghl = GHLClient(api_key=api_key)
+            try:
+                async with get_db_session() as db:
+                    result = await db.execute(
+                        select(CallLog).where(CallLog.call_sid == call_context.call_sid)
+                    )
+                    call_log = result.scalar_one_or_none()
+                phone = call_log.contact_phone if call_log else None
+                if phone:
+                    contact_id = await ghl.find_contact(location_id, phone)
+            finally:
+                await ghl.close()
+
+        if not contact_id:
+            await params.result_callback("Could not find contact in CRM")
+            return
+
+        from app.ghl.client import GHLClient
+
+        ghl = GHLClient(api_key=api_key)
+        try:
+            tag = wf["tag"]
+            ok = await ghl.tag_contact(contact_id, tag)
+            logger.info(
+                "during_call_workflow_triggered",
+                call_sid=call_context.call_sid,
+                workflow=wf.get("name"),
+                tag=tag,
+                success=ok,
+            )
+            await params.result_callback(
+                f"Done — tagged contact with '{tag}'" if ok else f"Failed to tag with '{tag}'"
+            )
+        finally:
+            await ghl.close()
+
+    return tools, handle_trigger_workflow
+
+
 async def build_pipeline(
     bot_config: BotConfig,
     call_context: CallContext,
     websocket: WebSocket,
-) -> tuple[PipelineTask, FastAPIWebsocketTransport, OpenAILLMContext, PlivoPCMFrameSerializer]:
+    provider: str = "plivo",
+) -> tuple[PipelineTask, FastAPIWebsocketTransport, OpenAILLMContext, PlivoPCMFrameSerializer | None]:
     """
     Construct an isolated Pipecat pipeline for a single call.
 
     Args:
         bot_config: Loaded from DB — contains voice, timeouts, credentials.
         call_context: Per-call data — filled prompt, contact info, call_sid.
-        websocket: The accepted FastAPI WebSocket connection from Plivo.
+        websocket: The accepted FastAPI WebSocket connection from Plivo/Twilio.
+        provider: "plivo" or "twilio" — determines serializer and audio format.
 
     Returns:
-        (task, transport, context, serializer) — context for messages, serializer for recordings.
+        (task, transport, context, recorder) — recorder is PlivoPCMFrameSerializer (with WAV recording) or None for Twilio.
     """
 
-    # --- Serializer (extracted for post-call recording access) ---
-    serializer = PlivoPCMFrameSerializer(
-        stream_id=call_context.call_sid,
-        record=True,
-    )
+    # --- Serializer (provider-specific) ---
+    recorder: PlivoPCMFrameSerializer | None = None
+    if provider == "twilio":
+        from pipecat.serializers.twilio import TwilioFrameSerializer
+
+        serializer = TwilioFrameSerializer(
+            stream_sid="",  # Updated by Twilio's 'start' event
+            params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
+        )
+    else:
+        plivo_serializer = PlivoPCMFrameSerializer(
+            stream_id=call_context.call_sid,
+            record=True,
+        )
+        serializer = plivo_serializer
+        recorder = plivo_serializer
 
     # --- Transport ---
     # VAD and turn analyzer go on transport params in pipecat 0.0.104.
@@ -230,6 +347,11 @@ async def build_pipeline(
         ),
     )
 
+    # --- During-call workflow tools ---
+    workflow_tools, workflow_handler = _build_workflow_tools(bot_config, call_context)
+    if workflow_handler:
+        llm.register_function("trigger_crm_workflow", workflow_handler)
+
     # --- TTS ---
     if settings.TTS_PROVIDER == "gemini":
         from pipecat.services.google.tts import GeminiTTSService
@@ -263,8 +385,12 @@ async def build_pipeline(
         )
 
     # --- Context ---
+    context_kwargs = {}
+    if workflow_tools:
+        context_kwargs["tools"] = workflow_tools
     context = OpenAILLMContext(
-        messages=[{"role": "system", "content": call_context.filled_prompt}]
+        messages=[{"role": "system", "content": call_context.filled_prompt}],
+        **context_kwargs,
     )
 
     # --- Context aggregator ---
@@ -314,4 +440,4 @@ async def build_pipeline(
         ),
     )
 
-    return task, transport, context, serializer
+    return task, transport, context, recorder

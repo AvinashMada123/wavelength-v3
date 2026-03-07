@@ -43,6 +43,45 @@ class GHLClient:
             logger.error("ghl_get_contact_error", error=str(e), contact_id=ghl_contact_id)
             return None
 
+    async def find_contact(self, location_id: str, phone: str) -> str | None:
+        """Search for a GHL contact by phone number. Returns contact ID or None."""
+        clean_phone = phone.strip()
+        if not clean_phone.startswith("+"):
+            clean_phone = "+" + clean_phone
+
+        session = await self._get_session()
+        url = f"{GHL_BASE_URL}/contacts/"
+        try:
+            async with session.get(url, params={"locationId": location_id, "query": clean_phone}) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    contacts = data.get("contacts", [])
+                    if contacts:
+                        contact_id = contacts[0].get("id")
+                        logger.info("ghl_contact_found", phone=clean_phone, contact_id=contact_id)
+                        return contact_id
+                else:
+                    logger.warning("ghl_find_contact_failed", status=resp.status, phone=clean_phone)
+        except Exception as e:
+            logger.error("ghl_find_contact_error", error=str(e), phone=clean_phone)
+        return None
+
+    async def tag_contact(self, contact_id: str, tag: str) -> bool:
+        """Add a tag to a GHL contact."""
+        session = await self._get_session()
+        url = f"{GHL_BASE_URL}/contacts/{contact_id}/tags"
+        try:
+            async with session.post(url, json={"tags": [tag]}) as resp:
+                if resp.status < 400:
+                    logger.info("ghl_tag_added", contact_id=contact_id, tag=tag)
+                    return True
+                body = await resp.text()
+                logger.error("ghl_tag_failed", status=resp.status, body=body[:200])
+                return False
+        except Exception as e:
+            logger.error("ghl_tag_error", error=str(e), contact_id=contact_id, tag=tag)
+            return False
+
     async def post_call_outcome(self, webhook_url: str, outcome_data: dict) -> bool:
         """POST call outcome to bot's configured GHL webhook URL."""
         session = await self._get_session()

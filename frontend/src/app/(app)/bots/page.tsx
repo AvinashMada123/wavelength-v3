@@ -54,7 +54,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { fetchBots, createBot, updateBot, deleteBot } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import { VOICE_GROUPS, LANGUAGE_OPTIONS, BUILTIN_VARIABLES } from "@/lib/constants";
-import type { BotConfig } from "@/types/api";
+import { Switch } from "@/components/ui/switch";
+import type { BotConfig, GHLWorkflow } from "@/types/api";
 
 // ---------- Form types ----------
 
@@ -72,9 +73,18 @@ interface BotForm {
   context_variables: Record<string, string>;
   silence_timeout_secs: number;
   ghl_webhook_url: string;
+  ghl_api_key: string;
+  ghl_location_id: string;
+  ghl_post_call_tag: string;
+  ghl_workflows: GHLWorkflow[];
+  max_call_duration: number;
+  telephony_provider: "plivo" | "twilio";
   plivo_auth_id: string;
   plivo_auth_token: string;
   plivo_caller_id: string;
+  twilio_account_sid: string;
+  twilio_auth_token: string;
+  twilio_phone_number: string;
 }
 
 const EMPTY_FORM: BotForm = {
@@ -91,10 +101,25 @@ const EMPTY_FORM: BotForm = {
   context_variables: {},
   silence_timeout_secs: 5,
   ghl_webhook_url: "",
+  ghl_api_key: "",
+  ghl_location_id: "",
+  ghl_post_call_tag: "",
+  ghl_workflows: [],
+  max_call_duration: 480,
+  telephony_provider: "plivo",
   plivo_auth_id: "",
   plivo_auth_token: "",
   plivo_caller_id: "",
+  twilio_account_sid: "",
+  twilio_auth_token: "",
+  twilio_phone_number: "",
 };
+
+const TIMING_OPTIONS = [
+  { value: "pre_call", label: "Pre-Call" },
+  { value: "during_call", label: "During Call" },
+  { value: "post_call", label: "Post-Call" },
+] as const;
 
 // Extract {variable_name} from a template string
 function extractVariables(template: string): string[] {
@@ -179,6 +204,38 @@ export default function BotsPage() {
     setNewVarName("");
   }
 
+  function addWorkflow() {
+    setForm((prev) => ({
+      ...prev,
+      ghl_workflows: [
+        ...prev.ghl_workflows,
+        {
+          id: crypto.randomUUID(),
+          name: "",
+          tag: "",
+          timing: "post_call" as const,
+          enabled: true,
+        },
+      ],
+    }));
+  }
+
+  function updateWorkflow(id: string, updates: Partial<GHLWorkflow>) {
+    setForm((prev) => ({
+      ...prev,
+      ghl_workflows: prev.ghl_workflows.map((wf) =>
+        wf.id === id ? { ...wf, ...updates } : wf
+      ),
+    }));
+  }
+
+  function removeWorkflow(id: string) {
+    setForm((prev) => ({
+      ...prev,
+      ghl_workflows: prev.ghl_workflows.filter((wf) => wf.id !== id),
+    }));
+  }
+
   function openCreate() {
     setEditingBot(null);
     setForm(EMPTY_FORM);
@@ -201,9 +258,18 @@ export default function BotsPage() {
       context_variables: bot.context_variables || {},
       silence_timeout_secs: bot.silence_timeout_secs,
       ghl_webhook_url: bot.ghl_webhook_url || "",
+      ghl_api_key: bot.ghl_api_key || "",
+      ghl_location_id: bot.ghl_location_id || "",
+      ghl_post_call_tag: bot.ghl_post_call_tag || "",
+      ghl_workflows: bot.ghl_workflows || [],
+      max_call_duration: bot.max_call_duration ?? 480,
+      telephony_provider: bot.telephony_provider || "plivo",
       plivo_auth_id: "",
       plivo_auth_token: "",
       plivo_caller_id: bot.plivo_caller_id,
+      twilio_account_sid: "",
+      twilio_auth_token: "",
+      twilio_phone_number: bot.twilio_phone_number || "",
     });
     setDialogOpen(true);
   }
@@ -213,9 +279,15 @@ export default function BotsPage() {
       toast.error("Agent name, company name, and system prompt are required");
       return;
     }
-    if (!editingBot && (!form.plivo_auth_id || !form.plivo_auth_token || !form.plivo_caller_id)) {
-      toast.error("Plivo credentials are required for new bots");
-      return;
+    if (!editingBot) {
+      if (form.telephony_provider === "plivo" && (!form.plivo_auth_id || !form.plivo_auth_token || !form.plivo_caller_id)) {
+        toast.error("Plivo credentials are required");
+        return;
+      }
+      if (form.telephony_provider === "twilio" && (!form.twilio_account_sid || !form.twilio_auth_token || !form.twilio_phone_number)) {
+        toast.error("Twilio credentials are required");
+        return;
+      }
     }
 
     setSaving(true);
@@ -346,6 +418,9 @@ export default function BotsPage() {
                       </div>
 
                       <div className="flex flex-wrap gap-2 mb-4">
+                        <Badge variant={bot.telephony_provider === "twilio" ? "default" : "secondary"} className="gap-1 text-xs">
+                          {bot.telephony_provider === "twilio" ? "Twilio" : "Plivo"}
+                        </Badge>
                         <Badge variant="outline" className="gap-1 text-xs">
                           <Volume2 className="h-3 w-3" /> {bot.tts_voice}
                         </Badge>
@@ -602,33 +677,184 @@ export default function BotsPage() {
 
               <Separator />
 
-              {/* ---- Plivo Credentials ---- */}
+              {/* ---- Telephony Provider ---- */}
               <div className="space-y-4">
-                <h3 className="text-sm font-medium text-muted-foreground">Plivo Credentials</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="plivo_auth_id">Auth ID {!editingBot && "*"}</Label>
-                    <Input id="plivo_auth_id" value={form.plivo_auth_id} onChange={(e) => setField("plivo_auth_id", e.target.value)} placeholder={editingBot ? "(unchanged)" : ""} className="font-mono text-sm" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="plivo_auth_token">Auth Token {!editingBot && "*"}</Label>
-                    <Input id="plivo_auth_token" type="password" value={form.plivo_auth_token} onChange={(e) => setField("plivo_auth_token", e.target.value)} placeholder={editingBot ? "(unchanged)" : ""} className="font-mono text-sm" />
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-medium text-muted-foreground">Telephony Provider</h3>
+                  <div className="flex gap-1 rounded-lg border p-0.5">
+                    {(["plivo", "twilio"] as const).map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => setField("telephony_provider", p)}
+                        className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                          form.telephony_provider === p
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {p === "plivo" ? "Plivo" : "Twilio"}
+                      </button>
+                    ))}
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="plivo_caller_id">Caller ID {!editingBot && "*"}</Label>
-                  <Input id="plivo_caller_id" value={form.plivo_caller_id} onChange={(e) => setField("plivo_caller_id", e.target.value)} placeholder="+14155551234" className="font-mono text-sm w-64" />
-                </div>
+
+                {form.telephony_provider === "plivo" ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="plivo_auth_id">Auth ID {!editingBot && "*"}</Label>
+                        <Input id="plivo_auth_id" value={form.plivo_auth_id} onChange={(e) => setField("plivo_auth_id", e.target.value)} placeholder={editingBot ? "(unchanged)" : ""} className="font-mono text-sm" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="plivo_auth_token">Auth Token {!editingBot && "*"}</Label>
+                        <Input id="plivo_auth_token" type="password" value={form.plivo_auth_token} onChange={(e) => setField("plivo_auth_token", e.target.value)} placeholder={editingBot ? "(unchanged)" : ""} className="font-mono text-sm" />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="plivo_caller_id">Caller ID {!editingBot && "*"}</Label>
+                      <Input id="plivo_caller_id" value={form.plivo_caller_id} onChange={(e) => setField("plivo_caller_id", e.target.value)} placeholder="+14155551234" className="font-mono text-sm w-64" />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="twilio_account_sid">Account SID {!editingBot && "*"}</Label>
+                        <Input id="twilio_account_sid" value={form.twilio_account_sid} onChange={(e) => setField("twilio_account_sid", e.target.value)} placeholder={editingBot ? "(unchanged)" : ""} className="font-mono text-sm" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="twilio_auth_token">Auth Token {!editingBot && "*"}</Label>
+                        <Input id="twilio_auth_token" type="password" value={form.twilio_auth_token} onChange={(e) => setField("twilio_auth_token", e.target.value)} placeholder={editingBot ? "(unchanged)" : ""} className="font-mono text-sm" />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="twilio_phone_number">Phone Number {!editingBot && "*"}</Label>
+                      <Input id="twilio_phone_number" value={form.twilio_phone_number} onChange={(e) => setField("twilio_phone_number", e.target.value)} placeholder="+14155551234" className="font-mono text-sm w-64" />
+                    </div>
+                  </>
+                )}
               </div>
 
               <Separator />
 
-              {/* ---- GHL ---- */}
+              {/* ---- GHL Credentials ---- */}
               <div className="space-y-4">
                 <h3 className="text-sm font-medium text-muted-foreground">GoHighLevel (optional)</h3>
                 <div className="space-y-2">
                   <Label htmlFor="ghl_webhook_url">Webhook URL</Label>
                   <Input id="ghl_webhook_url" value={form.ghl_webhook_url} onChange={(e) => setField("ghl_webhook_url", e.target.value)} placeholder="https://services.leadconnectorhq.com/hooks/..." className="font-mono text-sm" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="ghl_api_key">API Key</Label>
+                    <Input id="ghl_api_key" type="password" value={form.ghl_api_key} onChange={(e) => setField("ghl_api_key", e.target.value)} placeholder={editingBot?.ghl_api_key ? "(unchanged)" : ""} className="font-mono text-sm" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="ghl_location_id">Location ID</Label>
+                    <Input id="ghl_location_id" value={form.ghl_location_id} onChange={(e) => setField("ghl_location_id", e.target.value)} placeholder="e.g. abc123XYZ" className="font-mono text-sm" />
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* ---- CRM Workflows ---- */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-medium text-muted-foreground">CRM Workflow Triggers</h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Each workflow adds a tag to the contact in your CRM. Set up CRM automations to trigger on &quot;tag added&quot;.
+                    </p>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={addWorkflow}>
+                    <Plus className="h-3.5 w-3.5 mr-1" />
+                    Add Workflow
+                  </Button>
+                </div>
+
+                {form.ghl_workflows.length === 0 && (
+                  <div className="rounded-lg border border-dashed p-6 text-center">
+                    <p className="text-sm text-muted-foreground">No workflows configured</p>
+                  </div>
+                )}
+
+                {form.ghl_workflows.map((wf) => (
+                  <div key={wf.id} className="rounded-lg border p-4 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 grid grid-cols-2 gap-3">
+                        <Input
+                          value={wf.name}
+                          onChange={(e) => updateWorkflow(wf.id, { name: e.target.value })}
+                          placeholder="Workflow Name"
+                          className="h-8 text-sm"
+                        />
+                        <Input
+                          value={wf.tag}
+                          onChange={(e) => updateWorkflow(wf.id, { tag: e.target.value })}
+                          placeholder="CRM Tag"
+                          className="h-8 text-sm font-mono"
+                        />
+                      </div>
+                      <Switch
+                        checked={wf.enabled}
+                        onCheckedChange={(checked) => updateWorkflow(wf.id, { enabled: checked })}
+                      />
+                      <span className="text-xs text-muted-foreground w-6">{wf.enabled ? "On" : "Off"}</span>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => removeWorkflow(wf.id)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-muted-foreground mr-2">Trigger Timing</span>
+                      {TIMING_OPTIONS.map((opt) => (
+                        <Button
+                          key={opt.value}
+                          variant={wf.timing === opt.value ? "default" : "outline"}
+                          size="sm"
+                          className="h-7 text-xs px-3"
+                          onClick={() => updateWorkflow(wf.id, { timing: opt.value })}
+                        >
+                          {opt.label}
+                        </Button>
+                      ))}
+                    </div>
+
+                    {wf.timing === "during_call" && (
+                      <div className="space-y-1">
+                        <Label className="text-xs">AI Trigger Description</Label>
+                        <Textarea
+                          value={wf.trigger_description || ""}
+                          onChange={(e) => updateWorkflow(wf.id, { trigger_description: e.target.value })}
+                          placeholder="e.g. Trigger when the customer confirms they want more information about the course."
+                          className="min-h-[60px] text-sm"
+                        />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <Separator />
+
+              {/* ---- Additional Options ---- */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-medium text-muted-foreground">Additional Options</h3>
+                <div className="flex items-center justify-between rounded-lg border p-4">
+                  <div>
+                    <p className="text-sm font-medium">Max Call Duration</p>
+                    <p className="text-xs text-muted-foreground">Maximum duration (in minutes) before the bot wraps up the call</p>
+                  </div>
+                  <Input
+                    type="number"
+                    value={Math.round(form.max_call_duration / 60)}
+                    onChange={(e) => setField("max_call_duration", (parseInt(e.target.value) || 0) * 60)}
+                    min={1}
+                    max={60}
+                    className="w-20 text-center"
+                  />
                 </div>
               </div>
 

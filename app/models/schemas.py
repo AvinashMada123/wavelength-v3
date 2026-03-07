@@ -31,9 +31,18 @@ class CreateBotConfigRequest(BaseModel):
     context_variables: dict[str, str] = Field(default_factory=dict)
     silence_timeout_secs: int = 5
     ghl_webhook_url: str | None = None
-    plivo_auth_id: str
-    plivo_auth_token: str
-    plivo_caller_id: str
+    ghl_api_key: str | None = None
+    ghl_location_id: str | None = None
+    ghl_post_call_tag: str | None = None
+    ghl_workflows: list[dict] = Field(default_factory=list)
+    max_call_duration: int = 480
+    telephony_provider: str = "plivo"
+    plivo_auth_id: str = ""
+    plivo_auth_token: str = ""
+    plivo_caller_id: str = ""
+    twilio_account_sid: str | None = None
+    twilio_auth_token: str | None = None
+    twilio_phone_number: str | None = None
 
 
 class UpdateBotConfigRequest(BaseModel):
@@ -50,9 +59,18 @@ class UpdateBotConfigRequest(BaseModel):
     context_variables: dict[str, str] | None = None
     silence_timeout_secs: int | None = None
     ghl_webhook_url: str | None = None
+    ghl_api_key: str | None = None
+    ghl_location_id: str | None = None
+    ghl_post_call_tag: str | None = None
+    ghl_workflows: list[dict] | None = None
+    max_call_duration: int | None = None
+    telephony_provider: str | None = None
     plivo_auth_id: str | None = None
     plivo_auth_token: str | None = None
     plivo_caller_id: str | None = None
+    twilio_account_sid: str | None = None
+    twilio_auth_token: str | None = None
+    twilio_phone_number: str | None = None
     is_active: bool | None = None
 
 
@@ -79,7 +97,14 @@ class BotConfigResponse(BaseModel):
     context_variables: dict[str, str]
     silence_timeout_secs: int
     ghl_webhook_url: str | None
+    ghl_api_key: str | None
+    ghl_location_id: str | None
+    ghl_post_call_tag: str | None
+    ghl_workflows: list[dict]
+    max_call_duration: int
+    telephony_provider: str
     plivo_caller_id: str
+    twilio_phone_number: str | None
     is_active: bool
     created_at: datetime
     updated_at: datetime
