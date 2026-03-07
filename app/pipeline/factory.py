@@ -503,9 +503,12 @@ async def build_pipeline(
         """Called by UserIdleProcessor when user is idle. Returns True to keep monitoring."""
         return await idle_handler.on_idle(processor, retry_count)
 
+    # Minimum 12s: idle timer counts from last USER speech, not from when bot
+    # finishes speaking. Short timeouts fire while TTS is still playing.
+    idle_timeout = max(float(call_context.silence_timeout_secs), 12.0)
     user_idle = UserIdleProcessor(
         callback=on_idle,
-        timeout=float(call_context.silence_timeout_secs),
+        timeout=idle_timeout,
     )
 
     # --- Call guard (voicemail / hold / DND detection) ---
