@@ -743,6 +743,7 @@ export default function CallLogsPage() {
 
                 {/* Details Tab */}
                 <TabsContent value="details" className="mt-4">
+                  <ScrollArea className="h-[400px]">
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                       <p className="text-muted-foreground">Bot</p>
@@ -817,6 +818,7 @@ export default function CallLogsPage() {
                       </div>
                     </>
                   )}
+                  </ScrollArea>
                 </TabsContent>
 
                 {/* Transcript Tab */}
