@@ -16,7 +16,7 @@ from pipecat.frames.frames import EndFrame, TTSSpeakFrame
 from pipecat.pipeline.runner import PipelineRunner
 from starlette.websockets import WebSocket
 
-from app.config import settings
+from app.config import gemini_key_pool, settings
 from app.models.bot_config import BotConfig
 from app.models.schemas import CallContext
 from app.pipeline.factory import build_pipeline
@@ -131,7 +131,7 @@ async def generate_call_summary(
     try:
         from google import genai
 
-        client = genai.Client(api_key=settings.GOOGLE_AI_API_KEY)
+        client = genai.Client(api_key=gemini_key_pool.get_key())
 
         conv_text = "\n".join(f"{role.upper()}: {content}" for role, content in conversation)
 
