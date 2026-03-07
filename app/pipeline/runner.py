@@ -12,7 +12,7 @@ import asyncio
 import re
 
 import structlog
-from pipecat.frames.frames import LLMMessagesAppendFrame, TTSSpeakFrame
+from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, TTSSpeakFrame
 from pipecat.pipeline.runner import PipelineRunner
 from starlette.websockets import WebSocket
 
@@ -38,7 +38,8 @@ async def run_pipeline(
     """
     task, transport, context, serializer = await build_pipeline(bot_config, ctx, websocket)
 
-    logger.info("pipeline_starting", call_sid=ctx.call_sid, voice=ctx.tts_voice)
+    max_duration = getattr(bot_config, "max_call_duration", 480) or 480
+    logger.info("pipeline_starting", call_sid=ctx.call_sid, voice=ctx.tts_voice, max_duration=max_duration)
 
     runner = PipelineRunner()
 
@@ -52,10 +53,20 @@ async def run_pipeline(
 
     asyncio.create_task(send_initial_greeting())
 
+    # Max call duration enforcement
+    async def enforce_max_duration():
+        try:
+            await asyncio.sleep(max_duration)
+            logger.info("max_call_duration_reached", call_sid=ctx.call_sid, max_duration=max_duration)
+            await task.queue_frame(EndFrame())
+        except asyncio.CancelledError:
+            pass
+
+    duration_task = asyncio.create_task(enforce_max_duration())
+
     # Watchdog: detect WebSocket closure and stop pipeline
     async def ws_watchdog():
         """Monitor WebSocket state and cancel pipeline when connection drops."""
-        from pipecat.frames.frames import EndFrame
         while True:
             await asyncio.sleep(1)
             try:
@@ -74,6 +85,7 @@ async def run_pipeline(
     try:
         await runner.run(task)
     finally:
+        duration_task.cancel()
         watchdog_task.cancel()
         serializer.close_wav()
 
@@ -96,7 +108,22 @@ async def generate_call_summary(
 
     Returns (summary, interest_level). interest_level is "high"/"medium"/"low" or None.
     """
-    conversation = [m for m in messages if m.get("role") in ("user", "assistant")]
+    # Normalize messages: may be Google Content objects or dicts
+    def _normalize(m):
+        if isinstance(m, dict):
+            return m.get("role", ""), m.get("content", "")
+        role = getattr(m, "role", "")
+        parts = getattr(m, "parts", [])
+        content = parts[0].text if parts and hasattr(parts[0], "text") else ""
+        if role == "model":
+            role = "assistant"
+        return role, content
+
+    conversation = [
+        (role, content) for m in messages
+        if (role := _normalize(m)[0]) in ("user", "assistant")
+        and not (content := _normalize(m)[1]).startswith("[SYSTEM:")
+    ]
     if not conversation:
         return None, None
 
@@ -106,7 +133,7 @@ async def generate_call_summary(
         genai.configure(api_key=settings.GOOGLE_AI_API_KEY)
         model = genai.GenerativeModel("gemini-2.5-flash")
 
-        conv_text = "\n".join(f"{m['role'].upper()}: {m['content']}" for m in conversation)
+        conv_text = "\n".join(f"{role.upper()}: {content}" for role, content in conversation)
 
         response = await model.generate_content_async(
             "Analyze this phone conversation and provide:\n"

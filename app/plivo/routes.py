@@ -279,6 +279,9 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         await _update_call_status(call_sid, status="in_progress", started_at=datetime.now(timezone.utc))
         logger.info("pipeline_call_started", call_sid=call_sid)
 
+        # Run pre-call GHL workflows (tag contacts before call starts)
+        await _run_ghl_workflows(ctx, bot_config, "pre_call")
+
         # Run pipeline — returns conversation history + recording paths
         pipeline_result = await run_pipeline(websocket, ctx, bot_config)
         conversation_messages = pipeline_result["messages"]
@@ -286,11 +289,23 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         logger.info("post_call_pipeline_done", call_sid=call_sid, msg_count=len(conversation_messages), recording_paths=recording_paths)
 
         # Build transcript entries (filter system messages)
-        transcript_entries = [
-            {"role": m["role"], "content": m.get("content", "")}
-            for m in conversation_messages
-            if m.get("role") in ("user", "assistant")
-        ]
+        # context.messages may be Google Content objects (with .role/.parts) or dicts
+        def _extract_message(m) -> dict | None:
+            if isinstance(m, dict):
+                role = m.get("role", "")
+                content = m.get("content", "")
+            else:
+                # Google Content object: .role is "user"/"model", .parts[0].text
+                role = getattr(m, "role", "")
+                parts = getattr(m, "parts", [])
+                content = parts[0].text if parts and hasattr(parts[0], "text") else ""
+                if role == "model":
+                    role = "assistant"
+            if role in ("user", "assistant") and not content.startswith("[SYSTEM:"):
+                return {"role": role, "content": content}
+            return None
+
+        transcript_entries = [e for m in conversation_messages if (e := _extract_message(m)) is not None]
         logger.info("post_call_transcript_built", call_sid=call_sid, entries=len(transcript_entries))
 
         # Generate LLM summary + interest classification
