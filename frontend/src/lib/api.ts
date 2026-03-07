@@ -23,6 +23,10 @@ export function fetchBots(): Promise<BotConfig[]> {
   return apiFetch("/api/bots");
 }
 
+export function fetchBot(id: string): Promise<BotConfig> {
+  return apiFetch(`/api/bots/${id}`);
+}
+
 export function createBot(data: CreateBotConfigRequest): Promise<BotConfig> {
   return apiFetch("/api/bots", {
     method: "POST",

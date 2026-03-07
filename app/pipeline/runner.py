@@ -37,7 +37,7 @@ async def run_pipeline(
       - "messages": conversation message history (list of {role, content} dicts)
       - "recording_paths": (bot_wav, user_wav) tuple or None
     """
-    task, transport, context, recorder = await build_pipeline(bot_config, ctx, websocket, provider=provider)
+    task, transport, context, recorder, guard = await build_pipeline(bot_config, ctx, websocket, provider=provider)
 
     max_duration = getattr(bot_config, "max_call_duration", 480) or 480
     logger.info("pipeline_starting", call_sid=ctx.call_sid, voice=ctx.tts_voice, max_duration=max_duration)
@@ -96,6 +96,9 @@ async def run_pipeline(
     return {
         "messages": context.messages,
         "recording_paths": recorder.get_recording_paths() if recorder else None,
+        "end_reason": guard.end_reason,
+        "dnd_detected": guard.dnd_detected,
+        "dnd_reason": guard.dnd_reason,
     }
 
 

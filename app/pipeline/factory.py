@@ -39,6 +39,7 @@ from starlette.websockets import WebSocket
 from app.config import settings
 from app.models.bot_config import BotConfig
 from app.models.schemas import CallContext
+from app.pipeline.call_guard import CallGuard
 from app.pipeline.idle_handler import IdleEscalationHandler
 
 _timing_logger = structlog.get_logger("pipeline.timing")
@@ -58,6 +59,23 @@ _DEFAULT_STYLE_PROMPT = (
     "Speak warmly in Indian English. Natural, calm, conversational tone. "
     "Never robotic."
 )
+
+# Universal phone call quality rules appended to every system prompt.
+_CONVERSATION_RULES = """
+
+PHONE CALL RULES (always follow):
+- HARD LIMIT: Maximum 2 sentences per turn, then STOP and let the customer speak.
+- Default turns: under 25 words. Detailed answers: under 40 words.
+- After asking ANY question, your turn is OVER. Do NOT continue talking. Do NOT answer your own question.
+- NEVER repeat a question you already asked, even rephrased.
+- Use a DIFFERENT acknowledgment each turn. Never start two consecutive turns the same way.
+  Rotate from: "Right" / "Hmm okay" / "I see" / "Interesting" / "Got it" / "Fair enough" / "Okay so"
+- BANNED phrases: "umm", "great question", "Absolutely", "That is absolutely correct", "I appreciate your time"
+- Audio issues: say "Sorry, I didn't catch that. Could you repeat?"
+- "Not interested" is not always goodbye — explore what's holding them back before ending.
+- If you already said goodbye and the customer responds with bye, do NOT say goodbye again.
+- If you said goodbye but the customer says "wait" or keeps talking, you MUST respond.
+"""
 
 # Map BCP-47 language codes → pipecat Language enum names
 _LANG_CODE_TO_ENUM = {
@@ -310,7 +328,7 @@ async def build_pipeline(
     call_context: CallContext,
     websocket: WebSocket,
     provider: str = "plivo",
-) -> tuple[PipelineTask, FastAPIWebsocketTransport, OpenAILLMContext, PlivoPCMFrameSerializer | None]:
+) -> tuple[PipelineTask, FastAPIWebsocketTransport, OpenAILLMContext, PlivoPCMFrameSerializer | None, CallGuard]:
     """
     Construct an isolated Pipecat pipeline for a single call.
 
@@ -321,7 +339,7 @@ async def build_pipeline(
         provider: "plivo" or "twilio" — determines serializer and audio format.
 
     Returns:
-        (task, transport, context, recorder) — recorder is PlivoPCMFrameSerializer (with WAV recording) or None for Twilio.
+        (task, transport, context, recorder, call_guard) — recorder is PlivoPCMFrameSerializer or None for Twilio.
     """
 
     # --- Serializer (provider-specific) ---
@@ -438,8 +456,9 @@ async def build_pipeline(
     # NOTE: Tools removed — OpenAILLMContext converts Google-native Tool objects
     # to OpenAI format, which Google's SDK then rejects. Call ends via hangup,
     # idle timeout, or max duration instead.
+    system_prompt = call_context.filled_prompt + _CONVERSATION_RULES
     context = OpenAILLMContext(
-        messages=[{"role": "system", "content": call_context.filled_prompt}],
+        messages=[{"role": "system", "content": system_prompt}],
     )
 
     # --- Context aggregator ---
@@ -459,6 +478,9 @@ async def build_pipeline(
         timeout=float(call_context.silence_timeout_secs),
     )
 
+    # --- Call guard (voicemail / hold / DND detection) ---
+    call_guard = CallGuard(call_sid=call_context.call_sid)
+
     # --- Latency trackers ---
     tracker_post_stt = LatencyTracker(position="post_stt", call_sid=call_context.call_sid)
     tracker_post_tts = LatencyTracker(position="post_tts", call_sid=call_context.call_sid)
@@ -468,6 +490,7 @@ async def build_pipeline(
         [
             transport.input(),
             stt,
+            call_guard,
             tracker_post_stt,
             user_idle,
             context_aggregator.user(),
@@ -492,4 +515,4 @@ async def build_pipeline(
     # Set task ref so end_call handler can queue EndFrame
     _task_ref[0] = task
 
-    return task, transport, context, recorder
+    return task, transport, context, recorder, call_guard

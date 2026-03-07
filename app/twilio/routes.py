@@ -22,6 +22,7 @@ from app.database import get_db, get_db_session
 from app.ghl.client import GHLClient
 from app.models.call_log import CallLog
 from app.models.schemas import CallContext
+from app.pipeline import session_limiter
 from app.pipeline.runner import generate_call_summary, run_pipeline
 from app.plivo.routes import (
     _get_call_log,
@@ -108,6 +109,13 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
 
     ctx = CallContext.from_db(call_log, bot_config=bot_config)
 
+    # Enforce concurrent session limit
+    if not await session_limiter.acquire():
+        logger.warning("session_limit_rejected", call_sid=call_sid)
+        await _update_call_status(call_sid, status="failed", outcome="capacity_exceeded")
+        await websocket.close()
+        return
+
     try:
         await _update_call_status(call_sid, status="in_progress", started_at=datetime.now(timezone.utc))
         logger.info("twilio_pipeline_call_started", call_sid=call_sid)
@@ -119,6 +127,15 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
         pipeline_result = await run_pipeline(websocket, ctx, bot_config, provider="twilio")
         conversation_messages = pipeline_result["messages"]
         recording_paths = pipeline_result["recording_paths"]
+        end_reason = pipeline_result.get("end_reason")
+        dnd_detected = pipeline_result.get("dnd_detected", False)
+        dnd_reason = pipeline_result.get("dnd_reason")
+
+        # If voicemail or hold/IVR detected, short-circuit
+        if end_reason in ("voicemail", "hold_ivr"):
+            await _update_call_status(call_sid, outcome=end_reason, metadata={"end_reason": end_reason})
+            await _post_ghl_outcome(ctx, outcome=end_reason)
+            return
 
         # Build transcript entries
         def _extract_message(m):
@@ -152,6 +169,11 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
         }
         if recording_path:
             call_metadata["recording_path"] = recording_path
+        if dnd_detected:
+            call_metadata["dnd_detected"] = True
+            call_metadata["dnd_reason"] = dnd_reason
+        if end_reason:
+            call_metadata["end_reason"] = end_reason
 
         await _update_call_status(call_sid, outcome="completed", summary=summary, metadata=call_metadata)
         await _post_ghl_outcome(ctx, outcome="completed", summary=summary, metadata=call_metadata)
@@ -161,6 +183,8 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
         logger.error("twilio_pipeline_error", call_sid=call_sid, error=str(e))
         await _update_call_status(call_sid, status="error")
         await _post_ghl_outcome(ctx, outcome="error", error=str(e))
+    finally:
+        await session_limiter.release()
 
 
 @router.post("/event/{call_sid}")

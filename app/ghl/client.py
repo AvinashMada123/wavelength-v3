@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import aiohttp
 import structlog
 
@@ -82,19 +84,21 @@ class GHLClient:
             logger.error("ghl_tag_error", error=str(e), contact_id=contact_id, tag=tag)
             return False
 
-    async def post_call_outcome(self, webhook_url: str, outcome_data: dict) -> bool:
-        """POST call outcome to bot's configured GHL webhook URL."""
+    async def post_call_outcome(self, webhook_url: str, outcome_data: dict, max_retries: int = 2) -> bool:
+        """POST call outcome to bot's configured GHL webhook URL with retry."""
         session = await self._get_session()
-        try:
-            async with session.post(webhook_url, json=outcome_data) as resp:
-                success = resp.status < 400
-                if not success:
+        for attempt in range(1 + max_retries):
+            try:
+                async with session.post(webhook_url, json=outcome_data) as resp:
+                    if resp.status < 400:
+                        return True
                     body = await resp.text()
-                    logger.error("ghl_webhook_post_failed", status=resp.status, body=body[:200])
-                return success
-        except Exception as e:
-            logger.error("ghl_webhook_post_error", error=str(e), webhook_url=webhook_url)
-            return False
+                    logger.error("ghl_webhook_post_failed", status=resp.status, body=body[:200], attempt=attempt + 1)
+            except Exception as e:
+                logger.error("ghl_webhook_post_error", error=str(e), webhook_url=webhook_url, attempt=attempt + 1)
+            if attempt < max_retries:
+                await asyncio.sleep(1.0 * (attempt + 1))  # 1s, 2s backoff
+        return False
 
     async def close(self):
         if self._session and not self._session.closed:
