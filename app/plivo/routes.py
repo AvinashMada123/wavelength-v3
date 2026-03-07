@@ -311,8 +311,12 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
 
         transcript_entries = [e for m in conversation_messages if (e := _extract_message(m)) is not None]
         # First message is always the system prompt injected as "user" role — skip it
-        if transcript_entries and transcript_entries[0]["role"] == "user" and "You are" in transcript_entries[0]["content"][:20]:
+        if transcript_entries and transcript_entries[0]["role"] == "user" and transcript_entries[0]["content"] == ctx.filled_prompt:
             transcript_entries = transcript_entries[1:]
+
+        # Prepend greeting (sent via TTSSpeakFrame, bypasses context aggregator)
+        greeting_text = f"Hi {ctx.contact_name}, this is {bot_config.agent_name} calling from {bot_config.company_name}. How are you doing today?"
+        transcript_entries.insert(0, {"role": "assistant", "content": greeting_text})
         logger.info("post_call_transcript_built", call_sid=call_sid, entries=len(transcript_entries))
 
         # Generate LLM summary + interest classification

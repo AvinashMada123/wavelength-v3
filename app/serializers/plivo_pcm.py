@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import json
+import time
 import wave
 from pathlib import Path
 
@@ -45,6 +46,9 @@ class PlivoPCMFrameSerializer(FrameSerializer):
         self._user_wav_file: wave.Wave_write | None = None
         self._bot_wav_path: str | None = None
         self._user_wav_path: str | None = None
+        self._recording_start: float | None = None  # monotonic clock for time-alignment
+        self._bot_bytes_written: int = 0
+        self._user_bytes_written: int = 0
         if record:
             rec_dir = Path("recordings")
             rec_dir.mkdir(exist_ok=True)
@@ -77,7 +81,16 @@ class PlivoPCMFrameSerializer(FrameSerializer):
                     f"bytes={len(frame.audio)}, total_bytes={self._total_bytes_serialized}"
                 )
             if self._bot_wav_file:
+                now = time.monotonic()
+                if self._recording_start is None:
+                    self._recording_start = now
+                expected = int((now - self._recording_start) * PLIVO_SAMPLE_RATE * 2)
+                gap = expected - self._bot_bytes_written
+                if gap > 0:
+                    self._bot_wav_file.writeframes(b'\x00' * gap)
+                    self._bot_bytes_written += gap
                 self._bot_wav_file.writeframes(frame.audio)
+                self._bot_bytes_written += len(frame.audio)
             return json.dumps({
                 "event": "playAudio",
                 "media": {
@@ -141,7 +154,16 @@ class PlivoPCMFrameSerializer(FrameSerializer):
             audio_bytes = base64.b64decode(payload_b64)
             self._total_bytes_received += len(audio_bytes)
             if self._user_wav_file:
+                now = time.monotonic()
+                if self._recording_start is None:
+                    self._recording_start = now
+                expected = int((now - self._recording_start) * PLIVO_SAMPLE_RATE * 2)
+                gap = expected - self._user_bytes_written
+                if gap > 0:
+                    self._user_wav_file.writeframes(b'\x00' * gap)
+                    self._user_bytes_written += gap
                 self._user_wav_file.writeframes(audio_bytes)
+                self._user_bytes_written += len(audio_bytes)
             return InputAudioRawFrame(
                 audio=audio_bytes,
                 sample_rate=PLIVO_SAMPLE_RATE,
