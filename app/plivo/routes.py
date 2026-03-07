@@ -320,22 +320,26 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
             logger.error("post_call_summary_failed", call_sid=call_sid, error=str(e), exc_info=True)
             summary, interest_level = None, None
 
-        # Build metadata (recording URL added asynchronously by Plivo callback)
+        # Build metadata — merge with existing to preserve recording_url from Plivo callback
+        async with get_db_session() as db:
+            existing_log = await _get_call_log(db, call_sid)
+        existing_meta = dict(existing_log.metadata_) if existing_log and existing_log.metadata_ else {}
+
         turn_count = sum(1 for t in transcript_entries if t["role"] == "user")
-        call_metadata = {
+        existing_meta.update({
             "transcript": transcript_entries,
             "interest_level": interest_level,
             "call_metrics": {"turn_count": turn_count},
-        }
+        })
         if dnd_detected:
-            call_metadata["dnd_detected"] = True
-            call_metadata["dnd_reason"] = dnd_reason
+            existing_meta["dnd_detected"] = True
+            existing_meta["dnd_reason"] = dnd_reason
         if end_reason:
-            call_metadata["end_reason"] = end_reason
+            existing_meta["end_reason"] = end_reason
 
         # Update call log with outcome + metadata
         await _update_call_status(
-            call_sid, outcome="completed", summary=summary, metadata=call_metadata
+            call_sid, outcome="completed", summary=summary, metadata=existing_meta
         )
         logger.info("post_call_metadata_saved", call_sid=call_sid, turns=turn_count)
 
