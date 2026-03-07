@@ -187,9 +187,15 @@ def _get_gemini_tts_class():
 def _build_workflow_tools(bot_config: BotConfig, call_context: CallContext):
     """Build LLM tool definitions and handler for during-call CRM workflows."""
     workflows = getattr(bot_config, "ghl_workflows", None) or []
+    if isinstance(workflows, str):
+        import json
+        try:
+            workflows = json.loads(workflows)
+        except (json.JSONDecodeError, TypeError):
+            workflows = []
     during_call = [
         wf for wf in workflows
-        if wf.get("timing") == "during_call" and wf.get("enabled") and wf.get("tag")
+        if isinstance(wf, dict) and wf.get("timing") == "during_call" and wf.get("enabled") and wf.get("tag")
     ]
 
     if not during_call:
