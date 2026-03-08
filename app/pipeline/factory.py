@@ -393,7 +393,6 @@ async def build_pipeline(
             model="nova-3",
             language=stt_language,
             interim_results=True,
-            utterance_end_ms="800",
             punctuate=True,
             smart_format=True,
             endpointing=300,
