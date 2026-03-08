@@ -318,7 +318,7 @@ class CallAnalyzer:
                 raise
 
     def _parse_json_response(self, text: str) -> dict:
-        """Parse JSON from Gemini response, handling markdown code blocks."""
+        """Parse JSON from Gemini response, handling markdown code blocks and truncation."""
         text = text.strip()
         # Strip markdown code fences if present
         if text.startswith("```"):
@@ -327,8 +327,25 @@ class CallAnalyzer:
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            logger.warning("json_parse_failed", preview=text[:300])
-            return {}
+            # Try to extract JSON object from the text
+            match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
+            if match:
+                try:
+                    return json.loads(match.group())
+                except json.JSONDecodeError:
+                    pass
+            # Try to repair truncated JSON by closing open strings/braces
+            repaired = text.rstrip()
+            if not repaired.endswith("}"):
+                # Close any open string
+                if repaired.count('"') % 2 == 1:
+                    repaired += '"'
+                repaired += "}"
+            try:
+                return json.loads(repaired)
+            except json.JSONDecodeError:
+                logger.warning("json_parse_failed", preview=text[:500])
+                return {}
 
     def _extract_token_usage(self, response) -> dict:
         """Extract input/output token counts from Gemini response."""
