@@ -61,9 +61,12 @@ export function triggerCall(data: TriggerCallRequest): Promise<TriggerCallRespon
   });
 }
 
-export function fetchCallLogs(botId?: string): Promise<CallLog[]> {
-  const params = botId ? `?bot_id=${botId}` : "";
-  return apiFetch(`/api/calls${params}`);
+export function fetchCallLogs(botId?: string, goalOutcome?: string): Promise<CallLog[]> {
+  const sp = new URLSearchParams();
+  if (botId) sp.set("bot_id", botId);
+  if (goalOutcome) sp.set("goal_outcome", goalOutcome);
+  const qs = sp.toString();
+  return apiFetch(`/api/calls${qs ? `?${qs}` : ""}`);
 }
 
 export function fetchCallDetail(callId: string): Promise<CallLog> {

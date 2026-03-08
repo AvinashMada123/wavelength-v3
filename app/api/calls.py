@@ -34,11 +34,21 @@ def set_dependencies(loader: BotConfigLoader):
 async def list_calls(
     bot_id: uuid.UUID | None = None,
     status: str | None = None,
+    goal_outcome: str | None = None,
     limit: int = 10000,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(CallLog).order_by(CallLog.created_at.desc())
+    if goal_outcome:
+        # Join with call_analytics to filter by goal_outcome
+        query = (
+            select(CallLog)
+            .join(CallAnalytics, CallAnalytics.call_log_id == CallLog.id)
+            .where(CallAnalytics.goal_outcome == goal_outcome)
+            .order_by(CallLog.created_at.desc())
+        )
+    else:
+        query = select(CallLog).order_by(CallLog.created_at.desc())
     if bot_id:
         query = query.where(CallLog.bot_id == bot_id)
     if status:

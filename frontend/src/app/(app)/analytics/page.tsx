@@ -359,14 +359,25 @@ export default function AnalyticsPage() {
                         ) : (
                           <div className="space-y-3">
                             {summary.outcomes.map((o, i) => (
-                              <div key={o.outcome} className="space-y-1.5">
+                              <div
+                                key={o.outcome}
+                                className="space-y-1.5 cursor-pointer group"
+                                onClick={() =>
+                                  router.push(
+                                    `/call-logs?bot_id=${selectedBotId}&goal_outcome=${encodeURIComponent(o.outcome)}`
+                                  )
+                                }
+                              >
                                 <div className="flex items-center justify-between text-sm">
-                                  <span className="font-medium capitalize">
+                                  <span className="font-medium capitalize group-hover:text-violet-400 transition-colors">
                                     {o.outcome.replace(/_/g, " ")}
                                   </span>
-                                  <span className="text-muted-foreground">
-                                    {o.count} ({o.percentage}%)
-                                  </span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-muted-foreground">
+                                      {o.count} ({o.percentage}%)
+                                    </span>
+                                    <ArrowRight className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                                  </div>
                                 </div>
                                 <div className="h-2 rounded-full bg-muted overflow-hidden">
                                   <motion.div
@@ -758,16 +769,31 @@ export default function AnalyticsPage() {
                                 {field.values.slice(0, 8).map((v, j) => (
                                   <div
                                     key={`${v.value}-${j}`}
-                                    className="flex items-center justify-between text-sm"
+                                    className={`flex items-center justify-between text-sm rounded px-1.5 py-0.5 -mx-1.5 ${
+                                      v.call_log_ids?.length
+                                        ? "cursor-pointer hover:bg-muted/50 transition-colors group"
+                                        : ""
+                                    }`}
+                                    onClick={() => {
+                                      if (v.call_log_ids?.length) {
+                                        // Open the first call log for this value
+                                        openCallLog(v.call_log_ids[0]);
+                                      }
+                                    }}
                                   >
-                                    <span className="truncate flex-1 mr-2">
+                                    <span className="truncate flex-1 mr-2 group-hover:text-violet-400 transition-colors">
                                       {v.value}
                                     </span>
-                                    {v.count != null && (
-                                      <Badge variant="outline" className="text-xs">
-                                        {v.count}
-                                      </Badge>
-                                    )}
+                                    <div className="flex items-center gap-1">
+                                      {v.count != null && (
+                                        <Badge variant="outline" className="text-xs">
+                                          {v.count}
+                                        </Badge>
+                                      )}
+                                      {v.call_log_ids?.length && (
+                                        <ArrowRight className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                                      )}
+                                    </div>
                                   </div>
                                 ))}
                                 {field.values.length > 8 && (

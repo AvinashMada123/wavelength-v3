@@ -261,7 +261,7 @@ export interface TrendPoint {
 
 export interface CapturedDataFieldSummary {
   field_id: string;
-  values: Array<{ value: string; count?: number }>;
+  values: Array<{ value: string; count?: number; call_log_ids?: string[] }>;
   total_captured: number;
 }
 

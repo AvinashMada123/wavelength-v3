@@ -155,9 +155,10 @@ function CallLogsPageInner() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Filters
-  const [filterBotId, setFilterBotId] = useState("all");
+  // Filters — initialize from URL params for deep linking
+  const [filterBotId, setFilterBotId] = useState(searchParams.get("bot_id") || "all");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [filterGoalOutcome, setFilterGoalOutcome] = useState(searchParams.get("goal_outcome") || "all");
   const [searchQuery, setSearchQuery] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -180,7 +181,8 @@ function CallLogsPageInner() {
   const loadCalls = useCallback(async () => {
     try {
       const data = await fetchCallLogs(
-        filterBotId !== "all" ? filterBotId : undefined
+        filterBotId !== "all" ? filterBotId : undefined,
+        filterGoalOutcome !== "all" ? filterGoalOutcome : undefined
       );
       setCalls(data);
     } catch {
@@ -188,7 +190,7 @@ function CallLogsPageInner() {
     } finally {
       setLoading(false);
     }
-  }, [filterBotId]);
+  }, [filterBotId, filterGoalOutcome]);
 
   useEffect(() => {
     fetchBots().then(setBots).catch(() => {});
@@ -250,6 +252,16 @@ function CallLogsPageInner() {
     return m;
   }, [bots]);
 
+  // ---------- Goal outcome options (derived from loaded calls) ----------
+
+  const goalOutcomeOptions = useMemo(() => {
+    const outcomes = new Set<string>();
+    for (const c of calls) {
+      if (c.outcome) outcomes.add(c.outcome);
+    }
+    return Array.from(outcomes).sort();
+  }, [calls]);
+
   // ---------- Filtering ----------
 
   const filteredCalls = useMemo(() => {
@@ -294,7 +306,7 @@ function CallLogsPageInner() {
   useEffect(() => {
     setPage(0);
     setSelectedIds(new Set());
-  }, [filterBotId, filterStatus, searchQuery, dateFrom, dateTo]);
+  }, [filterBotId, filterStatus, filterGoalOutcome, searchQuery, dateFrom, dateTo]);
 
   // ---------- Selection ----------
 
@@ -340,6 +352,7 @@ function CallLogsPageInner() {
     searchQuery ||
     filterStatus !== "all" ||
     filterBotId !== "all" ||
+    filterGoalOutcome !== "all" ||
     dateFrom ||
     dateTo;
 
@@ -347,6 +360,7 @@ function CallLogsPageInner() {
     setSearchQuery("");
     setFilterStatus("all");
     setFilterBotId("all");
+    setFilterGoalOutcome("all");
     setDateFrom("");
     setDateTo("");
   }
@@ -447,6 +461,21 @@ function CallLogsPageInner() {
                       {bots.map((bot) => (
                         <SelectItem key={bot.id} value={bot.id}>
                           {bot.agent_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  {/* Goal outcome filter */}
+                  <Select value={filterGoalOutcome} onValueChange={setFilterGoalOutcome}>
+                    <SelectTrigger className="w-40 h-9">
+                      <SelectValue placeholder="All outcomes" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All outcomes</SelectItem>
+                      {goalOutcomeOptions.map((o) => (
+                        <SelectItem key={o} value={o}>
+                          {o.replace(/_/g, " ")}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -588,7 +617,6 @@ function CallLogsPageInner() {
                         <TableHead>Duration</TableHead>
                         <TableHead>Outcome</TableHead>
                         <TableHead>Interest</TableHead>
-                        <TableHead>Summary</TableHead>
                         <TableHead>Time</TableHead>
                         <TableHead className="w-10" />
                       </TableRow>
@@ -617,8 +645,13 @@ function CallLogsPageInner() {
                           <TableCell>
                             <StatusBadge status={call.status} />
                           </TableCell>
-                          <TableCell className="font-medium">
-                            {call.contact_name}
+                          <TableCell>
+                            <p className="font-medium">{call.contact_name}</p>
+                            {call.summary && (
+                              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1 max-w-[250px]">
+                                {call.summary}
+                              </p>
+                            )}
                           </TableCell>
                           <TableCell className="text-muted-foreground">
                             {formatPhoneNumber(call.contact_phone)}
@@ -657,9 +690,6 @@ function CallLogsPageInner() {
                             ) : (
                               <span className="text-muted-foreground">-</span>
                             )}
-                          </TableCell>
-                          <TableCell className="max-w-[200px] truncate text-sm text-muted-foreground">
-                            {call.summary || "-"}
                           </TableCell>
                           <TableCell className="text-muted-foreground whitespace-nowrap text-sm">
                             {timeAgo(call.created_at)}

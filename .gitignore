@@ -8,3 +8,4 @@ node_modules/
 debug_audio/
 recordings/
 *.tsbuildinfo
+credentials/

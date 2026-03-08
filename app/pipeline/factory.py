@@ -545,7 +545,7 @@ async def build_pipeline(
         pipeline,
         params=PipelineParams(
             allow_interruptions=True,
-            interruption_strategies=[MinWordsInterruptionStrategy(min_words=1)],
+            interruption_strategies=[MinWordsInterruptionStrategy(min_words=2)],
             enable_metrics=True,
             enable_usage_metrics=True,
         ),

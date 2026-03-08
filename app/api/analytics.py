@@ -424,7 +424,7 @@ async def get_captured_data_summary(
 ):
     """Aggregated captured data per field. Enum fields: exact counts. String fields: raw values."""
     query = (
-        select(CallAnalytics.captured_data)
+        select(CallAnalytics.captured_data, CallAnalytics.call_log_id)
         .where(
             CallAnalytics.bot_id == bot_id,
             CallAnalytics.captured_data.isnot(None),
@@ -437,14 +437,14 @@ async def get_captured_data_summary(
     query = query.limit(1000)
 
     result = await db.execute(query)
-    rows = [r[0] for r in result.all() if r[0]]
+    raw_rows = [(r[0], r[1]) for r in result.all() if r[0]]
 
-    if not rows:
+    if not raw_rows:
         return []
 
-    # Aggregate all field values
-    field_values: dict[str, list] = {}
-    for captured in rows:
+    # Aggregate all field values with call_log_ids
+    field_values: dict[str, list[tuple[str, str | None]]] = {}
+    for captured, call_log_id in raw_rows:
         if not isinstance(captured, dict):
             continue
         for field_id, value in captured.items():
@@ -452,20 +452,27 @@ async def get_captured_data_summary(
                 continue
             if field_id not in field_values:
                 field_values[field_id] = []
-            field_values[field_id].append(str(value))
+            field_values[field_id].append((str(value), str(call_log_id) if call_log_id else None))
 
     summaries = []
-    for field_id, values in field_values.items():
-        # Count unique values
-        value_counts: dict[str, int] = {}
-        for v in values:
-            value_counts[v] = value_counts.get(v, 0) + 1
+    for field_id, entries in field_values.items():
+        # Group by value
+        value_groups: dict[str, dict] = {}
+        for val, clid in entries:
+            if val not in value_groups:
+                value_groups[val] = {"count": 0, "call_log_ids": []}
+            value_groups[val]["count"] += 1
+            if clid:
+                value_groups[val]["call_log_ids"].append(clid)
 
-        sorted_values = sorted(value_counts.items(), key=lambda x: -x[1])
+        sorted_values = sorted(value_groups.items(), key=lambda x: -x[1]["count"])
         summaries.append(CapturedDataFieldSummary(
             field_id=field_id,
-            values=[{"value": v, "count": c} for v, c in sorted_values],
-            total_captured=len(values),
+            values=[
+                {"value": v, "count": g["count"], "call_log_ids": g["call_log_ids"]}
+                for v, g in sorted_values
+            ],
+            total_captured=len(entries),
         ))
 
     return summaries
