@@ -8,6 +8,12 @@ import type {
   QueuedCall,
   CircuitBreakerState,
   QueueStats,
+  AnalyticsSummaryResponse,
+  AnalyticsOutcomeItem,
+  RedFlagGroupItem,
+  AlertsResponse,
+  TrendPoint,
+  CapturedDataFieldSummary,
 } from "@/types/api";
 
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
@@ -122,4 +128,90 @@ export function resetCircuitBreaker(botId: string): Promise<{ status: string }> 
   return apiFetch(`/api/queue/circuit-breaker/${botId}/reset`, {
     method: "POST",
   });
+}
+
+// --- Analytics ---
+
+export function fetchAnalyticsSummary(
+  botId: string,
+  params?: { start_date?: string; end_date?: string }
+): Promise<AnalyticsSummaryResponse> {
+  const sp = new URLSearchParams();
+  if (params?.start_date) sp.set("start_date", params.start_date);
+  if (params?.end_date) sp.set("end_date", params.end_date);
+  const qs = sp.toString();
+  return apiFetch(`/api/analytics/${botId}/summary${qs ? `?${qs}` : ""}`);
+}
+
+export function fetchAnalyticsOutcomes(
+  botId: string,
+  params?: { outcome?: string; has_red_flags?: boolean; page?: number; page_size?: number }
+): Promise<AnalyticsOutcomeItem[]> {
+  const sp = new URLSearchParams();
+  if (params?.outcome) sp.set("outcome", params.outcome);
+  if (params?.has_red_flags !== undefined) sp.set("has_red_flags", String(params.has_red_flags));
+  if (params?.page) sp.set("page", String(params.page));
+  if (params?.page_size) sp.set("page_size", String(params.page_size));
+  const qs = sp.toString();
+  return apiFetch(`/api/analytics/${botId}/outcomes${qs ? `?${qs}` : ""}`);
+}
+
+export function fetchAnalyticsRedFlags(
+  botId: string,
+  params?: { severity?: string; flag_id?: string }
+): Promise<RedFlagGroupItem[]> {
+  const sp = new URLSearchParams();
+  if (params?.severity) sp.set("severity", params.severity);
+  if (params?.flag_id) sp.set("flag_id", params.flag_id);
+  const qs = sp.toString();
+  return apiFetch(`/api/analytics/${botId}/red-flags${qs ? `?${qs}` : ""}`);
+}
+
+export function fetchAnalyticsAlerts(botId: string): Promise<AlertsResponse> {
+  return apiFetch(`/api/analytics/${botId}/alerts`);
+}
+
+export function acknowledgeAlert(
+  botId: string,
+  analyticsId: string,
+  acknowledgedBy: string
+): Promise<{ status: string }> {
+  return apiFetch(`/api/analytics/${botId}/alerts/${analyticsId}/acknowledge`, {
+    method: "POST",
+    body: JSON.stringify({ acknowledged_by: acknowledgedBy }),
+  });
+}
+
+export function snoozeAlert(
+  botId: string,
+  analyticsId: string,
+  snoozeUntil: string
+): Promise<{ status: string }> {
+  return apiFetch(`/api/analytics/${botId}/alerts/${analyticsId}/snooze`, {
+    method: "POST",
+    body: JSON.stringify({ snooze_until: snoozeUntil }),
+  });
+}
+
+export function fetchAnalyticsTrends(
+  botId: string,
+  params?: { interval?: "daily" | "weekly"; start_date?: string; end_date?: string }
+): Promise<TrendPoint[]> {
+  const sp = new URLSearchParams();
+  if (params?.interval) sp.set("interval", params.interval);
+  if (params?.start_date) sp.set("start_date", params.start_date);
+  if (params?.end_date) sp.set("end_date", params.end_date);
+  const qs = sp.toString();
+  return apiFetch(`/api/analytics/${botId}/trends${qs ? `?${qs}` : ""}`);
+}
+
+export function fetchAnalyticsCapturedData(
+  botId: string,
+  params?: { start_date?: string; end_date?: string }
+): Promise<CapturedDataFieldSummary[]> {
+  const sp = new URLSearchParams();
+  if (params?.start_date) sp.set("start_date", params.start_date);
+  if (params?.end_date) sp.set("end_date", params.end_date);
+  const qs = sp.toString();
+  return apiFetch(`/api/analytics/${botId}/captured-data${qs ? `?${qs}` : ""}`);
 }

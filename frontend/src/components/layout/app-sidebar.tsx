@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Bot, Phone, ClipboardList, Radio, ListOrdered } from "lucide-react";
+import { LayoutDashboard, Bot, Phone, ClipboardList, Radio, ListOrdered, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Sidebar,
@@ -21,6 +21,7 @@ const navItems = [
   { title: "Calls", href: "/calls", icon: Phone },
   { title: "Call Queue", href: "/queue", icon: ListOrdered },
   { title: "Call Logs", href: "/call-logs", icon: ClipboardList },
+  { title: "Analytics", href: "/analytics", icon: BarChart3 },
 ];
 
 export function AppSidebar() {

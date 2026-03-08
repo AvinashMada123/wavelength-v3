@@ -19,6 +19,9 @@ import {
   Copy,
   Check,
   Webhook,
+  Target,
+  AlertTriangle,
+  Database,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -47,7 +50,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 import { fetchBot, createBot, updateBot } from "@/lib/api";
 import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS } from "@/lib/constants";
-import type { BotConfig, GHLWorkflow } from "@/types/api";
+import type { BotConfig, GHLWorkflow, GoalConfig, SuccessCriterion, RedFlagConfig, DataCaptureField } from "@/types/api";
 
 // ---------------------------------------------------------------------------
 // Form type
@@ -195,6 +198,7 @@ export default function BotEditorPage() {
   const isNew = botId === "new";
 
   const [form, setForm] = useState<BotForm>(EMPTY_FORM);
+  const [goalConfig, setGoalConfig] = useState<GoalConfig | null>(null);
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
   const [copiedCurl, setCopiedCurl] = useState(false);
@@ -206,6 +210,7 @@ export default function BotEditorPage() {
     try {
       const bot = await fetchBot(botId);
       setForm(botToForm(bot));
+      setGoalConfig(bot.goal_config || null);
     } catch {
       toast.error("Failed to load bot configuration");
       router.push("/bots");
@@ -305,6 +310,96 @@ export default function BotEditorPage() {
     }));
   }
 
+  // ---- Goal config helpers ----
+
+  function initGoalConfig() {
+    setGoalConfig({
+      version: 1,
+      goal_type: "",
+      goal_description: "",
+      success_criteria: [{ id: "primary", label: "", is_primary: true }],
+      red_flags: [],
+      data_capture_fields: [],
+    });
+  }
+
+  function updateGoalField<K extends keyof GoalConfig>(key: K, value: GoalConfig[K]) {
+    setGoalConfig((prev) => (prev ? { ...prev, [key]: value } : prev));
+  }
+
+  function addSuccessCriterion() {
+    if (!goalConfig) return;
+    updateGoalField("success_criteria", [
+      ...goalConfig.success_criteria,
+      { id: `criterion_${Date.now()}`, label: "", is_primary: false },
+    ]);
+  }
+
+  function updateCriterion(index: number, updates: Partial<SuccessCriterion>) {
+    if (!goalConfig) return;
+    const updated = goalConfig.success_criteria.map((c, i) => {
+      if (i !== index) return updates.is_primary ? { ...c, is_primary: false } : c;
+      return { ...c, ...updates };
+    });
+    updateGoalField("success_criteria", updated);
+  }
+
+  function removeCriterion(index: number) {
+    if (!goalConfig) return;
+    updateGoalField(
+      "success_criteria",
+      goalConfig.success_criteria.filter((_, i) => i !== index),
+    );
+  }
+
+  function addRedFlag() {
+    if (!goalConfig) return;
+    updateGoalField("red_flags", [
+      ...(goalConfig.red_flags || []),
+      { id: `flag_${Date.now()}`, label: "", severity: "medium" as const, detect_in: "post_call" as const },
+    ]);
+  }
+
+  function updateRedFlag(index: number, updates: Partial<RedFlagConfig>) {
+    if (!goalConfig) return;
+    const updated = (goalConfig.red_flags || []).map((f, i) =>
+      i === index ? { ...f, ...updates } : f,
+    );
+    updateGoalField("red_flags", updated);
+  }
+
+  function removeRedFlag(index: number) {
+    if (!goalConfig) return;
+    updateGoalField(
+      "red_flags",
+      (goalConfig.red_flags || []).filter((_, i) => i !== index),
+    );
+  }
+
+  function addCaptureField() {
+    if (!goalConfig) return;
+    updateGoalField("data_capture_fields", [
+      ...(goalConfig.data_capture_fields || []),
+      { id: `field_${Date.now()}`, label: "", type: "string" as const },
+    ]);
+  }
+
+  function updateCaptureField(index: number, updates: Partial<DataCaptureField>) {
+    if (!goalConfig) return;
+    const updated = (goalConfig.data_capture_fields || []).map((f, i) =>
+      i === index ? { ...f, ...updates } : f,
+    );
+    updateGoalField("data_capture_fields", updated);
+  }
+
+  function removeCaptureField(index: number) {
+    if (!goalConfig) return;
+    updateGoalField(
+      "data_capture_fields",
+      (goalConfig.data_capture_fields || []).filter((_, i) => i !== index),
+    );
+  }
+
   // ---- Validation & save ----
 
   async function handleSave() {
@@ -359,6 +454,9 @@ export default function BotEditorPage() {
           payload[k] = v;
         }
       }
+
+      // Include goal_config in payload
+      payload.goal_config = goalConfig;
 
       if (isNew) {
         await createBot(payload as never);
@@ -463,6 +561,10 @@ export default function BotEditorPage() {
                   <TabsTrigger value="integrations" className="gap-1.5">
                     <Link2 className="h-3.5 w-3.5" />
                     Integrations
+                  </TabsTrigger>
+                  <TabsTrigger value="goals" className="gap-1.5">
+                    <Target className="h-3.5 w-3.5" />
+                    Goals
                   </TabsTrigger>
                   <TabsTrigger value="settings" className="gap-1.5">
                     <Settings className="h-3.5 w-3.5" />
@@ -1332,6 +1434,229 @@ export default function BotEditorPage() {
                 {/* ================================================================
                     TAB 5: Settings
                    ================================================================ */}
+                {/* ================================================================
+                    TAB: Goals
+                   ================================================================ */}
+                <TabsContent value="goals">
+                  <Card>
+                    <CardContent className="pt-6 space-y-8">
+                      {!goalConfig ? (
+                        <div className="flex flex-col items-center justify-center py-12">
+                          <Target className="h-10 w-10 text-muted-foreground/30 mb-3" />
+                          <p className="text-sm font-medium mb-1">No Goal Configuration</p>
+                          <p className="text-xs text-muted-foreground mb-4 text-center max-w-md">
+                            Enable goal-based analytics to track call outcomes, detect red flags, and capture structured data from conversations.
+                          </p>
+                          <Button onClick={initGoalConfig} className="gap-1.5">
+                            <Plus className="h-4 w-4" />
+                            Enable Goal Analytics
+                          </Button>
+                        </div>
+                      ) : (
+                        <>
+                          {/* Goal Type & Description */}
+                          <Section title="Goal Definition" description="Define what this bot is trying to achieve on each call.">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div className="space-y-2">
+                                <Label>Goal Type</Label>
+                                <Input
+                                  placeholder="e.g., event_invitation, lead_qualification"
+                                  value={goalConfig.goal_type}
+                                  onChange={(e) => updateGoalField("goal_type", e.target.value)}
+                                />
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Goal Description</Label>
+                              <Textarea
+                                placeholder="Describe the primary goal of each call..."
+                                value={goalConfig.goal_description}
+                                onChange={(e) => updateGoalField("goal_description", e.target.value)}
+                                rows={2}
+                              />
+                            </div>
+                          </Section>
+
+                          <Separator />
+
+                          {/* Success Criteria */}
+                          <Section title="Success Criteria" description="Define possible outcomes. Exactly one must be marked as primary.">
+                            <div className="space-y-3">
+                              {goalConfig.success_criteria.map((c, i) => (
+                                <div key={i} className="flex items-center gap-3 rounded-lg border p-3">
+                                  <div className="flex-1 grid grid-cols-2 gap-3">
+                                    <Input
+                                      placeholder="ID (e.g., confirmed)"
+                                      value={c.id}
+                                      onChange={(e) => updateCriterion(i, { id: e.target.value.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "") })}
+                                    />
+                                    <Input
+                                      placeholder="Label (e.g., Confirmed attendance)"
+                                      value={c.label}
+                                      onChange={(e) => updateCriterion(i, { label: e.target.value })}
+                                    />
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+                                      <input
+                                        type="radio"
+                                        name="primary_criterion"
+                                        checked={c.is_primary || false}
+                                        onChange={() => updateCriterion(i, { is_primary: true })}
+                                        className="accent-violet-500"
+                                      />
+                                      Primary
+                                    </label>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                                      onClick={() => removeCriterion(i)}
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
+                              <Button type="button" variant="outline" size="sm" onClick={addSuccessCriterion} className="gap-1.5">
+                                <Plus className="h-3.5 w-3.5" />
+                                Add Criterion
+                              </Button>
+                            </div>
+                          </Section>
+
+                          <Separator />
+
+                          {/* Red Flags */}
+                          <Section title="Red Flags" description="Define signals to watch for during or after calls.">
+                            <div className="space-y-3">
+                              {(goalConfig.red_flags || []).map((rf, i) => (
+                                <div key={i} className="rounded-lg border p-3 space-y-3">
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex-1 grid grid-cols-2 gap-3">
+                                      <Input
+                                        placeholder="ID (e.g., dnd_threat)"
+                                        value={rf.id}
+                                        onChange={(e) => updateRedFlag(i, { id: e.target.value.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "") })}
+                                      />
+                                      <Input
+                                        placeholder="Label (e.g., DND / legal threat)"
+                                        value={rf.label}
+                                        onChange={(e) => updateRedFlag(i, { label: e.target.value })}
+                                      />
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                                      onClick={() => removeRedFlag(i)}
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </div>
+                                  <div className="grid grid-cols-3 gap-3">
+                                    <Select value={rf.severity} onValueChange={(v) => updateRedFlag(i, { severity: v as RedFlagConfig["severity"] })}>
+                                      <SelectTrigger><SelectValue placeholder="Severity" /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="critical">Critical</SelectItem>
+                                        <SelectItem value="high">High</SelectItem>
+                                        <SelectItem value="medium">Medium</SelectItem>
+                                        <SelectItem value="low">Low</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                    <Select value={rf.detect_in || "post_call"} onValueChange={(v) => updateRedFlag(i, { detect_in: v as "realtime" | "post_call" })}>
+                                      <SelectTrigger><SelectValue placeholder="Detection" /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="post_call">Post-Call (LLM)</SelectItem>
+                                        <SelectItem value="realtime">Real-time (Keywords)</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                    {rf.detect_in === "realtime" && (
+                                      <Input
+                                        placeholder="Keywords (comma-separated)"
+                                        value={(rf.keywords || []).join(", ")}
+                                        onChange={(e) => updateRedFlag(i, { keywords: e.target.value.split(",").map((k) => k.trim()).filter(Boolean) })}
+                                      />
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                              <Button type="button" variant="outline" size="sm" onClick={addRedFlag} className="gap-1.5">
+                                <Plus className="h-3.5 w-3.5" />
+                                Add Red Flag
+                              </Button>
+                            </div>
+                          </Section>
+
+                          <Separator />
+
+                          {/* Data Capture Fields */}
+                          <Section title="Data Capture Fields" description="Structured data to extract from each call transcript.">
+                            <div className="space-y-3">
+                              {(goalConfig.data_capture_fields || []).map((f, i) => (
+                                <div key={i} className="flex items-start gap-3 rounded-lg border p-3">
+                                  <div className="flex-1 grid grid-cols-3 gap-3">
+                                    <Input
+                                      placeholder="ID (e.g., attending_date)"
+                                      value={f.id}
+                                      onChange={(e) => updateCaptureField(i, { id: e.target.value.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "") })}
+                                    />
+                                    <Input
+                                      placeholder="Label"
+                                      value={f.label}
+                                      onChange={(e) => updateCaptureField(i, { label: e.target.value })}
+                                    />
+                                    <Select value={f.type} onValueChange={(v) => updateCaptureField(i, { type: v as DataCaptureField["type"] })}>
+                                      <SelectTrigger><SelectValue /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="string">String</SelectItem>
+                                        <SelectItem value="integer">Integer</SelectItem>
+                                        <SelectItem value="float">Float</SelectItem>
+                                        <SelectItem value="boolean">Boolean</SelectItem>
+                                        <SelectItem value="enum">Enum</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 text-muted-foreground hover:text-destructive mt-1"
+                                    onClick={() => removeCaptureField(i)}
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              ))}
+                              <Button type="button" variant="outline" size="sm" onClick={addCaptureField} className="gap-1.5">
+                                <Plus className="h-3.5 w-3.5" />
+                                Add Capture Field
+                              </Button>
+                            </div>
+                          </Section>
+
+                          <Separator />
+
+                          {/* Remove goal config */}
+                          <div className="flex justify-end">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className="text-destructive hover:text-destructive gap-1.5"
+                              onClick={() => setGoalConfig(null)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Remove Goal Configuration
+                            </Button>
+                          </div>
+                        </>
+                      )}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
                 <TabsContent value="settings">
                   <Card>
                     <CardContent className="pt-6 space-y-8">

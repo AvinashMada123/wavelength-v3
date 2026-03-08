@@ -31,6 +31,7 @@ export interface BotConfig {
   telephony_provider: "plivo" | "twilio";
   plivo_caller_id: string;
   twilio_phone_number: string | null;
+  goal_config: GoalConfig | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -63,6 +64,7 @@ export interface CreateBotConfigRequest {
   twilio_account_sid?: string | null;
   twilio_auth_token?: string | null;
   twilio_phone_number?: string | null;
+  goal_config?: GoalConfig | null;
 }
 
 export interface UpdateBotConfigRequest {
@@ -92,6 +94,7 @@ export interface UpdateBotConfigRequest {
   twilio_account_sid?: string | null;
   twilio_auth_token?: string | null;
   twilio_phone_number?: string | null;
+  goal_config?: GoalConfig | null;
   is_active?: boolean | null;
 }
 
@@ -147,6 +150,119 @@ export interface QueueStats {
   completed: number;
   failed: number;
   cancelled: number;
+}
+
+// --- Goal Config ---
+
+export interface RedFlagConfig {
+  id: string;
+  label: string;
+  severity: "critical" | "high" | "medium" | "low";
+  auto_detect?: boolean;
+  keywords?: string[];
+  detect_in?: "realtime" | "post_call";
+}
+
+export interface SuccessCriterion {
+  id: string;
+  label: string;
+  is_primary?: boolean;
+}
+
+export interface DataCaptureField {
+  id: string;
+  label: string;
+  type: "string" | "integer" | "float" | "boolean" | "enum";
+  enum_values?: string[];
+  description?: string;
+}
+
+export interface GoalConfig {
+  version?: number;
+  goal_type: string;
+  goal_description: string;
+  success_criteria: SuccessCriterion[];
+  red_flags?: RedFlagConfig[];
+  data_capture_fields?: DataCaptureField[];
+}
+
+// --- Analytics ---
+
+export interface OutcomeSummary {
+  outcome: string;
+  count: number;
+  percentage: number;
+}
+
+export interface AnalyticsSummaryResponse {
+  bot_id: string;
+  total_analyzed: number;
+  outcomes: OutcomeSummary[];
+  avg_duration_secs: number | null;
+  avg_agent_word_share: number | null;
+  red_flag_rate: number;
+  total_red_flags: number;
+  period_start: string | null;
+  period_end: string | null;
+}
+
+export interface AnalyticsOutcomeItem {
+  id: string;
+  call_log_id: string | null;
+  goal_outcome: string | null;
+  has_red_flags: boolean;
+  red_flag_max_severity: string | null;
+  turn_count: number | null;
+  call_duration_secs: number | null;
+  agent_word_share: number | null;
+  created_at: string;
+}
+
+export interface RedFlagGroupItem {
+  flag_id: string;
+  severity: string;
+  count: number;
+  calls: Array<{
+    analytics_id: string;
+    call_log_id: string | null;
+    evidence: string | null;
+    created_at: string;
+  }>;
+}
+
+export interface AlertItem {
+  id: string;
+  call_log_id: string | null;
+  bot_id: string;
+  goal_outcome: string | null;
+  red_flag_max_severity: string | null;
+  red_flags: Array<{
+    id: string;
+    severity: string;
+    evidence?: string;
+    turn_index?: number;
+  }> | null;
+  created_at: string;
+  contact_name: string | null;
+  contact_phone: string | null;
+}
+
+export interface AlertsResponse {
+  total_unacknowledged: number;
+  alerts: AlertItem[];
+}
+
+export interface TrendPoint {
+  date: string;
+  total: number;
+  outcomes: Record<string, number>;
+  red_flag_count: number;
+}
+
+export interface CapturedDataFieldSummary {
+  field_id: string;
+  values: Array<{ value: string; count?: number }>;
+  total_captured: number;
 }
 
 export interface CallLogMetadata {
