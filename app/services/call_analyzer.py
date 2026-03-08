@@ -297,7 +297,7 @@ class CallAnalyzer:
                     model="gemini-2.5-flash",
                     contents=prompt,
                     config=genai.types.GenerateContentConfig(
-                        max_output_tokens=500,
+                        max_output_tokens=1024,
                         temperature=temperature,
                     ),
                 )
