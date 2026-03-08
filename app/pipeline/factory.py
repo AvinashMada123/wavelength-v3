@@ -311,14 +311,18 @@ def _build_end_call_tool():
             types.FunctionDeclaration(
                 name="end_call",
                 description=(
-                    "End the phone call. Call this IMMEDIATELY when:\n"
+                    "End the phone call. Call this ONLY when:\n"
                     "1) Both you AND the customer have said goodbye/bye/take care — call end_call with NO additional text.\n"
                     "2) The customer says 'not interested', 'don't call me', 'wrong number', or any clear rejection "
                     "after you've attempted to address their concern.\n"
                     "3) The customer explicitly asks to hang up or end the call.\n\n"
                     "IMPORTANT: If you already said goodbye and the customer responds with "
                     "'bye'/'okay bye'/'thanks bye', call end_call IMMEDIATELY without saying anything else. "
-                    "Do NOT say goodbye twice."
+                    "Do NOT say goodbye twice.\n\n"
+                    "NEVER end the call if:\n"
+                    "- The customer is still mid-sentence, stuttering, or asking a question.\n"
+                    "- The customer is hesitant but has NOT explicitly said goodbye or rejected.\n"
+                    "- You are unsure whether the customer wants to end — keep the conversation going instead."
                 ),
                 parameters=types.Schema(
                     type="OBJECT",
