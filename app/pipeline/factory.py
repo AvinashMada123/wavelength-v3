@@ -483,8 +483,12 @@ async def build_pipeline(
 
     # --- Context ---
     system_prompt = call_context.filled_prompt + _CONVERSATION_RULES
+    greeting_text = f"Hi {call_context.contact_name}, this is {bot_config.agent_name} calling from {bot_config.company_name}. How are you doing today?"
     context = OpenAILLMContext(
-        messages=[{"role": "system", "content": system_prompt}],
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "assistant", "content": greeting_text},
+        ],
     )
 
     # Set tools in Google-native format (context.tools property has no setter, use set_tools)
@@ -545,7 +549,7 @@ async def build_pipeline(
         pipeline,
         params=PipelineParams(
             allow_interruptions=True,
-            interruption_strategies=[MinWordsInterruptionStrategy(min_words=2)],
+            interruption_strategies=[MinWordsInterruptionStrategy(min_words=1)],
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
