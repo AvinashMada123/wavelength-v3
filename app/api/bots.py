@@ -103,6 +103,50 @@ async def update_bot(bot_id: uuid.UUID, req: UpdateBotConfigRequest, db: AsyncSe
     return bot
 
 
+@router.post("/{bot_id}/clone", response_model=BotConfigResponse, status_code=201)
+async def clone_bot(bot_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Clone an existing bot config with a new ID and '(Copy)' suffix on the name."""
+    result = await db.execute(select(BotConfig).where(BotConfig.id == bot_id))
+    original = result.scalar_one_or_none()
+    if not original:
+        raise HTTPException(status_code=404, detail="Bot config not found")
+
+    clone = BotConfig(
+        agent_name=original.agent_name + " (Copy)",
+        company_name=original.company_name,
+        location=original.location,
+        event_name=original.event_name,
+        event_date=original.event_date,
+        event_time=original.event_time,
+        tts_provider=original.tts_provider,
+        tts_voice=original.tts_voice,
+        tts_style_prompt=original.tts_style_prompt,
+        language=original.language,
+        system_prompt_template=original.system_prompt_template,
+        context_variables=original.context_variables,
+        silence_timeout_secs=original.silence_timeout_secs,
+        ghl_webhook_url=original.ghl_webhook_url,
+        ghl_api_key=original.ghl_api_key,
+        ghl_location_id=original.ghl_location_id,
+        ghl_post_call_tag=original.ghl_post_call_tag,
+        ghl_workflows=original.ghl_workflows,
+        max_call_duration=original.max_call_duration,
+        telephony_provider=original.telephony_provider,
+        plivo_auth_id=original.plivo_auth_id,
+        plivo_auth_token=original.plivo_auth_token,
+        plivo_caller_id=original.plivo_caller_id,
+        twilio_account_sid=original.twilio_account_sid,
+        twilio_auth_token=original.twilio_auth_token,
+        twilio_phone_number=original.twilio_phone_number,
+        goal_config=original.goal_config,
+    )
+    db.add(clone)
+    await db.commit()
+    await db.refresh(clone)
+    logger.info("bot_config_cloned", original_id=str(bot_id), clone_id=str(clone.id))
+    return clone
+
+
 @router.delete("/{bot_id}", status_code=204)
 async def delete_bot(bot_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     """Soft-delete: set is_active = false."""

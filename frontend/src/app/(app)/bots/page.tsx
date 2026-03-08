@@ -37,7 +37,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fetchBots, deleteBot } from "@/lib/api";
+import { fetchBots, deleteBot, cloneBot } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import { LANGUAGE_OPTIONS } from "@/lib/constants";
 import type { BotConfig } from "@/types/api";
@@ -204,6 +204,18 @@ export default function BotsPage() {
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setApiTriggerBot(bot); }}>
                               <Webhook className="mr-2 h-4 w-4" /> API Trigger
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={async (e) => {
+                              e.stopPropagation();
+                              try {
+                                const cloned = await cloneBot(bot.id);
+                                toast.success(`Cloned as "${cloned.agent_name}"`);
+                                loadBots();
+                              } catch {
+                                toast.error("Clone failed");
+                              }
+                            }}>
+                              <Copy className="mr-2 h-4 w-4" /> Clone
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-destructive"

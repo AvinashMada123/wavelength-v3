@@ -54,6 +54,10 @@ export function deleteBot(id: string): Promise<void> {
   return apiFetch(`/api/bots/${id}`, { method: "DELETE" });
 }
 
+export function cloneBot(id: string): Promise<BotConfig> {
+  return apiFetch(`/api/bots/${id}/clone`, { method: "POST" });
+}
+
 export function triggerCall(data: TriggerCallRequest): Promise<TriggerCallResponse> {
   return apiFetch("/api/calls/trigger", {
     method: "POST",
