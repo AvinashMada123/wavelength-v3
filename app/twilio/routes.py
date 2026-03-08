@@ -203,7 +203,7 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
         await _run_ghl_workflows(ctx, bot_config, "post_call")
 
         # Write to call_analytics table if goal-based analysis was performed
-        if analysis and analysis.goal_outcome and goal_cfg:
+        if analysis and analysis.goal_outcome is not None and goal_cfg:
             try:
                 async with get_db_session() as db:
                     existing_log = await _get_call_log(db, call_sid)

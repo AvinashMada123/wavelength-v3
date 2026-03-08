@@ -442,7 +442,7 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         logger.info("post_call_metadata_saved", call_sid=call_sid, turns=turn_count)
 
         # Write to call_analytics table if goal-based analysis was performed
-        if analysis and analysis.goal_outcome and goal_cfg:
+        if analysis and analysis.goal_outcome is not None and goal_cfg:
             try:
                 await _save_call_analytics(
                     call_sid=call_sid,

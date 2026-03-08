@@ -131,7 +131,7 @@ class CallAnalyzer:
             f"**Possible Outcomes (pick one ID):**\n{criteria_desc}\n\n"
             f"**Transcript:**\n{conv_text}\n\n"
             f"Analyze the conversation and respond with ONLY valid JSON (no markdown):\n"
-            f'{{"goal_outcome": "<id from the list above>",'
+            f'{{"goal_outcome": "<id from the list above, or \\"none\\" if no outcome was reached>",'
             f' "summary": "<2-3 sentence summary contextualized to the goal>",'
             f' "interest_level": "<high|medium|low>"}}'
         )
@@ -144,16 +144,17 @@ class CallAnalyzer:
         result["input_tokens"] = token_info["input_tokens"]
         result["output_tokens"] = token_info["output_tokens"]
 
-        # Validate goal_outcome is a valid criterion ID
-        valid_ids = {c.id for c in goal_config.success_criteria}
-        if result.get("goal_outcome") not in valid_ids:
+        # Validate goal_outcome is a valid criterion ID or "none"
+        valid_ids = {c.id for c in goal_config.success_criteria} | {"none"}
+        raw_outcome = result.get("goal_outcome")
+        if raw_outcome is None or raw_outcome not in valid_ids:
             logger.warning(
                 "invalid_goal_outcome",
                 call_sid=call_sid,
-                got=result.get("goal_outcome"),
+                got=raw_outcome,
                 valid=list(valid_ids),
             )
-            # Keep the value but log it — don't crash
+            result["goal_outcome"] = "none"
 
         return result
 
