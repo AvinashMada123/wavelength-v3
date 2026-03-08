@@ -157,6 +157,9 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
 
         # Generate analysis — goal-aware if configured, generic fallback otherwise
         goal_cfg = getattr(bot_config, "goal_config", None)
+        if isinstance(goal_cfg, str):
+            import json as _json
+            goal_cfg = _json.loads(goal_cfg)
         summary = None
         interest_level = None
         analysis = None
