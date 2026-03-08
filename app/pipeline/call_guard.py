@@ -90,9 +90,10 @@ class CallGuard(FrameProcessor):
       end_reason: "voicemail" | "hold_ivr" | None
       dnd_detected: bool
       dnd_reason: str | None (e.g. "strong: stop calling")
+      detected_red_flags: list[dict] — accumulated real-time red flag detections
     """
 
-    def __init__(self, call_sid: str, **kwargs):
+    def __init__(self, call_sid: str, goal_config: dict | None = None, **kwargs):
         super().__init__(name="CallGuard", **kwargs)
         self._call_sid = call_sid
         self._user_turn_count = 0
@@ -100,6 +101,14 @@ class CallGuard(FrameProcessor):
         self._dnd_detected = False
         self._dnd_reason: str | None = None
         self._ended = False
+
+        # Custom keyword-based red flags from goal_config (realtime only)
+        self._custom_realtime_flags: list[dict] = []
+        if goal_config:
+            for rf in goal_config.get("red_flags", []):
+                if rf.get("detect_in") == "realtime" and rf.get("keywords"):
+                    self._custom_realtime_flags.append(rf)
+        self.detected_red_flags: list[dict] = []
 
     @property
     def end_reason(self) -> str | None:
@@ -159,10 +168,35 @@ class CallGuard(FrameProcessor):
                     logger.info("dnd_detected", call_sid=self._call_sid, strength="strong", phrase=phrase)
                     self._dnd_detected = True
                     self._dnd_reason = f"strong: {phrase}"
-                    return
-            for phrase in _DND_PHRASES_SOFT:
-                if phrase in text:
-                    logger.info("dnd_detected", call_sid=self._call_sid, strength="soft", phrase=phrase)
-                    self._dnd_detected = True
-                    self._dnd_reason = f"soft: {phrase}"
-                    return
+                    break
+            if not self._dnd_detected:
+                for phrase in _DND_PHRASES_SOFT:
+                    if phrase in text:
+                        logger.info("dnd_detected", call_sid=self._call_sid, strength="soft", phrase=phrase)
+                        self._dnd_detected = True
+                        self._dnd_reason = f"soft: {phrase}"
+                        break
+
+        # Custom real-time red flag detection (keyword-based only, no LLM)
+        detected_ids = {rf["id"] for rf in self.detected_red_flags}
+        for rf_config in self._custom_realtime_flags:
+            rf_id = rf_config["id"]
+            if rf_id in detected_ids:
+                continue  # Already detected this flag
+            for keyword in rf_config.get("keywords", []):
+                if keyword.lower() in text:
+                    detection = {
+                        "id": rf_id,
+                        "severity": rf_config.get("severity", "medium"),
+                        "evidence": text[:200],
+                        "turn_index": self._user_turn_count,
+                    }
+                    self.detected_red_flags.append(detection)
+                    logger.info(
+                        "custom_red_flag_detected",
+                        call_sid=self._call_sid,
+                        flag_id=rf_id,
+                        severity=rf_config.get("severity"),
+                        keyword=keyword,
+                    )
+                    break  # One match per flag is enough

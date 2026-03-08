@@ -95,6 +95,7 @@ async def run_pipeline(
         "end_reason": guard.end_reason,
         "dnd_detected": guard.dnd_detected,
         "dnd_reason": guard.dnd_reason,
+        "realtime_red_flags": guard.detected_red_flags,
     }
 
 

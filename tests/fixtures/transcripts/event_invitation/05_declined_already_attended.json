@@ -1,0 +1,29 @@
+{
+  "description": "Contact already attended a previous masterclass, mentions a competitor, declines politely",
+  "transcript": [
+    {"role": "assistant", "content": "Hi Arun, this is Priya calling from Freedom with AI. How are you doing today?"},
+    {"role": "user", "content": "Oh hi. I've attended one of your sessions before actually."},
+    {"role": "assistant", "content": "That's great to hear, Arun! We have a new masterclass this Saturday covering advanced AI automation strategies. It's different from the introductory one."},
+    {"role": "user", "content": "Actually I've already started using Zapier and ChatGPT for my business. I also tried that Digital Pratik's course on automation. I think I'm covered for now."},
+    {"role": "assistant", "content": "I see, sounds like you're already making good progress with AI tools. This session goes deeper into custom workflows and AI agents, which is beyond what most courses cover."},
+    {"role": "user", "content": "Hmm interesting but I don't think I need another session right now. Maybe if you have something more advanced later, like building custom AI tools, I'd be interested."},
+    {"role": "assistant", "content": "Got it. We're actually working on an advanced workshop series. Should I keep you posted when that launches?"},
+    {"role": "user", "content": "Yes, that would be good. You can message me about that one."},
+    {"role": "assistant", "content": "I'll make sure you're notified. Thanks for your time, Arun. It's great that you're already ahead of the curve!"},
+    {"role": "user", "content": "Thanks Priya. Take care!"},
+    {"role": "assistant", "content": "You too, bye!"}
+  ],
+  "expected": {
+    "goal_outcome": "declined",
+    "red_flags": [
+      {"id": "competitor_mention", "severity": "medium"}
+    ],
+    "captured_data": {
+      "attending_date": null,
+      "num_attendees": null,
+      "objection_reason": "already_attended",
+      "referral_source": null
+    },
+    "interest_level": "low"
+  }
+}

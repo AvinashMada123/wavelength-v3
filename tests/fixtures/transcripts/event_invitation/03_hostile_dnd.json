@@ -1,0 +1,28 @@
+{
+  "description": "Hostile caller with DND request — should trigger critical red flags",
+  "transcript": [
+    {"role": "assistant", "content": "Hi Vikram, this is Priya calling from Freedom with AI. How are you doing today?"},
+    {"role": "user", "content": "Who is this? How did you get my number?"},
+    {"role": "assistant", "content": "I'm Priya from Freedom with AI. We're reaching out about a free masterclass on AI automation that might be helpful for your business."},
+    {"role": "user", "content": "I never signed up for anything. This is a scam call. Don't call me again."},
+    {"role": "assistant", "content": "I understand your concern, Vikram. I apologize for the inconvenience. I'll make sure we remove your number from our list."},
+    {"role": "user", "content": "You better. I'm going to file a complaint if you call again. Stop calling me."},
+    {"role": "assistant", "content": "I completely understand. Your number has been noted for removal. I'm sorry for the disturbance. Have a good day."},
+    {"role": "user", "content": "Yeah whatever. Bye."}
+  ],
+  "expected": {
+    "goal_outcome": "declined",
+    "red_flags": [
+      {"id": "dnd", "severity": "critical"},
+      {"id": "hostile", "severity": "critical"},
+      {"id": "complaint", "severity": "high"}
+    ],
+    "captured_data": {
+      "attending_date": null,
+      "num_attendees": null,
+      "objection_reason": "not_interested",
+      "referral_source": null
+    },
+    "interest_level": "low"
+  }
+}

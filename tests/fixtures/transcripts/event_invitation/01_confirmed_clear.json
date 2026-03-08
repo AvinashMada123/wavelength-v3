@@ -1,0 +1,29 @@
+{
+  "description": "Clear confirmation — contact enthusiastically agrees to attend the masterclass",
+  "transcript": [
+    {"role": "assistant", "content": "Hi Rahul, this is Priya calling from Freedom with AI. How are you doing today?"},
+    {"role": "user", "content": "Hi Priya, I'm doing well. How are you?"},
+    {"role": "assistant", "content": "I'm great, thanks for asking! So Rahul, I'm reaching out because we're hosting a free masterclass on AI automation for business owners this Saturday, March 15th at 3 PM."},
+    {"role": "user", "content": "Oh that sounds interesting. What's it about exactly?"},
+    {"role": "assistant", "content": "It's a 90-minute hands-on session where you'll learn how to use AI tools to save 10-15 hours per week in your business. We cover automating client follow-ups, content creation, and lead management."},
+    {"role": "user", "content": "That sounds really useful actually. I've been wanting to learn more about AI for my coaching business."},
+    {"role": "assistant", "content": "That's great to hear! So can I confirm your spot for this Saturday at 3 PM?"},
+    {"role": "user", "content": "Yes, please sign me up. Will I get a link or something?"},
+    {"role": "assistant", "content": "You'll receive a WhatsApp message with the Zoom link and all the details. Will you be joining alone or bringing anyone along?"},
+    {"role": "user", "content": "I might bring my business partner. So two of us probably."},
+    {"role": "assistant", "content": "That's wonderful, I'll note that down. You're all set for Saturday, March 15th at 3 PM. Looking forward to seeing you there!"},
+    {"role": "user", "content": "Thanks Priya, looking forward to it. Bye!"},
+    {"role": "assistant", "content": "Bye Rahul, have a great day!"}
+  ],
+  "expected": {
+    "goal_outcome": "confirmed",
+    "red_flags": [],
+    "captured_data": {
+      "attending_date": "Saturday, March 15th at 3 PM",
+      "num_attendees": "2",
+      "objection_reason": null,
+      "referral_source": null
+    },
+    "interest_level": "high"
+  }
+}

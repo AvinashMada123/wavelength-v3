@@ -1,0 +1,28 @@
+{
+  "description": "Ambiguous outcome — contact says 'I'll try to come' without firm commitment. Tests prompt sensitivity between tentative vs confirmed.",
+  "transcript": [
+    {"role": "assistant", "content": "Hi Meera, this is Priya calling from Freedom with AI. How are you doing today?"},
+    {"role": "user", "content": "I'm fine. Tell me what's this call about?"},
+    {"role": "assistant", "content": "We're hosting a free masterclass on AI automation this Saturday at 3 PM. It's designed for business owners who want to save time using AI tools."},
+    {"role": "user", "content": "Hmm okay. Saturday you said?"},
+    {"role": "assistant", "content": "Yes, this Saturday, March 15th at 3 PM. It's online so you can join from anywhere."},
+    {"role": "user", "content": "I have some work in the afternoon but I'll try to come. What time does it end?"},
+    {"role": "assistant", "content": "It's about 90 minutes, so by 4:30 PM. Shall I send you the details on WhatsApp?"},
+    {"role": "user", "content": "Yeah send the link. I'll try to make it but I can't promise. Depends on my client meeting."},
+    {"role": "assistant", "content": "No problem at all. I'll send you the details and you can decide. Even if you join a bit late, you'll still get value from it."},
+    {"role": "user", "content": "Okay fine. Thanks."},
+    {"role": "assistant", "content": "Great, I'll send that over. Have a nice day, Meera!"},
+    {"role": "user", "content": "You too, bye."}
+  ],
+  "expected": {
+    "goal_outcome": "tentative",
+    "red_flags": [],
+    "captured_data": {
+      "attending_date": "Saturday, March 15th at 3 PM",
+      "num_attendees": "1",
+      "objection_reason": "busy_schedule",
+      "referral_source": null
+    },
+    "interest_level": "medium"
+  }
+}

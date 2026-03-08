@@ -2,8 +2,106 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+
+# --- Goal Config schemas ---
+
+
+class RedFlagConfig(BaseModel):
+    id: str
+    label: str
+    severity: Literal["critical", "high", "medium", "low"]
+    auto_detect: bool = False
+    keywords: list[str] | None = None
+    detect_in: Literal["realtime", "post_call"] = "post_call"
+
+    @model_validator(mode="after")
+    def realtime_needs_keywords(self):
+        if self.detect_in == "realtime" and not self.keywords:
+            raise ValueError(
+                f"Red flag '{self.id}': detect_in='realtime' requires non-empty keywords list"
+            )
+        return self
+
+
+class SuccessCriterion(BaseModel):
+    id: str
+    label: str
+    is_primary: bool = False
+
+
+class DataCaptureField(BaseModel):
+    id: str
+    label: str
+    type: Literal["string", "integer", "float", "boolean", "enum"]
+    enum_values: list[str] | None = None
+    description: str | None = None
+
+    @model_validator(mode="after")
+    def enum_needs_values(self):
+        if self.type == "enum" and not self.enum_values:
+            raise ValueError(
+                f"Field '{self.id}': type='enum' requires non-empty enum_values"
+            )
+        return self
+
+
+class GoalConfig(BaseModel):
+    version: int = 1
+    goal_type: str
+    goal_description: str
+    success_criteria: list[SuccessCriterion]
+    red_flags: list[RedFlagConfig] = []
+    data_capture_fields: list[DataCaptureField] = []
+
+    @model_validator(mode="after")
+    def exactly_one_primary(self):
+        primaries = [c for c in self.success_criteria if c.is_primary]
+        if len(primaries) == 0:
+            raise ValueError("Exactly one success criterion must have is_primary=True, found 0")
+        if len(primaries) > 1:
+            ids = [c.id for c in primaries]
+            raise ValueError(
+                f"Exactly one success criterion must have is_primary=True, found {len(primaries)}: {ids}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def unique_ids_across_all(self):
+        all_ids: list[str] = []
+        for c in self.success_criteria:
+            all_ids.append(c.id)
+        for rf in self.red_flags:
+            all_ids.append(rf.id)
+        for f in self.data_capture_fields:
+            all_ids.append(f.id)
+        seen = set()
+        for item_id in all_ids:
+            if item_id in seen:
+                raise ValueError(f"Duplicate ID '{item_id}' found across criteria, red flags, and fields")
+            seen.add(item_id)
+        return self
+
+
+# --- Call Analysis schemas (output of post-call analyzer) ---
+
+
+class RedFlagDetection(BaseModel):
+    id: str
+    severity: str
+    evidence: str | None = None
+    turn_index: int | None = None
+
+
+class CallAnalysis(BaseModel):
+    goal_outcome: str | None = None
+    summary: str | None = None
+    interest_level: str | None = None
+    red_flags: list[RedFlagDetection] = []
+    captured_data: dict[str, Any] = {}
 
 
 # --- Request schemas ---
@@ -44,6 +142,7 @@ class CreateBotConfigRequest(BaseModel):
     twilio_account_sid: str | None = None
     twilio_auth_token: str | None = None
     twilio_phone_number: str | None = None
+    goal_config: GoalConfig | None = None
 
 
 class UpdateBotConfigRequest(BaseModel):
@@ -73,6 +172,7 @@ class UpdateBotConfigRequest(BaseModel):
     twilio_account_sid: str | None = None
     twilio_auth_token: str | None = None
     twilio_phone_number: str | None = None
+    goal_config: GoalConfig | dict | None = None
     is_active: bool | None = None
 
 
@@ -108,6 +208,7 @@ class BotConfigResponse(BaseModel):
     telephony_provider: str
     plivo_caller_id: str
     twilio_phone_number: str | None
+    goal_config: dict | None = None
     is_active: bool
     created_at: datetime
     updated_at: datetime

@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "goal_type": "event_invitation",
+  "goal_description": "Invite the contact to attend a free masterclass event. Get a clear commitment or understand why they can't attend.",
+  "success_criteria": [
+    {"id": "confirmed", "label": "Confirmed Attendance", "is_primary": true},
+    {"id": "tentative", "label": "Tentative / Maybe", "is_primary": false},
+    {"id": "callback", "label": "Requested Callback / Reschedule", "is_primary": false},
+    {"id": "declined", "label": "Declined", "is_primary": false},
+    {"id": "no_outcome", "label": "No Clear Outcome", "is_primary": false}
+  ],
+  "red_flags": [
+    {"id": "dnd", "label": "Do Not Disturb / Do Not Call", "severity": "critical", "auto_detect": true, "detect_in": "realtime", "keywords": ["don't call", "stop calling", "remove my number", "do not call", "mat karo call", "band karo"]},
+    {"id": "wrong_person", "label": "Wrong Person / Number", "severity": "high", "detect_in": "realtime", "keywords": ["wrong number", "galat number", "who is this", "yeh kaun hai", "i don't know this person"]},
+    {"id": "hostile", "label": "Hostile / Abusive", "severity": "critical", "detect_in": "realtime", "keywords": ["shut up", "scam", "fraud", "police", "complaint"]},
+    {"id": "competitor_mention", "label": "Mentioned Competitor", "severity": "medium", "detect_in": "post_call"},
+    {"id": "complaint", "label": "Complaint About Service", "severity": "high", "detect_in": "post_call"}
+  ],
+  "data_capture_fields": [
+    {"id": "attending_date", "label": "Preferred Date", "type": "string", "description": "Which date the contact prefers for the masterclass"},
+    {"id": "num_attendees", "label": "Number of Attendees", "type": "enum", "enum_values": ["1", "2", "3", "4", "5+"], "description": "How many people will attend including the contact"},
+    {"id": "objection_reason", "label": "Reason for Declining", "type": "enum", "enum_values": ["busy_schedule", "not_interested", "cost_concern", "already_attended", "location_issue", "other"], "description": "Primary reason if the contact declined"},
+    {"id": "referral_source", "label": "How They Heard About Us", "type": "string", "description": "How the contact learned about the company or event"}
+  ]
+}

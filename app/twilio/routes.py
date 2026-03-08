@@ -25,11 +25,14 @@ from app.models.schemas import CallContext
 from app.pipeline import session_limiter
 from app.pipeline.runner import generate_call_summary, run_pipeline
 from app.plivo.routes import (
+    _compute_agent_word_share,
     _get_call_log,
     _post_ghl_outcome,
     _run_ghl_workflows,
+    _save_call_analytics,
     _update_call_status,
 )
+from app.services.call_analyzer import CallAnalyzer
 
 logger = structlog.get_logger(__name__)
 
@@ -152,7 +155,29 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
 
         transcript_entries = [e for m in conversation_messages if (e := _extract_message(m)) is not None]
 
-        summary, interest_level = await generate_call_summary(ctx, conversation_messages)
+        # Generate analysis — goal-aware if configured, generic fallback otherwise
+        goal_cfg = getattr(bot_config, "goal_config", None)
+        summary = None
+        interest_level = None
+        analysis = None
+
+        try:
+            analyzer = CallAnalyzer()
+            analysis = await analyzer.analyze(
+                transcript=transcript_entries,
+                goal_config=goal_cfg,
+                system_prompt=ctx.filled_prompt,
+                realtime_red_flags=pipeline_result.get("realtime_red_flags", []),
+                call_sid=call_sid,
+            )
+            summary = analysis.summary
+            interest_level = analysis.interest_level
+        except Exception as e:
+            logger.error("twilio_post_call_analysis_failed", call_sid=call_sid, error=str(e))
+            try:
+                summary, interest_level = await generate_call_summary(ctx, conversation_messages)
+            except Exception:
+                pass
 
         # Recording: Twilio has its own native recording — not implemented yet
         turn_count = sum(1 for t in transcript_entries if t["role"] == "user")
@@ -167,9 +192,33 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
         if end_reason:
             call_metadata["end_reason"] = end_reason
 
+        # Add goal-based analytics to metadata if available
+        if analysis and analysis.goal_outcome:
+            call_metadata["goal_outcome"] = analysis.goal_outcome
+            call_metadata["red_flags"] = [rf.model_dump() for rf in analysis.red_flags]
+            call_metadata["captured_data"] = analysis.captured_data
+
         await _update_call_status(call_sid, outcome="completed", summary=summary, metadata=call_metadata)
         await _post_ghl_outcome(ctx, outcome="completed", summary=summary, metadata=call_metadata)
         await _run_ghl_workflows(ctx, bot_config, "post_call")
+
+        # Write to call_analytics table if goal-based analysis was performed
+        if analysis and analysis.goal_outcome and goal_cfg:
+            try:
+                async with get_db_session() as db:
+                    existing_log = await _get_call_log(db, call_sid)
+                await _save_call_analytics(
+                    call_sid=call_sid,
+                    bot_id=bot_config.id,
+                    call_log_id=existing_log.id if existing_log else None,
+                    analysis=analysis,
+                    goal_type=goal_cfg.get("goal_type") if isinstance(goal_cfg, dict) else goal_cfg.goal_type,
+                    turn_count=turn_count,
+                    call_duration=existing_log.call_duration if existing_log else None,
+                    transcript=transcript_entries,
+                )
+            except Exception as e:
+                logger.error("twilio_save_analytics_failed", call_sid=call_sid, error=str(e))
 
     except Exception as e:
         logger.error("twilio_pipeline_error", call_sid=call_sid, error=str(e))

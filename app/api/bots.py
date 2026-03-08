@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.bot_config.loader import BotConfigLoader
 from app.database import get_db
 from app.models.bot_config import BotConfig
-from app.models.schemas import BotConfigResponse, CreateBotConfigRequest, UpdateBotConfigRequest
+from app.models.schemas import BotConfigResponse, CreateBotConfigRequest, GoalConfig, UpdateBotConfigRequest
 
 logger = structlog.get_logger(__name__)
 
@@ -47,6 +47,7 @@ async def create_bot(req: CreateBotConfigRequest, db: AsyncSession = Depends(get
         plivo_auth_id=req.plivo_auth_id,
         plivo_auth_token=req.plivo_auth_token,
         plivo_caller_id=req.plivo_caller_id,
+        goal_config=req.goal_config.model_dump() if req.goal_config else None,
     )
     db.add(bot)
     await db.commit()
@@ -78,6 +79,15 @@ async def update_bot(bot_id: uuid.UUID, req: UpdateBotConfigRequest, db: AsyncSe
         raise HTTPException(status_code=404, detail="Bot config not found")
 
     update_data = req.model_dump(exclude_unset=True)
+
+    # Validate goal_config if provided as raw dict (PATCH may send raw JSON)
+    if "goal_config" in update_data and update_data["goal_config"] is not None:
+        try:
+            validated = GoalConfig(**update_data["goal_config"])
+            update_data["goal_config"] = validated.model_dump()
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=f"Invalid goal_config: {e}")
+
     for field, value in update_data.items():
         setattr(bot, field, value)
     bot.updated_at = datetime.now(timezone.utc)

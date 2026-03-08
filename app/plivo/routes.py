@@ -24,7 +24,10 @@ from app.ghl.client import GHLClient
 from app.pipeline import session_limiter
 from app.models.call_log import CallLog
 from app.models.schemas import CallContext
+from app.models.call_analytics import CallAnalytics
+from app.models.schemas import CallAnalysis
 from app.pipeline.runner import generate_call_summary, run_pipeline
+from app.services.call_analyzer import CallAnalyzer
 from app.plivo.xml_responses import build_hangup_xml, build_stream_xml
 
 logger = structlog.get_logger(__name__)
@@ -176,6 +179,69 @@ async def _run_ghl_workflows(ctx: CallContext, bot_config, timing: str) -> None:
         await bot_ghl.close()
 
 
+def _compute_agent_word_share(transcript: list[dict]) -> float:
+    """Ratio of bot words to total words. Proxy for talk time."""
+    bot_words = sum(len(t["content"].split()) for t in transcript if t["role"] == "assistant")
+    user_words = sum(len(t["content"].split()) for t in transcript if t["role"] == "user")
+    total = bot_words + user_words
+    return round(bot_words / total, 2) if total > 0 else 0.0
+
+
+def _get_max_severity(red_flags: list) -> str | None:
+    """Return the highest severity from a list of red flags."""
+    severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    if not red_flags:
+        return None
+    severities = [rf.get("severity", rf.severity if hasattr(rf, "severity") else "low") for rf in red_flags]
+    return min(severities, key=lambda s: severity_order.get(s, 99))
+
+
+async def _save_call_analytics(
+    call_sid: str,
+    bot_id,
+    call_log_id,
+    analysis: CallAnalysis,
+    goal_type: str,
+    turn_count: int,
+    call_duration: int | None,
+    transcript: list[dict],
+) -> None:
+    """Write a CallAnalytics row after goal-based analysis."""
+    red_flags_dicts = [rf.model_dump() for rf in analysis.red_flags]
+    has_flags = len(red_flags_dicts) > 0
+    max_severity = _get_max_severity(red_flags_dicts) if has_flags else None
+
+    row = CallAnalytics(
+        call_log_id=call_log_id,
+        bot_id=bot_id,
+        goal_type=goal_type,
+        goal_outcome=analysis.goal_outcome,
+        has_red_flags=has_flags,
+        red_flag_max_severity=max_severity,
+        red_flags=red_flags_dicts if has_flags else None,
+        captured_data=analysis.captured_data or None,
+        turn_count=turn_count,
+        call_duration_secs=call_duration,
+        agent_word_share=_compute_agent_word_share(transcript),
+    )
+
+    async with get_db_session() as db:
+        db.add(row)
+        await db.commit()
+
+    logger.info(
+        "call_analytics_saved",
+        call_sid=call_sid,
+        goal_outcome=analysis.goal_outcome,
+        has_red_flags=has_flags,
+        max_severity=max_severity,
+    )
+
+    # If critical/high red flags, post alert to GHL webhook
+    if has_flags and max_severity in ("critical", "high"):
+        logger.info("red_flag_alert_triggered", call_sid=call_sid, severity=max_severity)
+
+
 def _map_plivo_status(plivo_status: str | None) -> str:
     """Map Plivo call status to our internal status."""
     mapping = {
@@ -313,13 +379,38 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         transcript_entries.insert(0, {"role": "assistant", "content": greeting_text})
         logger.info("post_call_transcript_built", call_sid=call_sid, entries=len(transcript_entries))
 
-        # Generate LLM summary + interest classification
+        # Generate analysis — goal-aware if configured, generic fallback otherwise
+        goal_cfg = getattr(bot_config, "goal_config", None)
+        summary = None
+        interest_level = None
+        analysis = None
+
         try:
-            summary, interest_level = await generate_call_summary(ctx, conversation_messages)
-            logger.info("post_call_summary_done", call_sid=call_sid, interest=interest_level, summary_len=len(summary) if summary else 0)
+            analyzer = CallAnalyzer()
+            analysis = await analyzer.analyze(
+                transcript=transcript_entries,
+                goal_config=goal_cfg,
+                system_prompt=ctx.filled_prompt,
+                realtime_red_flags=pipeline_result.get("realtime_red_flags", []),
+                call_sid=call_sid,
+            )
+            summary = analysis.summary
+            interest_level = analysis.interest_level
+            logger.info(
+                "post_call_analysis_done",
+                call_sid=call_sid,
+                goal_outcome=analysis.goal_outcome,
+                interest=interest_level,
+                red_flags=len(analysis.red_flags),
+                summary_len=len(summary) if summary else 0,
+            )
         except Exception as e:
-            logger.error("post_call_summary_failed", call_sid=call_sid, error=str(e), exc_info=True)
-            summary, interest_level = None, None
+            logger.error("post_call_analysis_failed", call_sid=call_sid, error=str(e), exc_info=True)
+            # Fallback to legacy summary if analyzer fails
+            try:
+                summary, interest_level = await generate_call_summary(ctx, conversation_messages)
+            except Exception:
+                pass
 
         # Build metadata — merge with existing to preserve recording_url from Plivo callback
         async with get_db_session() as db:
@@ -338,11 +429,33 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         if end_reason:
             existing_meta["end_reason"] = end_reason
 
+        # Add goal-based analytics to metadata if available
+        if analysis and analysis.goal_outcome:
+            existing_meta["goal_outcome"] = analysis.goal_outcome
+            existing_meta["red_flags"] = [rf.model_dump() for rf in analysis.red_flags]
+            existing_meta["captured_data"] = analysis.captured_data
+
         # Update call log with outcome + metadata
         await _update_call_status(
             call_sid, status="completed", outcome="completed", summary=summary, metadata=existing_meta
         )
         logger.info("post_call_metadata_saved", call_sid=call_sid, turns=turn_count)
+
+        # Write to call_analytics table if goal-based analysis was performed
+        if analysis and analysis.goal_outcome and goal_cfg:
+            try:
+                await _save_call_analytics(
+                    call_sid=call_sid,
+                    bot_id=bot_config.id,
+                    call_log_id=existing_log.id if existing_log else None,
+                    analysis=analysis,
+                    goal_type=goal_cfg.get("goal_type") if isinstance(goal_cfg, dict) else goal_cfg.goal_type,
+                    turn_count=turn_count,
+                    call_duration=existing_log.call_duration if existing_log else None,
+                    transcript=transcript_entries,
+                )
+            except Exception as e:
+                logger.error("save_call_analytics_failed", call_sid=call_sid, error=str(e), exc_info=True)
 
         # Post enriched outcome to GHL (failures here should not mark call as error)
         try:

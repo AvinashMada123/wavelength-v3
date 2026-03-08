@@ -1,0 +1,26 @@
+{
+  "description": "Polite decline — contact is interested but too busy, no hostility",
+  "transcript": [
+    {"role": "assistant", "content": "Hi Sneha, this is Priya calling from Freedom with AI. How are you doing today?"},
+    {"role": "user", "content": "Hi, I'm okay. What's this about?"},
+    {"role": "assistant", "content": "I'm reaching out because we're hosting a free masterclass on AI automation for business owners this Saturday. I thought it might be valuable for you."},
+    {"role": "user", "content": "Saturday? No, I can't do Saturday. I have a family function."},
+    {"role": "assistant", "content": "I understand. We do run these regularly. Would you be interested in attending a future session?"},
+    {"role": "user", "content": "Hmm, maybe. But honestly I'm quite busy these days with my new project launch. Maybe next month?"},
+    {"role": "assistant", "content": "Of course, that makes sense. Should I have someone reach out to you next month when we schedule the next batch?"},
+    {"role": "user", "content": "Yeah, you can do that. Just send me a message on WhatsApp, don't call again please."},
+    {"role": "assistant", "content": "Noted, we'll send you a WhatsApp message next month. Thanks for your time, Sneha. All the best with your project launch!"},
+    {"role": "user", "content": "Thanks, bye."}
+  ],
+  "expected": {
+    "goal_outcome": "callback",
+    "red_flags": [],
+    "captured_data": {
+      "attending_date": null,
+      "num_attendees": null,
+      "objection_reason": "busy_schedule",
+      "referral_source": null
+    },
+    "interest_level": "medium"
+  }
+}

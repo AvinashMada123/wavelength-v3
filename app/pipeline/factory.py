@@ -513,8 +513,9 @@ async def build_pipeline(
         timeout=idle_timeout,
     )
 
-    # --- Call guard (voicemail / hold / DND detection) ---
-    call_guard = CallGuard(call_sid=call_context.call_sid)
+    # --- Call guard (voicemail / hold / DND detection + custom red flags) ---
+    goal_cfg = getattr(bot_config, "goal_config", None)
+    call_guard = CallGuard(call_sid=call_context.call_sid, goal_config=goal_cfg)
 
     # --- Latency trackers ---
     tracker_post_stt = LatencyTracker(position="post_stt", call_sid=call_context.call_sid)
