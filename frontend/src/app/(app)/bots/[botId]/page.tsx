@@ -1596,38 +1596,47 @@ export default function BotEditorPage() {
                           <Section title="Data Capture Fields" description="Structured data to extract from each call transcript.">
                             <div className="space-y-3">
                               {(goalConfig.data_capture_fields || []).map((f, i) => (
-                                <div key={i} className="flex items-start gap-3 rounded-lg border p-3">
-                                  <div className="flex-1 grid grid-cols-3 gap-3">
-                                    <Input
-                                      placeholder="ID (e.g., attending_date)"
-                                      value={f.id}
-                                      onChange={(e) => updateCaptureField(i, { id: e.target.value.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "") })}
-                                    />
-                                    <Input
-                                      placeholder="Label"
-                                      value={f.label}
-                                      onChange={(e) => updateCaptureField(i, { label: e.target.value })}
-                                    />
-                                    <Select value={f.type} onValueChange={(v) => updateCaptureField(i, { type: v as DataCaptureField["type"] })}>
-                                      <SelectTrigger><SelectValue /></SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="string">String</SelectItem>
-                                        <SelectItem value="integer">Integer</SelectItem>
-                                        <SelectItem value="float">Float</SelectItem>
-                                        <SelectItem value="boolean">Boolean</SelectItem>
-                                        <SelectItem value="enum">Enum</SelectItem>
-                                      </SelectContent>
-                                    </Select>
+                                <div key={i} className="rounded-lg border p-3 space-y-3">
+                                  <div className="flex items-start gap-3">
+                                    <div className="flex-1 grid grid-cols-3 gap-3">
+                                      <Input
+                                        placeholder="ID (e.g., attending_date)"
+                                        value={f.id}
+                                        onChange={(e) => updateCaptureField(i, { id: e.target.value.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "") })}
+                                      />
+                                      <Input
+                                        placeholder="Label"
+                                        value={f.label}
+                                        onChange={(e) => updateCaptureField(i, { label: e.target.value })}
+                                      />
+                                      <Select value={f.type} onValueChange={(v) => updateCaptureField(i, { type: v as DataCaptureField["type"], ...(v !== "enum" ? { enum_values: undefined } : {}) })}>
+                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="string">String</SelectItem>
+                                          <SelectItem value="integer">Integer</SelectItem>
+                                          <SelectItem value="float">Float</SelectItem>
+                                          <SelectItem value="boolean">Boolean</SelectItem>
+                                          <SelectItem value="enum">Enum</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-7 w-7 text-muted-foreground hover:text-destructive mt-1"
+                                      onClick={() => removeCaptureField(i)}
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </Button>
                                   </div>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-7 w-7 text-muted-foreground hover:text-destructive mt-1"
-                                    onClick={() => removeCaptureField(i)}
-                                  >
-                                    <X className="h-3.5 w-3.5" />
-                                  </Button>
+                                  {f.type === "enum" && (
+                                    <Input
+                                      placeholder="Enum values (comma-separated, e.g., yes, no, maybe)"
+                                      value={(f.enum_values || []).join(", ")}
+                                      onChange={(e) => updateCaptureField(i, { enum_values: e.target.value.split(",").map((v) => v.trim()).filter(Boolean) })}
+                                    />
+                                  )}
                                 </div>
                               ))}
                               <Button type="button" variant="outline" size="sm" onClick={addCaptureField} className="gap-1.5">
