@@ -12,8 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.bot_config.loader import BotConfigLoader
 from app.database import get_db
 from app.models.call_log import CallLog
+from app.models.call_analytics import CallAnalytics
 from app.models.call_queue import QueuedCall
-from app.models.schemas import CallLogListResponse, CallLogResponse, QueueEnqueueResponse, TriggerCallRequest
+from app.models.schemas import CallAnalyticsResponse, CallLogListResponse, CallLogResponse, QueueEnqueueResponse, TriggerCallRequest
 from sqlalchemy import select
 
 logger = structlog.get_logger(__name__)
@@ -53,7 +54,26 @@ async def get_call(call_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     call_log = result.scalar_one_or_none()
     if not call_log:
         raise HTTPException(status_code=404, detail="Call not found")
-    return call_log
+
+    # Attach analytics if available
+    analytics_result = await db.execute(
+        select(CallAnalytics).where(CallAnalytics.call_log_id == call_id)
+    )
+    analytics_row = analytics_result.scalar_one_or_none()
+
+    response = CallLogResponse.model_validate(call_log)
+    if analytics_row:
+        response.analytics = CallAnalyticsResponse(
+            goal_outcome=analytics_row.goal_outcome,
+            goal_type=analytics_row.goal_type,
+            red_flags=analytics_row.red_flags,
+            has_red_flags=analytics_row.has_red_flags,
+            red_flag_max_severity=analytics_row.red_flag_max_severity,
+            captured_data=analytics_row.captured_data,
+            turn_count=analytics_row.turn_count,
+            agent_word_share=analytics_row.agent_word_share,
+        )
+    return response
 
 
 @router.post("/trigger", response_model=QueueEnqueueResponse, status_code=202)

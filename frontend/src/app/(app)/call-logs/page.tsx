@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { Suspense, useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Phone,
@@ -18,6 +19,10 @@ import {
   RefreshCw,
   FileText,
   PhoneOff,
+  AlertTriangle,
+  Shield,
+  Target,
+  Database,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/layout/header";
@@ -60,7 +65,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { fetchBots, fetchCallLogs, fetchCallDetail, getRecordingUrl } from "@/lib/api";
 import { exportCallsCSV } from "@/lib/call-logs-export";
 import { formatDate, formatDuration, formatPhoneNumber, timeAgo, cn } from "@/lib/utils";
-import type { BotConfig, CallLog } from "@/types/api";
+import type { BotConfig, CallLog, CallAnalyticsData } from "@/types/api";
 
 // ---------- Status config ----------
 
@@ -120,11 +125,31 @@ function InterestBadge({ level }: { level: string }) {
   );
 }
 
+// ---------- Severity config ----------
+
+const SEVERITY_COLORS: Record<string, string> = {
+  critical: "bg-red-500/10 text-red-500 border-red-500/20",
+  high: "bg-orange-500/10 text-orange-500 border-orange-500/20",
+  medium: "bg-amber-500/10 text-amber-500 border-amber-500/20",
+  low: "bg-blue-500/10 text-blue-500 border-blue-500/20",
+};
+
 // ---------- Page ----------
 
 const PAGE_SIZE = 25;
 
 export default function CallLogsPage() {
+  return (
+    <Suspense>
+      <CallLogsPageInner />
+    </Suspense>
+  );
+}
+
+function CallLogsPageInner() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
   const [bots, setBots] = useState<BotConfig[]>([]);
   const [calls, setCalls] = useState<CallLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -144,6 +169,9 @@ export default function CallLogsPage() {
   // Detail modal
   const [selectedCall, setSelectedCall] = useState<CallLog | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+
+  // Deep-link: auto-open call from ?call_id= param
+  const deepLinkCallId = searchParams.get("call_id");
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -183,6 +211,16 @@ export default function CallLogsPage() {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [calls, loadCalls]);
+
+  // Deep-link: auto-open a specific call from URL param
+  useEffect(() => {
+    if (deepLinkCallId && !loading) {
+      openCallDetail({ id: deepLinkCallId } as CallLog);
+      // Clear the param so closing the modal doesn't re-open
+      router.replace("/call-logs", { scroll: false });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkCallId, loading]);
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -832,41 +870,124 @@ export default function CallLogsPage() {
                       </div>
                     </>
                   )}
+
+                  {/* Goal-based Analytics */}
+                  {selectedCall.analytics && (
+                    <>
+                      <Separator className="my-4" />
+                      <div className="space-y-4">
+                        <p className="text-sm font-medium flex items-center gap-1.5">
+                          <Target className="h-4 w-4 text-violet-500" />
+                          Goal Analysis
+                        </p>
+
+                        {/* Outcome */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-muted-foreground">Outcome:</span>
+                          <Badge variant="outline" className="capitalize">
+                            {(selectedCall.analytics.goal_outcome || "none").replace(/_/g, " ")}
+                          </Badge>
+                          {selectedCall.analytics.goal_type && (
+                            <span className="text-xs text-muted-foreground">
+                              ({selectedCall.analytics.goal_type})
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Agent Word Share */}
+                        {selectedCall.analytics.agent_word_share != null && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-muted-foreground">Agent word share:</span>
+                            <span className="text-sm font-medium">
+                              {Math.round(selectedCall.analytics.agent_word_share * 100)}%
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Red Flags */}
+                        {selectedCall.analytics.has_red_flags && selectedCall.analytics.red_flags && selectedCall.analytics.red_flags.length > 0 && (
+                          <div className="space-y-2">
+                            <p className="text-sm font-medium flex items-center gap-1.5 text-red-500">
+                              <AlertTriangle className="h-3.5 w-3.5" />
+                              Red Flags ({selectedCall.analytics.red_flags.length})
+                            </p>
+                            <div className="space-y-1.5">
+                              {selectedCall.analytics.red_flags.map((rf, j) => (
+                                <div key={`${rf.id}-${j}`} className="rounded bg-muted/50 p-2 text-xs">
+                                  <div className="flex items-center gap-1.5 mb-0.5">
+                                    <Badge variant="outline" className={`text-[10px] py-0 ${SEVERITY_COLORS[rf.severity] || ""}`}>
+                                      {rf.severity}
+                                    </Badge>
+                                    <span className="font-medium">{rf.id.replace(/_/g, " ")}</span>
+                                  </div>
+                                  {rf.evidence && (
+                                    <p className="text-muted-foreground italic mt-0.5">
+                                      &ldquo;{rf.evidence}&rdquo;
+                                    </p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Captured Data */}
+                        {selectedCall.analytics.captured_data && Object.keys(selectedCall.analytics.captured_data).length > 0 && (
+                          <div className="space-y-2">
+                            <p className="text-sm font-medium flex items-center gap-1.5">
+                              <Database className="h-3.5 w-3.5 text-cyan-500" />
+                              Captured Data
+                            </p>
+                            <div className="grid grid-cols-2 gap-2">
+                              {Object.entries(selectedCall.analytics.captured_data).map(([key, val]) => (
+                                <div key={key} className="rounded bg-muted/50 p-2 text-xs">
+                                  <p className="text-muted-foreground capitalize">{key.replace(/_/g, " ")}</p>
+                                  <p className="font-medium mt-0.5">{String(val ?? "-")}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
                   </ScrollArea>
                 </TabsContent>
 
                 {/* Transcript Tab */}
                 <TabsContent value="transcript" className="mt-4">
                   <ScrollArea className="h-[400px] rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-10">#</TableHead>
-                          <TableHead className="w-20">Speaker</TableHead>
-                          <TableHead>Message</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {selectedCall.metadata?.transcript?.map((entry, i) => (
-                          <TableRow key={i}>
-                            <TableCell className="text-muted-foreground text-xs">
-                              {i + 1}
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant={entry.role === "assistant" ? "default" : "secondary"}
-                                className="text-[10px]"
-                              >
-                                {entry.role === "assistant" ? "AI" : "User"}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {entry.content}
-                            </TableCell>
+                    <div className="w-full overflow-hidden">
+                      <Table className="table-fixed w-full">
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-10">#</TableHead>
+                            <TableHead className="w-16">Speaker</TableHead>
+                            <TableHead>Message</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                        </TableHeader>
+                        <TableBody>
+                          {selectedCall.metadata?.transcript?.map((entry, i) => (
+                            <TableRow key={i}>
+                              <TableCell className="text-muted-foreground text-xs align-top">
+                                {i + 1}
+                              </TableCell>
+                              <TableCell className="align-top">
+                                <Badge
+                                  variant={entry.role === "assistant" ? "default" : "secondary"}
+                                  className="text-[10px]"
+                                >
+                                  {entry.role === "assistant" ? "AI" : "User"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-sm break-words whitespace-normal">
+                                {entry.content}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
                   </ScrollArea>
                 </TabsContent>
 

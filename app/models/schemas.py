@@ -235,6 +235,18 @@ class CallLogListResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CallAnalyticsResponse(BaseModel):
+    """Analytics data attached to a call log detail."""
+    goal_outcome: str | None = None
+    goal_type: str | None = None
+    red_flags: list[dict] | None = None
+    has_red_flags: bool = False
+    red_flag_max_severity: str | None = None
+    captured_data: dict | None = None
+    turn_count: int | None = None
+    agent_word_share: float | None = None
+
+
 class CallLogResponse(BaseModel):
     """Full response with metadata — for single call detail."""
     id: uuid.UUID
@@ -251,6 +263,7 @@ class CallLogResponse(BaseModel):
     ended_at: datetime | None
     created_at: datetime
     metadata: dict | None = Field(default=None, validation_alias="metadata_")
+    analytics: CallAnalyticsResponse | None = None
 
     model_config = {"from_attributes": True}
 

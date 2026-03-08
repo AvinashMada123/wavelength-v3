@@ -272,6 +272,22 @@ export interface CallLogMetadata {
   call_metrics?: { turn_count: number; total_duration_s?: number };
 }
 
+export interface CallAnalyticsData {
+  goal_outcome: string | null;
+  goal_type: string | null;
+  red_flags: Array<{
+    id: string;
+    severity: string;
+    evidence?: string;
+    turn_index?: number;
+  }> | null;
+  has_red_flags: boolean;
+  red_flag_max_severity: string | null;
+  captured_data: Record<string, unknown> | null;
+  turn_count: number | null;
+  agent_word_share: number | null;
+}
+
 export interface CallLog {
   id: string;
   bot_id: string;
@@ -287,4 +303,5 @@ export interface CallLog {
   ended_at: string | null;
   created_at: string;
   metadata?: CallLogMetadata | null;
+  analytics?: CallAnalyticsData | null;
 }

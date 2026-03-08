@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   BarChart3,
@@ -90,6 +91,7 @@ function getSeverityIcon(severity: string) {
 // ---------------------------------------------------------------------------
 
 export default function AnalyticsPage() {
+  const router = useRouter();
   const [bots, setBots] = useState<BotConfig[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string>("");
   const [loading, setLoading] = useState(true);
@@ -174,6 +176,12 @@ export default function AnalyticsPage() {
     } catch {
       toast.error("Failed to snooze alert");
     }
+  };
+
+  // Navigate to call log detail
+  const openCallLog = (callLogId: string | null) => {
+    if (!callLogId) return;
+    router.push(`/call-logs?call_id=${callLogId}`);
   };
 
   // Trends chart
@@ -452,7 +460,8 @@ export default function AnalyticsPage() {
                               initial={{ opacity: 0, x: -10 }}
                               animate={{ opacity: 1, x: 0 }}
                               transition={{ delay: i * 0.03 }}
-                              className="flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-muted/50"
+                              className="group flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-muted/50 cursor-pointer"
+                              onClick={() => openCallLog(item.call_log_id)}
                             >
                               <div className="flex items-center gap-3">
                                 {item.goal_outcome ? (
@@ -493,6 +502,9 @@ export default function AnalyticsPage() {
                                 <span className="text-xs text-muted-foreground whitespace-nowrap">
                                   {timeAgo(item.created_at)}
                                 </span>
+                                {item.call_log_id && (
+                                  <ArrowRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                                )}
                               </div>
                             </motion.div>
                           ))}
@@ -595,6 +607,17 @@ export default function AnalyticsPage() {
                                 )}
 
                                 <div className="flex gap-2 pl-6">
+                                  {alert.call_log_id && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 text-xs"
+                                      onClick={() => openCallLog(alert.call_log_id)}
+                                    >
+                                      <Eye className="h-3 w-3 mr-1" />
+                                      View Call
+                                    </Button>
+                                  )}
                                   <Button
                                     size="sm"
                                     variant="outline"
@@ -667,14 +690,20 @@ export default function AnalyticsPage() {
                                   {group.calls.slice(0, 5).map((call, j) => (
                                     <div
                                       key={call.analytics_id}
-                                      className="flex items-start justify-between text-xs rounded bg-muted/50 p-2"
+                                      className={`flex items-start justify-between text-xs rounded bg-muted/50 p-2 ${call.call_log_id ? "cursor-pointer hover:bg-muted transition-colors" : ""}`}
+                                      onClick={() => call.call_log_id && openCallLog(call.call_log_id)}
                                     >
                                       <p className="text-muted-foreground italic flex-1 truncate mr-4">
                                         {call.evidence ? `"${call.evidence}"` : "No evidence recorded"}
                                       </p>
-                                      <span className="text-muted-foreground whitespace-nowrap">
-                                        {timeAgo(call.created_at)}
-                                      </span>
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-muted-foreground whitespace-nowrap">
+                                          {timeAgo(call.created_at)}
+                                        </span>
+                                        {call.call_log_id && (
+                                          <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                                        )}
+                                      </div>
                                     </div>
                                   ))}
                                   {group.calls.length > 5 && (
