@@ -50,9 +50,11 @@ class CallAnalyzer:
         if not transcript:
             return CallAnalysis()
 
-        # Parse goal_config if raw dict
+        # Parse goal_config from str/dict into GoalConfig
         parsed_config: GoalConfig | None = None
         if goal_config is not None:
+            if isinstance(goal_config, str):
+                goal_config = json.loads(goal_config)
             if isinstance(goal_config, dict):
                 parsed_config = GoalConfig(**goal_config)
             else:
