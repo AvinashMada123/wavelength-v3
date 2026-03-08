@@ -390,12 +390,12 @@ async def build_pipeline(
     stt = DeepgramSTTService(
         api_key=settings.DEEPGRAM_API_KEY,
         live_options=LiveOptions(
-            model="nova-3",
+            model="nova-2-general",
             language=stt_language,
             interim_results=True,
+            utterance_end_ms="1000",
             punctuate=True,
             smart_format=True,
-            endpointing=300,
         ),
     )
 
