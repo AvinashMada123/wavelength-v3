@@ -455,8 +455,21 @@ export default function BotEditorPage() {
         }
       }
 
-      // Include goal_config in payload
-      payload.goal_config = goalConfig;
+      // Include goal_config in payload — sanitize enum fields
+      if (goalConfig) {
+        payload.goal_config = {
+          ...goalConfig,
+          data_capture_fields: (goalConfig.data_capture_fields || []).map((f) => {
+            if (f.type === "enum") {
+              return { ...f, enum_values: f.enum_values?.length ? f.enum_values : ["yes", "no"] };
+            }
+            const { enum_values, ...rest } = f;
+            return rest;
+          }),
+        };
+      } else {
+        payload.goal_config = null;
+      }
 
       if (isNew) {
         await createBot(payload as never);
