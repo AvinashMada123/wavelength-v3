@@ -104,8 +104,49 @@ export interface TriggerCallRequest {
 }
 
 export interface TriggerCallResponse {
-  call_sid: string;
+  queue_id: string;
   status: string;
+}
+
+export interface QueuedCall {
+  id: string;
+  bot_id: string;
+  contact_name: string;
+  contact_phone: string;
+  ghl_contact_id: string | null;
+  extra_vars: Record<string, string>;
+  source: string;
+  status: "queued" | "processing" | "completed" | "failed" | "held" | "cancelled";
+  priority: number;
+  error_message: string | null;
+  call_log_id: string | null;
+  created_at: string;
+  processed_at: string | null;
+  bot_name: string | null;
+}
+
+export interface CircuitBreakerState {
+  bot_id: string;
+  bot_name: string | null;
+  state: "closed" | "open";
+  consecutive_failures: number;
+  failure_threshold: number;
+  last_failure_at: string | null;
+  last_failure_reason: string | null;
+  opened_at: string | null;
+  opened_by: string | null;
+  updated_at: string;
+}
+
+export interface QueueStats {
+  bot_id: string;
+  bot_name: string;
+  queued: number;
+  held: number;
+  processing: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
 }
 
 export interface CallLogMetadata {

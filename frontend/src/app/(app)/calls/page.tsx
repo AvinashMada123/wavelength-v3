@@ -221,7 +221,7 @@ export default function CallsPage() {
         contact_name: contactName,
         contact_phone: contactPhone,
       });
-      toast.success(`Call triggered: ${res.call_sid.slice(0, 8)}...`);
+      toast.success(`Call queued: ${res.queue_id.slice(0, 8)}...`);
       setContactName("");
       setContactPhone("");
       loadCalls();

@@ -2,19 +2,13 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
-
 import structlog
 from fastapi import APIRouter, HTTPException, Request
 
-from app.bot_config.loader import BotConfigLoader, fill_prompt_template
-from app.config import settings
+from app.bot_config.loader import BotConfigLoader
 from app.database import get_db_session
-from app.models.bot_config import BotConfig
-from app.models.call_log import CallLog
-from app.models.schemas import TriggerCallResponse
-from app.plivo.client import make_outbound_call as plivo_make_call
-from app.twilio.client import make_outbound_call as twilio_make_call
+from app.models.call_queue import QueuedCall
+from app.models.schemas import QueueEnqueueResponse
 
 logger = structlog.get_logger(__name__)
 
@@ -31,6 +25,8 @@ def set_dependencies(loader: BotConfigLoader):
 
 def _verify_api_key(request: Request) -> None:
     """Verify x-api-key header or ?key= query param against WEBHOOK_API_KEY."""
+    from app.config import settings
+
     if not settings.WEBHOOK_API_KEY:
         raise HTTPException(status_code=500, detail="WEBHOOK_API_KEY not configured on server")
 
@@ -41,10 +37,14 @@ def _verify_api_key(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Invalid API key.")
 
 
-@router.post("/trigger-call", response_model=TriggerCallResponse)
+@router.post("/trigger-call", response_model=QueueEnqueueResponse, status_code=202)
 async def webhook_trigger_call(request: Request):
     """
     Public webhook for triggering calls from GHL or any external system.
+
+    Calls are now ENQUEUED rather than fired immediately. The background
+    queue processor picks them up, checks the circuit breaker, and initiates
+    the actual call.
 
     Auth: x-api-key header or ?key= query param must match WEBHOOK_API_KEY.
 
@@ -108,87 +108,32 @@ async def webhook_trigger_call(request: Request):
     if not bot_config_id:
         raise HTTPException(status_code=400, detail="botConfigId is required.")
 
-    # --- Load bot config ---
+    # --- Verify bot config exists ---
     bot_config = await bot_config_loader.get(bot_config_id)
     if not bot_config:
         raise HTTPException(status_code=404, detail="Bot config not found.")
 
     contact_name = contact_name or "Customer"
 
-    # --- Fill prompt template ---
-    ctx_vars = bot_config.context_variables or {}
-    template_vars = ctx_vars if isinstance(ctx_vars, dict) else {}
-    template_vars.update(
-        contact_name=contact_name,
-        agent_name=bot_config.agent_name,
-        company_name=bot_config.company_name,
-        location=bot_config.location or "",
-        event_name=bot_config.event_name or "",
-        event_date=bot_config.event_date or "",
-        event_time=bot_config.event_time or "",
-    )
-    template_vars.update(custom_overrides)
-
-    filled_prompt = fill_prompt_template(bot_config.system_prompt_template, **template_vars)
-
-    # --- Create call log ---
-    call_sid = str(uuid4())
-
+    # --- Enqueue call instead of firing immediately ---
     async with get_db_session() as db:
-        call_log = CallLog(
+        queued_call = QueuedCall(
             bot_id=bot_config.id,
-            call_sid=call_sid,
             contact_name=contact_name,
             contact_phone=phone_number,
             ghl_contact_id=ghl_contact_id,
-            status="initiated",
-            context_data={
-                "bot_id": str(bot_config.id),
-                "filled_prompt": filled_prompt,
-                "contact_name": contact_name,
-                "ghl_contact_id": ghl_contact_id,
-                "ghl_webhook_url": bot_config.ghl_webhook_url,
-                "tts_provider": bot_config.tts_provider,
-                "tts_voice": bot_config.tts_voice,
-                "tts_style_prompt": bot_config.tts_style_prompt,
-                "language": bot_config.language,
-                "silence_timeout_secs": bot_config.silence_timeout_secs,
-            },
+            extra_vars=custom_overrides,
+            source="webhook",
+            status="queued",
         )
-        db.add(call_log)
-        await db.flush()
-
-        # --- Initiate outbound call ---
-        provider = getattr(bot_config, "telephony_provider", "plivo") or "plivo"
-        base_url = settings.PUBLIC_BASE_URL
-
-        if provider == "twilio":
-            provider_uuid = await twilio_make_call(
-                account_sid=bot_config.twilio_account_sid,
-                auth_token=bot_config.twilio_auth_token,
-                from_number=bot_config.twilio_phone_number,
-                to_number=phone_number,
-                answer_url=f"{base_url}/twilio/answer/{call_sid}",
-                status_callback_url=f"{base_url}/twilio/event/{call_sid}",
-            )
-        else:
-            provider_uuid = await plivo_make_call(
-                auth_id=bot_config.plivo_auth_id,
-                auth_token=bot_config.plivo_auth_token,
-                from_number=bot_config.plivo_caller_id,
-                to_number=phone_number,
-                answer_url=f"{base_url}/plivo/answer/{call_sid}",
-                hangup_url=f"{base_url}/plivo/event/{call_sid}",
-            )
-
-        if not provider_uuid:
-            call_log.status = "failed"
-            await db.commit()
-            raise HTTPException(status_code=502, detail=f"Failed to initiate {provider} call")
-
-        call_log.plivo_call_uuid = provider_uuid
-        call_log.status = "ringing"
+        db.add(queued_call)
         await db.commit()
+        await db.refresh(queued_call)
 
-    logger.info("webhook_call_triggered", call_sid=call_sid, provider=provider, to=phone_number, bot_id=bot_config_id)
-    return TriggerCallResponse(call_sid=call_sid, status="ringing")
+    logger.info(
+        "webhook_call_enqueued",
+        queue_id=str(queued_call.id),
+        phone=phone_number,
+        bot_id=bot_config_id,
+    )
+    return QueueEnqueueResponse(queue_id=queued_call.id, status="queued")

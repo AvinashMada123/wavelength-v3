@@ -3,21 +3,18 @@
 from __future__ import annotations
 
 import uuid
-from uuid import uuid4
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot_config.loader import BotConfigLoader, fill_prompt_template
-from app.config import settings
+from app.bot_config.loader import BotConfigLoader
 from app.database import get_db
 from app.models.call_log import CallLog
-from app.models.schemas import CallLogResponse, TriggerCallRequest, TriggerCallResponse
+from app.models.call_queue import QueuedCall
+from app.models.schemas import CallLogResponse, QueueEnqueueResponse, TriggerCallRequest
 from sqlalchemy import select
-from app.plivo.client import make_outbound_call as plivo_make_call
-from app.twilio.client import make_outbound_call as twilio_make_call
 
 logger = structlog.get_logger(__name__)
 
@@ -50,93 +47,30 @@ async def list_calls(
     return result.scalars().all()
 
 
-@router.post("/trigger", response_model=TriggerCallResponse)
+@router.post("/trigger", response_model=QueueEnqueueResponse, status_code=202)
 async def trigger_call(req: TriggerCallRequest, db: AsyncSession = Depends(get_db)):
-    # 1. Load bot config
+    """Enqueue a call for processing by the background queue processor."""
+    # 1. Validate bot config exists
     bot_config = await bot_config_loader.get(str(req.bot_id))
     if not bot_config:
         raise HTTPException(status_code=404, detail="Bot config not found")
 
-    # 2. Fill system prompt template
-    # Merge: context_variables defaults < extra_vars (overrides)
-    ctx_vars = bot_config.context_variables or {}
-    template_vars = ctx_vars if isinstance(ctx_vars, dict) else {}
-    template_vars.update(
-        contact_name=req.contact_name,
-        agent_name=bot_config.agent_name,
-        company_name=bot_config.company_name,
-        location=bot_config.location or "",
-        event_name=bot_config.event_name or "",
-        event_date=bot_config.event_date or "",
-        event_time=bot_config.event_time or "",
-    )
-    template_vars.update(req.extra_vars)
-
-    filled_prompt = fill_prompt_template(
-        bot_config.system_prompt_template,
-        **template_vars,
-    )
-
-    # 3. Create call_sid and call_log
-    call_sid = str(uuid4())
-    call_log = CallLog(
+    # 2. Enqueue call
+    queued_call = QueuedCall(
         bot_id=bot_config.id,
-        call_sid=call_sid,
         contact_name=req.contact_name,
         contact_phone=req.contact_phone,
         ghl_contact_id=req.ghl_contact_id,
-        status="initiated",
-        context_data={
-            "bot_id": str(bot_config.id),
-            "filled_prompt": filled_prompt,
-            "contact_name": req.contact_name,
-            "ghl_contact_id": req.ghl_contact_id,
-            "ghl_webhook_url": bot_config.ghl_webhook_url,
-            "tts_provider": bot_config.tts_provider,
-            "tts_voice": bot_config.tts_voice,
-            "tts_style_prompt": bot_config.tts_style_prompt,
-            "language": bot_config.language,
-            "silence_timeout_secs": bot_config.silence_timeout_secs,
-        },
+        extra_vars=req.extra_vars,
+        source="api",
+        status="queued",
     )
-    db.add(call_log)
-    await db.flush()
-
-    # 4. Initiate outbound call via configured provider
-    provider = getattr(bot_config, "telephony_provider", "plivo") or "plivo"
-    base_url = settings.PUBLIC_BASE_URL
-
-    if provider == "twilio":
-        provider_uuid = await twilio_make_call(
-            account_sid=bot_config.twilio_account_sid,
-            auth_token=bot_config.twilio_auth_token,
-            from_number=bot_config.twilio_phone_number,
-            to_number=req.contact_phone,
-            answer_url=f"{base_url}/twilio/answer/{call_sid}",
-            status_callback_url=f"{base_url}/twilio/event/{call_sid}",
-        )
-    else:
-        provider_uuid = await plivo_make_call(
-            auth_id=bot_config.plivo_auth_id,
-            auth_token=bot_config.plivo_auth_token,
-            from_number=bot_config.plivo_caller_id,
-            to_number=req.contact_phone,
-            answer_url=f"{base_url}/plivo/answer/{call_sid}",
-            hangup_url=f"{base_url}/plivo/event/{call_sid}",
-        )
-
-    if not provider_uuid:
-        call_log.status = "failed"
-        await db.commit()
-        raise HTTPException(status_code=502, detail=f"Failed to initiate {provider} call")
-
-    # 5. Update call_log with provider UUID
-    call_log.plivo_call_uuid = provider_uuid
-    call_log.status = "ringing"
+    db.add(queued_call)
     await db.commit()
+    await db.refresh(queued_call)
 
-    logger.info("call_triggered", call_sid=call_sid, provider=provider, provider_uuid=provider_uuid, to=req.contact_phone)
-    return TriggerCallResponse(call_sid=call_sid, status="ringing")
+    logger.info("call_enqueued", queue_id=str(queued_call.id), to=req.contact_phone, bot_id=str(req.bot_id))
+    return QueueEnqueueResponse(queue_id=queued_call.id, status="queued")
 
 
 @router.get("/{call_sid}/recording")

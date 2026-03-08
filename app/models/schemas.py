@@ -134,6 +134,59 @@ class CallLogResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# --- Queue & Circuit Breaker schemas ---
+
+
+class QueuedCallResponse(BaseModel):
+    id: uuid.UUID
+    bot_id: uuid.UUID
+    contact_name: str
+    contact_phone: str
+    ghl_contact_id: str | None
+    extra_vars: dict
+    source: str
+    status: str
+    priority: int
+    error_message: str | None
+    call_log_id: uuid.UUID | None
+    created_at: datetime
+    processed_at: datetime | None
+    bot_name: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class CircuitBreakerResponse(BaseModel):
+    bot_id: uuid.UUID
+    bot_name: str | None = None
+    state: str
+    consecutive_failures: int
+    failure_threshold: int
+    last_failure_at: datetime | None
+    last_failure_reason: str | None
+    opened_at: datetime | None
+    opened_by: str | None
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class QueueStatsResponse(BaseModel):
+    bot_id: uuid.UUID
+    bot_name: str
+    queued: int = 0
+    held: int = 0
+    processing: int = 0
+    completed: int = 0
+    failed: int = 0
+    cancelled: int = 0
+
+
+class QueueEnqueueResponse(BaseModel):
+    queue_id: uuid.UUID
+    status: str
+
+
 # --- Internal data classes ---
 
 

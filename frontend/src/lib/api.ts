@@ -5,6 +5,9 @@ import type {
   TriggerCallRequest,
   TriggerCallResponse,
   CallLog,
+  QueuedCall,
+  CircuitBreakerState,
+  QueueStats,
 } from "@/types/api";
 
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
@@ -63,4 +66,56 @@ export async function checkHealth(): Promise<{ status: string }> {
 
 export function getRecordingUrl(callSid: string): string {
   return `/api/calls/${callSid}/recording`;
+}
+
+// --- Queue & Circuit Breaker ---
+
+export function fetchQueuedCalls(params?: {
+  bot_id?: string;
+  status?: string;
+  limit?: number;
+}): Promise<QueuedCall[]> {
+  const searchParams = new URLSearchParams();
+  if (params?.bot_id) searchParams.set("bot_id", params.bot_id);
+  if (params?.status) searchParams.set("status", params.status);
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  const qs = searchParams.toString();
+  return apiFetch(`/api/queue${qs ? `?${qs}` : ""}`);
+}
+
+export function fetchQueueStats(): Promise<QueueStats[]> {
+  return apiFetch("/api/queue/stats");
+}
+
+export function cancelQueuedCall(queueId: string): Promise<{ status: string }> {
+  return apiFetch(`/api/queue/${queueId}/cancel`, { method: "POST" });
+}
+
+export function bulkCancelQueuedCalls(queueIds: string[]): Promise<{ cancelled: number }> {
+  return apiFetch("/api/queue/bulk-cancel", {
+    method: "POST",
+    body: JSON.stringify(queueIds),
+  });
+}
+
+export function bulkApproveHeldCalls(botId: string): Promise<{ status: string }> {
+  return apiFetch(`/api/queue/bulk-approve?bot_id=${botId}`, {
+    method: "POST",
+  });
+}
+
+export function fetchCircuitBreakers(): Promise<CircuitBreakerState[]> {
+  return apiFetch("/api/queue/circuit-breaker");
+}
+
+export function openCircuitBreaker(botId: string): Promise<{ status: string }> {
+  return apiFetch(`/api/queue/circuit-breaker/${botId}/open`, {
+    method: "POST",
+  });
+}
+
+export function resetCircuitBreaker(botId: string): Promise<{ status: string }> {
+  return apiFetch(`/api/queue/circuit-breaker/${botId}/reset`, {
+    method: "POST",
+  });
 }
