@@ -1,0 +1,17 @@
+services:
+  backend:
+    container_name: wavelength-backend
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./credentials:/credentials:ro
+    env_file:
+      - .env
+    networks:
+      - wavelength-net
+
+networks:
+  wavelength-net:
+    external: true
