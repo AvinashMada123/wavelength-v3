@@ -12,9 +12,9 @@ import pipecat.transports.base_output as _base_output
 import structlog
 from deepgram import LiveOptions
 
-# Increase from 0.35s default to survive inter-sentence TTS gaps (worst TTFB: 1.943s).
-# Safe: no pipeline component depends on BotStoppedSpeakingFrame timing for turn-taking.
-_base_output.BOT_VAD_STOP_SECS = 3.0
+# Increase from 0.35s default to survive inter-sentence TTS gaps.
+# 1.5s is safe for Sarvam TTS (0.2s TTFB) while reducing post-speech dead zone.
+_base_output.BOT_VAD_STOP_SECS = 1.5
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
