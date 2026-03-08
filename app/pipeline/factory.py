@@ -28,6 +28,7 @@ from pipecat.processors.user_idle_processor import UserIdleProcessor
 from app.serializers.plivo_pcm import PlivoPCMFrameSerializer
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.google.llm_vertex import GoogleVertexLLMService
 from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketParams,
     FastAPIWebsocketTransport,
@@ -36,7 +37,7 @@ from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from starlette.websockets import WebSocket
 
-from app.config import gemini_key_pool, settings
+from app.config import settings
 from app.models.bot_config import BotConfig
 from app.models.schemas import CallContext
 from app.pipeline.call_guard import CallGuard
@@ -399,10 +400,11 @@ async def build_pipeline(
         ),
     )
 
-    # --- LLM (key from round-robin pool) ---
-    call_api_key = gemini_key_pool.get_key()
-    llm = GoogleLLMService(
-        api_key=call_api_key,
+    # --- LLM (Vertex AI) ---
+    llm = GoogleVertexLLMService(
+        credentials_path=settings.GOOGLE_APPLICATION_CREDENTIALS,
+        project_id=settings.GOOGLE_CLOUD_PROJECT,
+        location=settings.VERTEX_AI_LOCATION,
         model="gemini-2.5-flash",
         params=GoogleLLMService.InputParams(
             temperature=0.7,
