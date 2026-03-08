@@ -1646,8 +1646,8 @@ export default function BotEditorPage() {
                                   {f.type === "enum" && (
                                     <Input
                                       placeholder="Enum values (comma-separated, e.g., yes, no, maybe)"
-                                      value={(f.enum_values || []).join(", ")}
-                                      onChange={(e) => updateCaptureField(i, { enum_values: e.target.value.split(",").map((v) => v.trim()).filter(Boolean) })}
+                                      defaultValue={(f.enum_values || []).join(", ")}
+                                      onBlur={(e) => updateCaptureField(i, { enum_values: e.target.value.split(",").map((v) => v.trim()).filter(Boolean) })}
                                     />
                                   )}
                                 </div>
