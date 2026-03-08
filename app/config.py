@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # GCP / Vertex AI
     GOOGLE_CLOUD_PROJECT: str = ""
     GOOGLE_APPLICATION_CREDENTIALS: str = ""
-    VERTEX_AI_LOCATION: str = "us-east4"
+    VERTEX_AI_LOCATION: str = "asia-southeast1"
 
     # Sarvam AI TTS
     SARVAM_API_KEY: str = ""
