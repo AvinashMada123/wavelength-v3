@@ -20,7 +20,6 @@ import re
 
 import structlog
 
-from app.config import gemini_key_pool
 from app.models.schemas import CallAnalysis, GoalConfig, RedFlagDetection
 
 logger = structlog.get_logger(__name__)
@@ -287,12 +286,17 @@ class CallAnalyzer:
         )
 
     async def _gemini_call(self, prompt: str, temperature: float, call_sid: str | None, max_retries: int = 3):
-        """Make a Gemini API call with retry on 429/503."""
+        """Make a Vertex AI Gemini call with retry on 429/503."""
         from google import genai
+        from app.config import settings
 
         for attempt in range(max_retries):
             try:
-                client = genai.Client(api_key=gemini_key_pool.get_key())
+                client = genai.Client(
+                    vertexai=True,
+                    project=settings.GOOGLE_CLOUD_PROJECT,
+                    location=settings.VERTEX_AI_LOCATION,
+                )
                 response = await client.aio.models.generate_content(
                     model="gemini-2.5-flash",
                     contents=prompt,
