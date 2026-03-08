@@ -340,6 +340,7 @@ async def build_pipeline(
     call_context: CallContext,
     websocket: WebSocket,
     provider: str = "plivo",
+    stream_sid: str = "",
 ) -> tuple[PipelineTask, FastAPIWebsocketTransport, OpenAILLMContext, CallGuard]:
     """
     Construct an isolated Pipecat pipeline for a single call.
@@ -359,7 +360,7 @@ async def build_pipeline(
         from pipecat.serializers.twilio import TwilioFrameSerializer
 
         serializer = TwilioFrameSerializer(
-            stream_sid="",  # Updated by Twilio's 'start' event
+            stream_sid=stream_sid,
             params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
         )
     else:

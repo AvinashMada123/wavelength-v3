@@ -29,6 +29,7 @@ async def run_pipeline(
     ctx: CallContext,
     bot_config: BotConfig,
     provider: str = "plivo",
+    stream_sid: str = "",
 ) -> dict:
     """
     Build and run the Pipecat pipeline for a single call.
@@ -36,7 +37,7 @@ async def run_pipeline(
     Returns dict with:
       - "messages": conversation message history (list of {role, content} dicts)
     """
-    task, transport, context, guard = await build_pipeline(bot_config, ctx, websocket, provider=provider)
+    task, transport, context, guard = await build_pipeline(bot_config, ctx, websocket, provider=provider, stream_sid=stream_sid)
 
     max_duration = getattr(bot_config, "max_call_duration", 480) or 480
     logger.info("pipeline_starting", call_sid=ctx.call_sid, voice=ctx.tts_voice, max_duration=max_duration)

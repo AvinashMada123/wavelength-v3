@@ -8,6 +8,7 @@ Twilio webhook and WebSocket routes.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 import structlog
@@ -122,11 +123,25 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
         await _update_call_status(call_sid, status="in_progress", started_at=datetime.now(timezone.utc))
         logger.info("twilio_pipeline_call_started", call_sid=call_sid)
 
+        # Pre-read Twilio's 'start' event to get the stream SID
+        stream_sid = ""
+        try:
+            for _ in range(5):  # Twilio sends 'connected' then 'start'
+                raw = await websocket.receive_text()
+                msg = json.loads(raw)
+                event = msg.get("event", "")
+                if event == "start":
+                    stream_sid = msg.get("streamSid", "")
+                    logger.info("twilio_stream_sid_captured", call_sid=call_sid, stream_sid=stream_sid)
+                    break
+        except Exception as e:
+            logger.error("twilio_stream_sid_read_failed", call_sid=call_sid, error=str(e))
+
         # Run pre-call GHL workflows
         await _run_ghl_workflows(ctx, bot_config, "pre_call")
 
         # Run pipeline (provider="twilio" tells factory to use TwilioFrameSerializer)
-        pipeline_result = await run_pipeline(websocket, ctx, bot_config, provider="twilio")
+        pipeline_result = await run_pipeline(websocket, ctx, bot_config, provider="twilio", stream_sid=stream_sid)
         conversation_messages = pipeline_result["messages"]
         end_reason = pipeline_result.get("end_reason")
         dnd_detected = pipeline_result.get("dnd_detected", False)
