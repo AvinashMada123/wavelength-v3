@@ -55,7 +55,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { fetchBots, fetchCallLogs, triggerCall, checkHealth, getRecordingUrl } from "@/lib/api";
+import { fetchBots, fetchCallLogs, fetchCallDetail, triggerCall, checkHealth, getRecordingUrl } from "@/lib/api";
 import { formatDate, formatDuration, formatPhoneNumber, timeAgo, cn } from "@/lib/utils";
 import type { BotConfig, CallLog } from "@/types/api";
 
@@ -137,6 +137,7 @@ export default function CallsPage() {
 
   // Detail modal
   const [selectedCall, setSelectedCall] = useState<CallLog | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -208,6 +209,19 @@ export default function CallsPage() {
   useEffect(() => {
     setPage(0);
   }, [filterBotId, filterStatus, searchQuery]);
+
+  async function openCallDetail(call: CallLog) {
+    setSelectedCall(call);
+    setLoadingDetail(true);
+    try {
+      const full = await fetchCallDetail(call.id);
+      setSelectedCall(full);
+    } catch {
+      // keep the light version
+    } finally {
+      setLoadingDetail(false);
+    }
+  }
 
   async function handleTrigger() {
     if (!selectedBotId || !contactName || !contactPhone) {
@@ -422,7 +436,7 @@ export default function CallsPage() {
                         <TableRow
                           key={call.id}
                           className="cursor-pointer"
-                          onClick={() => setSelectedCall(call)}
+                          onClick={() => openCallDetail(call)}
                         >
                           <TableCell>
                             <StatusBadge status={call.status} />
@@ -454,7 +468,7 @@ export default function CallsPage() {
                               className="h-7 w-7"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setSelectedCall(call);
+                                openCallDetail(call);
                               }}
                             >
                               <FileText className="h-3.5 w-3.5" />

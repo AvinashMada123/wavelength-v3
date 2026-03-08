@@ -13,7 +13,7 @@ from app.bot_config.loader import BotConfigLoader
 from app.database import get_db
 from app.models.call_log import CallLog
 from app.models.call_queue import QueuedCall
-from app.models.schemas import CallLogResponse, QueueEnqueueResponse, TriggerCallRequest
+from app.models.schemas import CallLogListResponse, CallLogResponse, QueueEnqueueResponse, TriggerCallRequest
 from sqlalchemy import select
 
 logger = structlog.get_logger(__name__)
@@ -29,7 +29,7 @@ def set_dependencies(loader: BotConfigLoader):
     bot_config_loader = loader
 
 
-@router.get("", response_model=list[CallLogResponse])
+@router.get("", response_model=list[CallLogListResponse])
 async def list_calls(
     bot_id: uuid.UUID | None = None,
     status: str | None = None,
@@ -45,6 +45,15 @@ async def list_calls(
     query = query.offset(offset).limit(limit)
     result = await db.execute(query)
     return result.scalars().all()
+
+
+@router.get("/{call_id}", response_model=CallLogResponse)
+async def get_call(call_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(CallLog).where(CallLog.id == call_id))
+    call_log = result.scalar_one_or_none()
+    if not call_log:
+        raise HTTPException(status_code=404, detail="Call not found")
+    return call_log
 
 
 @router.post("/trigger", response_model=QueueEnqueueResponse, status_code=202)

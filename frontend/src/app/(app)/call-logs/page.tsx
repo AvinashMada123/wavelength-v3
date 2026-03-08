@@ -57,7 +57,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { fetchBots, fetchCallLogs, getRecordingUrl } from "@/lib/api";
+import { fetchBots, fetchCallLogs, fetchCallDetail, getRecordingUrl } from "@/lib/api";
 import { exportCallsCSV } from "@/lib/call-logs-export";
 import { formatDate, formatDuration, formatPhoneNumber, timeAgo, cn } from "@/lib/utils";
 import type { BotConfig, CallLog } from "@/types/api";
@@ -143,6 +143,7 @@ export default function CallLogsPage() {
 
   // Detail modal
   const [selectedCall, setSelectedCall] = useState<CallLog | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -188,6 +189,19 @@ export default function CallLogsPage() {
     await loadCalls();
     setRefreshing(false);
     toast.success("Refreshed");
+  }
+
+  async function openCallDetail(call: CallLog) {
+    setSelectedCall(call);
+    setLoadingDetail(true);
+    try {
+      const full = await fetchCallDetail(call.id);
+      setSelectedCall(full);
+    } catch {
+      // keep the light version
+    } finally {
+      setLoadingDetail(false);
+    }
   }
 
   // ---------- Bot name lookup ----------
@@ -552,7 +566,7 @@ export default function CallLogsPage() {
                             "hover:bg-muted/50 border-b transition-colors cursor-pointer",
                             selectedIds.has(call.id) && "bg-violet-500/5"
                           )}
-                          onClick={() => setSelectedCall(call)}
+                          onClick={() => openCallDetail(call)}
                         >
                           <TableCell onClick={(e) => e.stopPropagation()}>
                             <input
@@ -619,7 +633,7 @@ export default function CallLogsPage() {
                               className="h-7 w-7"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setSelectedCall(call);
+                                openCallDetail(call);
                               }}
                             >
                               <FileText className="h-3.5 w-3.5" />

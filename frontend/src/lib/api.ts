@@ -60,6 +60,10 @@ export function fetchCallLogs(botId?: string): Promise<CallLog[]> {
   return apiFetch(`/api/calls${params}`);
 }
 
+export function fetchCallDetail(callId: string): Promise<CallLog> {
+  return apiFetch(`/api/calls/${callId}`);
+}
+
 export async function checkHealth(): Promise<{ status: string }> {
   return apiFetch("/health");
 }

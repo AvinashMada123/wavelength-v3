@@ -115,7 +115,27 @@ class BotConfigResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CallLogListResponse(BaseModel):
+    """Light response for list endpoints — no metadata/transcript."""
+    id: uuid.UUID
+    bot_id: uuid.UUID
+    call_sid: str
+    contact_name: str
+    contact_phone: str
+    ghl_contact_id: str | None
+    status: str
+    outcome: str | None
+    call_duration: int | None
+    summary: str | None
+    started_at: datetime | None
+    ended_at: datetime | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class CallLogResponse(BaseModel):
+    """Full response with metadata — for single call detail."""
     id: uuid.UUID
     bot_id: uuid.UUID
     call_sid: str

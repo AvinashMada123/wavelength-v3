@@ -170,5 +170,5 @@ export interface CallLog {
   started_at: string | null;
   ended_at: string | null;
   created_at: string;
-  metadata: CallLogMetadata | null;
+  metadata?: CallLogMetadata | null;
 }
