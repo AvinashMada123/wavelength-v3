@@ -473,6 +473,17 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         logger.error("pipeline_error", call_sid=call_sid, error=str(e), exc_info=True)
         await _update_call_status(call_sid, status="error")
         await _post_ghl_outcome(ctx, outcome="error", error=str(e))
+        # Record pipeline failure in circuit breaker
+        try:
+            from app.services import circuit_breaker
+            async with get_db_session() as db:
+                tripped = await circuit_breaker.record_failure(
+                    db, bot_config.id, f"pipeline_error: {str(e)[:200]}"
+                )
+                if tripped:
+                    logger.warning("circuit_breaker_tripped_by_pipeline", bot_id=str(bot_config.id))
+        except Exception:
+            logger.error("circuit_breaker_record_failed", call_sid=call_sid, exc_info=True)
     finally:
         await session_limiter.release()
 
