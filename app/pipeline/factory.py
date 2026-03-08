@@ -515,6 +515,9 @@ async def build_pipeline(
 
     # --- Call guard (voicemail / hold / DND detection + custom red flags) ---
     goal_cfg = getattr(bot_config, "goal_config", None)
+    if isinstance(goal_cfg, str):
+        import json
+        goal_cfg = json.loads(goal_cfg)
     call_guard = CallGuard(call_sid=call_context.call_sid, goal_config=goal_cfg)
 
     # --- Latency trackers ---
