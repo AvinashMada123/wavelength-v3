@@ -500,6 +500,35 @@ async def build_pipeline(
     # --- Context aggregator ---
     context_aggregator = llm.create_context_aggregator(context)
 
+    # Patch user aggregator to handle dropped STT transcripts.
+    # When VAD detects user speech but Deepgram produces no transcript
+    # (common when user speaks during/right after bot speech), the default
+    # behavior logs a warning and does nothing — bot goes silent.
+    # This patch pushes a spoken fallback instead.
+    _user_agg = context_aggregator.user()
+    _orig_push_aggregation = _user_agg.push_aggregation
+
+    async def _fallback_push_aggregation():
+        from pipecat.frames.frames import TTSSpeakFrame
+
+        if len(_user_agg._aggregation) > 0:
+            await _orig_push_aggregation()
+        elif (
+            not _user_agg._seen_interim_results
+            and _user_agg._was_bot_speaking
+            and not _user_agg._bot_speaking
+        ):
+            logger.warning(
+                "stt_transcript_dropped_pushing_fallback",
+                call_sid=call_context.call_sid,
+            )
+            _user_agg._was_bot_speaking = False
+            await _user_agg.push_frame(
+                TTSSpeakFrame(text="Sorry, I didn't catch that. Could you repeat?")
+            )
+
+    _user_agg.push_aggregation = _fallback_push_aggregation
+
     # --- Idle handler ---
     idle_handler = IdleEscalationHandler(
         silence_timeout=call_context.silence_timeout_secs,
