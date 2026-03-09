@@ -103,6 +103,34 @@ async def cancel_queued_call(queue_id: uuid.UUID, db: AsyncSession = Depends(get
     return {"status": "cancelled", "queue_id": str(queue_id)}
 
 
+@router.post("/{queue_id}/trigger")
+async def trigger_queued_call(queue_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Force-trigger a single queued/held call, bypassing circuit breaker.
+
+    Useful for testing individual calls when the bot is paused.
+    """
+    result = await db.execute(select(QueuedCall).where(QueuedCall.id == queue_id))
+    call = result.scalar_one_or_none()
+    if not call:
+        raise HTTPException(status_code=404, detail="Queue entry not found")
+    if call.status not in ("queued", "held"):
+        raise HTTPException(status_code=400, detail=f"Cannot trigger call in '{call.status}' status")
+
+    call.status = "processing"
+    await db.commit()
+
+    # Fire-and-forget: process this call in the background
+    import asyncio
+    from app.services.queue_processor import _process_single_call, _loader
+
+    if not _loader:
+        raise HTTPException(status_code=503, detail="Queue processor not initialized")
+
+    asyncio.create_task(_process_single_call(_loader, call.id, call.bot_id))
+    logger.info("queue_call_manually_triggered", queue_id=str(queue_id), contact=call.contact_name)
+    return {"status": "triggered", "queue_id": str(queue_id)}
+
+
 @router.post("/bulk-cancel")
 async def bulk_cancel(
     queue_ids: list[uuid.UUID],

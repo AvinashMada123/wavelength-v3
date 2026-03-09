@@ -6,19 +6,24 @@ States:
 - open: Calls are held, no new calls processed for this bot.
 - half_open: Not used yet (manual reset required).
 
-Only system failures trip the breaker (provider errors, pipeline crashes).
-Normal call outcomes (no_answer, busy, voicemail) do NOT count as failures.
+Trips on:
+1. System failures (provider errors, pipeline crashes) — consecutive failure counter.
+2. Red flag alerts — auto-pauses when unacknowledged alerts exceed threshold.
 """
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.call_analytics import CallAnalytics
 from app.models.call_queue import CircuitBreakerState, QueuedCall
+
+ALERT_PAUSE_THRESHOLD = int(os.environ.get("ALERT_PAUSE_THRESHOLD", "3"))
 
 logger = structlog.get_logger(__name__)
 
@@ -143,3 +148,50 @@ async def _release_held_calls(db: AsyncSession, bot_id) -> None:
     for call in result.scalars().all():
         call.status = "queued"
         call.error_message = None
+
+
+async def check_alert_threshold(db: AsyncSession, bot_id) -> bool:
+    """Auto-pause bot if unacknowledged alerts exceed threshold.
+
+    Returns True if the bot was just paused.
+    """
+    if ALERT_PAUSE_THRESHOLD <= 0:
+        return False
+
+    # Already open — nothing to do
+    cb = await get_or_create(db, bot_id)
+    if cb.state == "open":
+        return False
+
+    now = datetime.now(timezone.utc)
+    count_result = await db.execute(
+        select(func.count())
+        .select_from(CallAnalytics)
+        .where(
+            CallAnalytics.bot_id == bot_id,
+            CallAnalytics.has_red_flags == True,
+            CallAnalytics.acknowledged_at.is_(None),
+            (CallAnalytics.snoozed_until.is_(None)) | (CallAnalytics.snoozed_until < now),
+        )
+    )
+    unacked = count_result.scalar() or 0
+
+    if unacked >= ALERT_PAUSE_THRESHOLD:
+        reason = f"Auto-paused: {unacked} unacknowledged red flag alerts (threshold: {ALERT_PAUSE_THRESHOLD})"
+        cb.state = "open"
+        cb.opened_at = now
+        cb.opened_by = "auto_alerts"
+        cb.last_failure_reason = reason
+        cb.updated_at = now
+
+        await _hold_queued_calls(db, bot_id, reason)
+
+        logger.warning(
+            "circuit_breaker_alert_pause",
+            bot_id=str(bot_id),
+            unacked_alerts=unacked,
+            threshold=ALERT_PAUSE_THRESHOLD,
+        )
+        return True
+
+    return False

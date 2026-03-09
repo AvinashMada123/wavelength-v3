@@ -116,6 +116,10 @@ export function cancelQueuedCall(queueId: string): Promise<{ status: string }> {
   return apiFetch(`/api/queue/${queueId}/cancel`, { method: "POST" });
 }
 
+export function triggerQueuedCall(queueId: string): Promise<{ status: string }> {
+  return apiFetch(`/api/queue/${queueId}/trigger`, { method: "POST" });
+}
+
 export function bulkCancelQueuedCalls(queueIds: string[]): Promise<{ cancelled: number }> {
   return apiFetch("/api/queue/bulk-cancel", {
     method: "POST",

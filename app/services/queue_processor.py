@@ -33,12 +33,14 @@ STAGGER_DELAY_SECS = float(os.environ.get("QUEUE_STAGGER_DELAY_SECS", "2.0"))
 
 _task: asyncio.Task | None = None
 _shutdown = False
+_loader: BotConfigLoader | None = None
 
 
 def start(bot_config_loader: BotConfigLoader) -> asyncio.Task:
     """Start the queue processor background task."""
-    global _task, _shutdown
+    global _task, _shutdown, _loader
     _shutdown = False
+    _loader = bot_config_loader
     _task = asyncio.create_task(_processor_loop(bot_config_loader))
     logger.info("queue_processor_started")
     return _task

@@ -19,6 +19,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ListOrdered,
+  PhoneCall,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/layout/header";
@@ -61,6 +62,7 @@ import {
   fetchQueueStats,
   fetchCircuitBreakers,
   cancelQueuedCall,
+  triggerQueuedCall,
   bulkCancelQueuedCalls,
   bulkApproveHeldCalls,
   openCircuitBreaker,
@@ -126,7 +128,7 @@ function CircuitBreakerCard({
               <p className="text-xs text-muted-foreground">
                 {isOpen ? (
                   <span className="text-red-400">
-                    PAUSED {cb.opened_by === "auto" ? "(auto-tripped)" : "(manual)"}
+                    PAUSED {cb.opened_by === "auto" ? "(auto-tripped)" : cb.opened_by === "auto_alerts" ? "(red flag alerts)" : "(manual)"}
                   </span>
                 ) : (
                   <span className="text-emerald-400">Active</span>
@@ -341,6 +343,19 @@ export default function QueuePage() {
       await loadData();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to cancel");
+    }
+  }
+
+  async function handleTriggerSingle(queueId: string) {
+    setActionLoading(`trigger-${queueId}`);
+    try {
+      await triggerQueuedCall(queueId);
+      toast.success("Call triggered — processing now");
+      await loadData();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to trigger");
+    } finally {
+      setActionLoading(null);
     }
   }
 
@@ -643,16 +658,34 @@ export default function QueuePage() {
                               {timeAgo(call.created_at)}
                             </TableCell>
                             <TableCell>
-                              {cancelable && (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7 text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                                  onClick={() => handleCancelSingle(call.id)}
-                                >
-                                  <X className="h-3.5 w-3.5" />
-                                </Button>
-                              )}
+                              <div className="flex items-center gap-0.5">
+                                {cancelable && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
+                                    onClick={() => handleTriggerSingle(call.id)}
+                                    disabled={actionLoading === `trigger-${call.id}`}
+                                    title="Trigger this call now"
+                                  >
+                                    {actionLoading === `trigger-${call.id}` ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <PhoneCall className="h-3.5 w-3.5" />
+                                    )}
+                                  </Button>
+                                )}
+                                {cancelable && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                    onClick={() => handleCancelSingle(call.id)}
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
+                              </div>
                             </TableCell>
                           </TableRow>
                         );

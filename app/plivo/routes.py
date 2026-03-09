@@ -241,6 +241,18 @@ async def _save_call_analytics(
     if has_flags and max_severity in ("critical", "high"):
         logger.info("red_flag_alert_triggered", call_sid=call_sid, severity=max_severity)
 
+    # Auto-pause bot if unacknowledged alerts exceed threshold
+    if has_flags:
+        try:
+            from app.services import circuit_breaker
+            async with get_db_session() as db:
+                paused = await circuit_breaker.check_alert_threshold(db, bot_id)
+                await db.commit()
+                if paused:
+                    logger.warning("bot_auto_paused_by_alerts", call_sid=call_sid, bot_id=str(bot_id))
+        except Exception as e:
+            logger.error("alert_threshold_check_failed", call_sid=call_sid, error=str(e))
+
 
 def _map_plivo_status(plivo_status: str | None) -> str:
     """Map Plivo call status to our internal status."""
