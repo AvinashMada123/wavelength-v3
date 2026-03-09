@@ -93,6 +93,51 @@ _LANG_CODE_TO_ENUM = {
 }
 
 
+class GreetingGuard(FrameProcessor):
+    """Suppress phantom UserStoppedSpeakingFrame during the initial greeting.
+
+    Plivo echoes bot audio back through WebSocket. Silero VAD detects this echo
+    as "speech" and fires UserStoppedSpeakingFrame within 0.1-0.2s of greeting
+    start. This causes the context aggregator to push to LLM, generating a
+    phantom response that overlaps with the greeting ("weird noises").
+
+    This guard drops UserStoppedSpeakingFrame for a configurable duration after
+    pipeline start. Real TranscriptionFrames still pass through and accumulate
+    in the aggregator — they'll be pushed on the next real user turn boundary.
+    """
+
+    def __init__(self, guard_duration: float = 5.0, call_sid: str = "", **kwargs):
+        super().__init__(name="GreetingGuard", **kwargs)
+        self._guard_duration = guard_duration
+        self._call_sid = call_sid
+        self._start_time: float | None = None
+        self._guard_active = True
+
+    async def process_frame(self, frame, direction: FrameDirection):
+        from pipecat.frames.frames import StartFrame, UserStoppedSpeakingFrame
+
+        if isinstance(frame, StartFrame):
+            await super().process_frame(frame, direction)
+            self._start_time = time.monotonic()
+            await self.push_frame(frame, direction)
+            return
+
+        # Drop UserStoppedSpeakingFrame during guard period
+        if isinstance(frame, UserStoppedSpeakingFrame) and self._guard_active:
+            if self._start_time is not None:
+                elapsed = time.monotonic() - self._start_time
+                if elapsed < self._guard_duration:
+                    logger.debug(
+                        "greeting_guard_suppressed",
+                        call_sid=self._call_sid,
+                        elapsed=round(elapsed, 2),
+                    )
+                    return  # Drop the frame — phantom VAD from echo
+            self._guard_active = False
+
+        await self.push_frame(frame, direction)
+
+
 class LatencyTracker(FrameProcessor):
     """Pass-through processor that logs timestamps for specific frame types.
 
@@ -256,48 +301,61 @@ def _build_workflow_tools(bot_config: BotConfig, call_context: CallContext):
             await params.result_callback("CRM not configured")
             return
 
-        contact_id = call_context.ghl_contact_id
-        if not contact_id:
-            from app.database import get_db_session
+        # Return immediately so LLM can continue generating text without
+        # waiting for the GHL HTTP round-trip (~1-2s).
+        tag = wf["tag"]
+        await params.result_callback(f"Done — tagged contact with '{tag}'")
+
+        import asyncio
+
+        async def _tag_in_background():
+            contact_id = call_context.ghl_contact_id
+            if not contact_id:
+                from app.database import get_db_session
+                from app.ghl.client import GHLClient
+                from app.models.call_log import CallLog
+                from sqlalchemy import select
+
+                ghl = GHLClient(api_key=api_key)
+                try:
+                    async with get_db_session() as db:
+                        result = await db.execute(
+                            select(CallLog).where(CallLog.call_sid == call_context.call_sid)
+                        )
+                        call_log = result.scalar_one_or_none()
+                    phone = call_log.contact_phone if call_log else None
+                    if phone:
+                        contact_id = await ghl.find_contact(location_id, phone)
+                finally:
+                    await ghl.close()
+
+            if not contact_id:
+                logger.warning("workflow_skip_no_contact", call_sid=call_context.call_sid, tag=tag)
+                return
+
             from app.ghl.client import GHLClient
-            from app.models.call_log import CallLog
-            from sqlalchemy import select
 
             ghl = GHLClient(api_key=api_key)
             try:
-                async with get_db_session() as db:
-                    result = await db.execute(
-                        select(CallLog).where(CallLog.call_sid == call_context.call_sid)
-                    )
-                    call_log = result.scalar_one_or_none()
-                phone = call_log.contact_phone if call_log else None
-                if phone:
-                    contact_id = await ghl.find_contact(location_id, phone)
+                ok = await ghl.tag_contact(contact_id, tag)
+                logger.info(
+                    "during_call_workflow_triggered",
+                    call_sid=call_context.call_sid,
+                    workflow=wf.get("name"),
+                    tag=tag,
+                    success=ok,
+                )
+            except Exception as e:
+                logger.error(
+                    "during_call_workflow_failed",
+                    call_sid=call_context.call_sid,
+                    tag=tag,
+                    error=str(e),
+                )
             finally:
                 await ghl.close()
 
-        if not contact_id:
-            await params.result_callback("Could not find contact in CRM")
-            return
-
-        from app.ghl.client import GHLClient
-
-        ghl = GHLClient(api_key=api_key)
-        try:
-            tag = wf["tag"]
-            ok = await ghl.tag_contact(contact_id, tag)
-            logger.info(
-                "during_call_workflow_triggered",
-                call_sid=call_context.call_sid,
-                workflow=wf.get("name"),
-                tag=tag,
-                success=ok,
-            )
-            await params.result_callback(
-                f"Done — tagged contact with '{tag}'" if ok else f"Failed to tag with '{tag}'"
-            )
-        finally:
-            await ghl.close()
+        asyncio.create_task(_tag_in_background())
 
     return tools, handle_trigger_workflow
 
@@ -544,6 +602,12 @@ async def build_pipeline(
         goal_cfg = json.loads(goal_cfg)
     call_guard = CallGuard(call_sid=call_context.call_sid, goal_config=goal_cfg)
 
+    # --- Greeting guard (suppress phantom VAD during initial greeting) ---
+    greeting_guard = GreetingGuard(
+        guard_duration=5.0,
+        call_sid=call_context.call_sid,
+    )
+
     # --- Latency trackers ---
     tracker_post_stt = LatencyTracker(position="post_stt", call_sid=call_context.call_sid)
     tracker_post_tts = LatencyTracker(position="post_tts", call_sid=call_context.call_sid)
@@ -556,6 +620,7 @@ async def build_pipeline(
             call_guard,
             tracker_post_stt,
             user_idle,
+            greeting_guard,
             context_aggregator.user(),
             llm,
             tts,
