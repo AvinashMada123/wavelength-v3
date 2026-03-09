@@ -941,16 +941,14 @@ async def build_pipeline(
     # Task ref is set after PipelineTask creation (handler needs it to queue EndFrame)
     _task_ref: list[PipelineTask | None] = [None]
 
-    async def handle_end_call(params):
-        # Safety guard for Groq: block premature end_call (known tool-calling instability)
-        if llm_provider == "groq":
-            user_msgs = [m for m in context.get_messages() if isinstance(m, dict) and m.get("role") == "user"]
-            if len(user_msgs) < 2:
-                logger.warning("end_call_blocked_too_early", call_sid=call_context.call_sid,
-                               user_turns=len(user_msgs), provider="groq")
-                await params.result_callback("Cannot end call yet. Continue the conversation.")
-                return
+    # GPT-OSS-20B (reasoning model) has severe tool-calling instability:
+    # it calls end_call on the first turn, gets blocked, then spirals into
+    # 30+ second reasoning loops producing no text. Skip tools entirely for
+    # reasoning models; rely on max_call_duration for call ending.
+    llm_model = getattr(bot_config, "llm_model", "")
+    _groq_no_tools = llm_provider == "groq" and "gpt-oss" in llm_model
 
+    async def handle_end_call(params):
         reason = params.arguments.get("reason", "conversation_ended")
         logger.info("end_call_triggered", call_sid=call_context.call_sid, reason=reason,
                      provider=llm_provider)
@@ -960,12 +958,15 @@ async def build_pipeline(
         if _task_ref[0]:
             await _task_ref[0].queue_frame(EndFrame())
 
-    llm.register_function("end_call", handle_end_call)
-
     # --- During-call workflow tools ---
     workflow_tool_schema, workflow_handler = _build_workflow_tools(bot_config, call_context)
-    if workflow_handler:
-        llm.register_function("trigger_crm_workflow", workflow_handler)
+
+    if not _groq_no_tools:
+        llm.register_function("end_call", handle_end_call)
+        if workflow_handler:
+            llm.register_function("trigger_crm_workflow", workflow_handler)
+    else:
+        logger.info("tools_disabled_for_model", model=llm_model, provider=llm_provider)
 
     # --- TTS ---
     tts_provider = getattr(bot_config, "tts_provider", "gemini")
@@ -1044,12 +1045,13 @@ async def build_pipeline(
     )
 
     # Set tools as provider-agnostic ToolsSchema — adapters auto-convert per LLM provider
-    from pipecat.adapters.schemas.tools_schema import ToolsSchema
+    if not _groq_no_tools:
+        from pipecat.adapters.schemas.tools_schema import ToolsSchema
 
-    standard_tools = [_build_end_call_tool()]
-    if workflow_tool_schema:
-        standard_tools.append(workflow_tool_schema)
-    context.set_tools(ToolsSchema(standard_tools=standard_tools))
+        standard_tools = [_build_end_call_tool()]
+        if workflow_tool_schema:
+            standard_tools.append(workflow_tool_schema)
+        context.set_tools(ToolsSchema(standard_tools=standard_tools))
 
     # --- Context aggregator ---
     context_aggregator = llm.create_context_aggregator(context)
