@@ -6,6 +6,7 @@ Returns (PipelineTask, FastAPIWebsocketTransport, OpenAILLMContext).
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import pipecat.transports.base_output as _base_output
@@ -819,17 +820,23 @@ async def build_pipeline(
         from pipecat.transcriptions.language import Language as PipecatLanguage
 
         class _SafeSarvamSTT(SarvamSTTService):
-            """Sarvam STT without broadcast_interruption on START_SPEECH.
+            """Sarvam STT with two critical fixes:
 
-            Upstream SarvamSTTService calls broadcast_interruption() on every
-            START_SPEECH VAD event, which directly kills in-flight LLM/TTS —
-            bypassing MinWordsInterruptionStrategy. This causes cascading
-            cancellations when users speak in multi-sentence bursts.
+            1. No broadcast_interruption on START_SPEECH — prevents cascade
+               cancellations that kill in-flight LLM/TTS.
 
-            We override _handle_message to only push UserStartedSpeakingFrame
-            (no broadcast_interruption). The pipeline's interruption strategy
-            then decides whether to actually interrupt based on STT word count.
+            2. Buffered END_SPEECH — Sarvam sends END_SPEECH *before* the
+               transcript data message. If we broadcast UserStoppedSpeakingFrame
+               immediately, the context aggregator sees empty _aggregation and
+               doesn't push to LLM. The transcript arrives later but nothing
+               triggers push_aggregation. Fix: buffer the stop frame and emit
+               it AFTER the transcript data arrives.
             """
+
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self._end_speech_pending = False
+                self._end_speech_timeout_task: asyncio.Task | None = None
 
             async def _handle_message(self, message):
                 try:
@@ -842,13 +849,40 @@ async def build_pipeline(
                             # NOTE: no broadcast_interruption() — let pipeline strategy decide
                         elif signal == "END_SPEECH":
                             await self._call_event_handler("on_speech_stopped")
-                            await self.broadcast_frame(UserStoppedSpeakingFrame)
+                            # Buffer stop frame — wait for transcript before broadcasting
+                            self._end_speech_pending = True
+                            # Safety timeout: if transcript never arrives, send stop frame anyway
+                            if self._end_speech_timeout_task:
+                                self._end_speech_timeout_task.cancel()
+                            self._end_speech_timeout_task = asyncio.create_task(
+                                self._end_speech_timeout()
+                            )
                     elif message.type == "data":
-                        # Delegate transcript handling to parent
+                        # Cancel timeout — transcript arrived
+                        if self._end_speech_timeout_task:
+                            self._end_speech_timeout_task.cancel()
+                            self._end_speech_timeout_task = None
+                        # Process transcript first (creates TranscriptionFrame)
                         await super()._handle_message(message)
+                        # NOW send the buffered stop frame so aggregator has the transcript
+                        if self._end_speech_pending:
+                            self._end_speech_pending = False
+                            await self.broadcast_frame(UserStoppedSpeakingFrame)
                 except Exception as e:
                     await self.push_error(error_msg=f"Failed to handle message: {e}", exception=e)
                     await self.stop_all_metrics()
+
+            async def _end_speech_timeout(self):
+                """Safety: send UserStoppedSpeakingFrame if no transcript arrives within 2s."""
+                try:
+                    await asyncio.sleep(2.0)
+                    if self._end_speech_pending:
+                        self._end_speech_pending = False
+                        logger.warning("sarvam_stt_end_speech_timeout",
+                                       extra={"detail": "No transcript after END_SPEECH, sending stop frame"})
+                        await self.broadcast_frame(UserStoppedSpeakingFrame)
+                except asyncio.CancelledError:
+                    pass
 
         # Map BCP-47 → Pipecat Language enum for Sarvam (all 12 pipecat-supported languages)
         _SARVAM_LANG_MAP = {
