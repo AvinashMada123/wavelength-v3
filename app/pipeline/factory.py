@@ -514,15 +514,16 @@ async def build_pipeline(
     context_aggregator = llm.create_context_aggregator(context)
 
     # Patch user aggregator to handle dropped STT transcripts.
-    # When VAD detects user speech but Deepgram produces no transcript,
-    # the default behavior does nothing — bot goes silent forever.
-    # This fires regardless of whether the user spoke during or after bot speech.
+    # When VAD detects user speech AND Deepgram produced interim results
+    # (confirming real speech) but the final transcript is empty, push a
+    # spoken fallback. Without _seen_interim_results guard, echo/noise
+    # from Plivo triggers the fallback every 0.5s (matching turn analyzer).
     _user_agg = context_aggregator.user()
     _orig_push_aggregation = _user_agg.push_aggregation
 
-    # Cooldown: min 10s between fallbacks, max 3 per call
+    # Cooldown: min 15s between fallbacks, max 2 per call
     import time as _time
-    _fallback_state = {"last_fired": 0.0, "count": 0, "max": 3, "cooldown": 10.0}
+    _fallback_state = {"last_fired": 0.0, "count": 0, "max": 2, "cooldown": 15.0}
 
     async def _fallback_push_aggregation():
         from pipecat.frames.frames import TTSSpeakFrame
@@ -530,10 +531,10 @@ async def build_pipeline(
         if len(_user_agg._aggregation) > 0:
             # Normal path: we have transcript text, forward it
             await _orig_push_aggregation()
-        else:
-            # No transcript despite VAD detecting speech — Deepgram returned
-            # nothing usable (empty finals, interims only, or language mismatch).
-            # Fire fallback with cooldown to avoid spamming.
+        elif getattr(_user_agg, "_seen_interim_results", False):
+            # Deepgram saw real speech (sent interims) but produced no final
+            # transcript — language mismatch, mumbled speech, or dropped audio.
+            # Fire fallback with cooldown.
             now = _time.monotonic()
             elapsed = now - _fallback_state["last_fired"]
             if _fallback_state["count"] >= _fallback_state["max"]:
@@ -551,13 +552,12 @@ async def build_pipeline(
                 "stt_transcript_dropped_pushing_fallback",
                 call_sid=call_context.call_sid,
                 count=_fallback_state["count"],
-                had_interims=getattr(_user_agg, "_seen_interim_results", False),
-                bot_was_speaking=getattr(_user_agg, "_was_bot_speaking", False),
             )
             _user_agg._was_bot_speaking = False
             await _user_agg.push_frame(
                 TTSSpeakFrame(text="Sorry, I didn't catch that. Could you repeat?")
             )
+        # else: no interims = echo/noise, silently ignore
 
     _user_agg.push_aggregation = _fallback_push_aggregation
 
