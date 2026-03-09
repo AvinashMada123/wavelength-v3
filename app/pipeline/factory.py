@@ -554,11 +554,12 @@ async def build_pipeline(
 
     # --- Context ---
     system_prompt = call_context.filled_prompt + _CONVERSATION_RULES
-    greeting_text = f"Hi {call_context.contact_name}, this is {bot_config.agent_name} calling from {bot_config.company_name}. How are you doing today?"
+    # NOTE: Greeting is NOT seeded here — TTSSpeakFrame goes through TTS →
+    # context_aggregator.assistant() which adds it automatically. Adding it
+    # here too causes a duplicate greeting in LLM context (wastes tokens).
     context = OpenAILLMContext(
         messages=[
             {"role": "system", "content": system_prompt},
-            {"role": "assistant", "content": greeting_text},
         ],
     )
 
