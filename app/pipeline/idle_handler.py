@@ -44,7 +44,8 @@ class IdleEscalationHandler:
                 "role": "user",
                 "content": (
                     "[SYSTEM: The user is still silent after your check-in. "
-                    "Ask once more if they can hear you.]"
+                    "Ask once more if they can hear you. Keep it short — just "
+                    "'Hello? Can you hear me?' Do NOT share any information or say goodbye yet.]"
                 ),
             }
             await processor.push_frame(LLMMessagesAppendFrame(messages=[message], run_llm=True))
@@ -54,7 +55,7 @@ class IdleEscalationHandler:
             # Level 3+: say goodbye and hang up.
             message = {
                 "role": "user",
-                "content": "[SYSTEM: The user appears to have left. Say a brief goodbye and end the call.]",
+                "content": "[SYSTEM: The user has been completely silent for a long time. Say ONLY a brief goodbye like 'Looks like you are busy, I will try again later. Take care!' Do NOT dump any information. Just a short goodbye.]",
             }
             await processor.push_frame(LLMMessagesAppendFrame(messages=[message], run_llm=True))
             await processor.push_frame(EndFrame())
