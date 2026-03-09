@@ -43,6 +43,7 @@ from app.models.bot_config import BotConfig
 from app.models.schemas import CallContext
 from app.pipeline.call_guard import CallGuard
 from app.pipeline.idle_handler import IdleEscalationHandler
+from app.pipeline.phrase_aggregator import PhraseTextAggregator
 
 _timing_logger = structlog.get_logger("pipeline.timing")
 logger = structlog.get_logger(__name__)
@@ -720,6 +721,7 @@ async def build_pipeline(
         tts = GeminiTTS(
             model="gemini-2.5-flash-tts",
             voice_id=voice_id,
+            text_aggregator=PhraseTextAggregator(min_phrase_chars=10),
             params=GeminiTTSService.InputParams(
                 language=tts_language,
             ),
