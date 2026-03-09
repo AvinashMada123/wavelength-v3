@@ -6,7 +6,6 @@ Returns (PipelineTask, FastAPIWebsocketTransport, OpenAILLMContext).
 
 from __future__ import annotations
 
-import collections
 import time
 
 import pipecat.transports.base_output as _base_output
@@ -211,49 +210,38 @@ class STTAudioGate(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-class TTSJitterBuffer(FrameProcessor):
-    """Continuous reservoir buffer absorbing Sarvam TTS WebSocket jitter.
+class HelloGuard(FrameProcessor):
+    """Suppress 'hello?' utterances that cause response restart cascades.
 
-    Sarvam TTS delivers audio chunks with 200-950ms timing jitter. The
-    transport sends at 2x real-time, so its queue drains fast and every
-    delivery gap = dead silence on the phone.
+    When the bot is processing (LLM thinking) or speaking, the user may
+    say "Hello?" because they hear silence or audio breakage. This gets
+    transcribed and either:
+      - Interrupts the bot's current speech (cancels audio)
+      - Pushes "Hello?" to context, restarting the LLM response
 
-    Two-phase approach:
-      1. Initial fill: Accumulates `initial_buffer_ms` before releasing
-         any audio. Only for the first sentence of each bot response.
-      2. Streaming: Releases audio while maintaining `min_reserve_ms` in
-         the reservoir. Continuation sentences skip the initial fill —
-         the min_reserve provides natural buffering at sentence boundaries.
+    Each restart adds 1-2s, so 2-3 "Hello?" = 4-6s perceived latency.
 
-    At 2x transport send speed, min_reserve_ms of 400 gives ~200ms of
-    real-time jitter absorption throughout each utterance.
+    This guard drops "hello?"-like transcripts (and their associated
+    UserStoppedSpeakingFrame) during the processing and speaking windows,
+    letting the original response complete uninterrupted.
     """
 
-    def __init__(
-        self,
-        initial_buffer_ms: int = 800,
-        min_reserve_ms: int = 400,
-        call_sid: str = "",
-        **kwargs,
-    ):
-        super().__init__(name="TTSJitterBuffer", **kwargs)
+    _HELLO_WORDS = frozenset({"hello", "hallo", "hi", "hey", "alo", "helo"})
+
+    def __init__(self, call_sid: str = "", **kwargs):
+        super().__init__(name="HelloGuard", **kwargs)
         self._call_sid = call_sid
-        # Bytes = ms * 16000 samples/sec * 2 bytes/sample / 1000
-        self._initial_target_bytes = int(16000 * initial_buffer_ms / 1000 * 2)
-        self._min_reserve_bytes = int(16000 * min_reserve_ms / 1000 * 2)
-        self._reservoir: collections.deque = collections.deque()
-        self._reservoir_bytes = 0
-        self._phase = "idle"  # idle | filling | streaming
-        self._last_stopped_time: float = 0
+        self._awaiting_response = False  # between user stop and bot start
+        self._bot_speaking = False
+        self._suppressed_hello = False
 
     async def process_frame(self, frame, direction: FrameDirection):
-        import time
-
         from pipecat.frames.frames import (
+            BotStartedSpeakingFrame,
+            BotStoppedSpeakingFrame,
             StartFrame,
-            TTSAudioRawFrame,
-            TTSStartedFrame,
-            TTSStoppedFrame,
+            TranscriptionFrame,
+            UserStoppedSpeakingFrame,
         )
 
         if isinstance(frame, StartFrame):
@@ -261,55 +249,57 @@ class TTSJitterBuffer(FrameProcessor):
             await self.push_frame(frame, direction)
             return
 
-        if isinstance(frame, TTSStartedFrame):
-            now = time.monotonic()
-            # Continuation sentence (< 2s gap) skips initial fill
-            if self._last_stopped_time and (now - self._last_stopped_time) < 2.0:
-                self._phase = "streaming"
-            else:
-                self._phase = "filling"
-            self._reservoir.clear()
-            self._reservoir_bytes = 0
+        # Bot started speaking — processing window closed
+        if isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+            self._awaiting_response = False
+            self._suppressed_hello = False
             await self.push_frame(frame, direction)
             return
 
-        if isinstance(frame, TTSAudioRawFrame) and self._phase in (
-            "filling",
-            "streaming",
+        if isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+            await self.push_frame(frame, direction)
+            return
+
+        # User stopped speaking
+        if isinstance(frame, UserStoppedSpeakingFrame):
+            if self._suppressed_hello:
+                # Only "hello?" was captured — drop this to prevent
+                # push_aggregation with "hello?" text
+                self._suppressed_hello = False
+                logger.debug(
+                    "hello_guard_drop_stop",
+                    call_sid=self._call_sid,
+                )
+                return
+            # Real user speech — open the processing window
+            self._awaiting_response = True
+            await self.push_frame(frame, direction)
+            return
+
+        # Check transcripts during processing or bot speaking
+        if isinstance(frame, TranscriptionFrame) and (
+            self._awaiting_response or self._bot_speaking
         ):
-            self._reservoir.append((frame, direction))
-            self._reservoir_bytes += len(frame.audio)
-
-            if self._phase == "filling":
-                if self._reservoir_bytes >= self._initial_target_bytes:
-                    self._phase = "streaming"
-                    await self._release_above_reserve()
-            else:
-                await self._release_above_reserve()
-            return
-
-        if isinstance(frame, TTSStoppedFrame):
-            await self._flush_all()
-            self._phase = "idle"
-            self._last_stopped_time = time.monotonic()
-            await self.push_frame(frame, direction)
-            return
+            cleaned = frame.text.strip().lower().rstrip("?.!,;: ")
+            words = cleaned.split()
+            if (
+                words
+                and len(words) <= 2
+                and all(w in self._HELLO_WORDS for w in words)
+            ):
+                self._suppressed_hello = True
+                logger.info(
+                    "hello_guard_suppressed",
+                    call_sid=self._call_sid,
+                    text=frame.text,
+                )
+                return
+            # Real speech — don't suppress the next UserStoppedSpeaking
+            self._suppressed_hello = False
 
         await self.push_frame(frame, direction)
-
-    async def _release_above_reserve(self):
-        """Release frames while keeping min_reserve_bytes in the reservoir."""
-        while self._reservoir and self._reservoir_bytes > self._min_reserve_bytes:
-            frame, direction = self._reservoir.popleft()
-            self._reservoir_bytes -= len(frame.audio)
-            await self.push_frame(frame, direction)
-
-    async def _flush_all(self):
-        """Release all remaining frames."""
-        for frame, direction in self._reservoir:
-            await self.push_frame(frame, direction)
-        self._reservoir.clear()
-        self._reservoir_bytes = 0
 
 
 class LatencyTracker(FrameProcessor):
@@ -799,23 +789,14 @@ async def build_pipeline(
         call_sid=call_context.call_sid,
     )
 
-    # --- TTS jitter buffer (absorb Sarvam WebSocket streaming gaps) ---
-    jitter_buffer = TTSJitterBuffer(
-        initial_buffer_ms=800,
-        min_reserve_ms=400,
-        call_sid=call_context.call_sid,
-    ) if tts_provider == "sarvam" else None
+    # --- Hello guard (suppress "hello?" cascade during processing) ---
+    hello_guard = HelloGuard(call_sid=call_context.call_sid)
 
     # --- Latency trackers ---
     tracker_post_stt = LatencyTracker(position="post_stt", call_sid=call_context.call_sid)
     tracker_post_tts = LatencyTracker(position="post_tts", call_sid=call_context.call_sid)
 
     # --- Pipeline ---
-    # Build processor list — jitter buffer is only added for Sarvam TTS
-    post_tts_processors = [tracker_post_tts]
-    if jitter_buffer:
-        post_tts_processors.append(jitter_buffer)
-
     pipeline = Pipeline(
         [
             transport.input(),
@@ -825,10 +806,11 @@ async def build_pipeline(
             tracker_post_stt,
             user_idle,
             greeting_guard,
+            hello_guard,
             context_aggregator.user(),
             llm,
             tts,
-            *post_tts_processors,
+            tracker_post_tts,
             transport.output(),
             context_aggregator.assistant(),
         ]
