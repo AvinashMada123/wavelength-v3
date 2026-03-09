@@ -312,7 +312,8 @@ def _build_end_call_tool():
                 name="end_call",
                 description=(
                     "End the phone call. Call this ONLY when:\n"
-                    "1) Both you AND the customer have said goodbye/bye/take care — call end_call with NO additional text.\n"
+                    "1) Both you AND the customer have exchanged EXPLICIT goodbye words "
+                    "(bye/goodbye/take care/see you) — call end_call with NO additional text.\n"
                     "2) The customer says 'not interested', 'don't call me', 'wrong number', or any clear rejection "
                     "after you've attempted to address their concern.\n"
                     "3) The customer explicitly asks to hang up or end the call.\n\n"
@@ -320,7 +321,9 @@ def _build_end_call_tool():
                     "'bye'/'okay bye'/'thanks bye', call end_call IMMEDIATELY without saying anything else. "
                     "Do NOT say goodbye twice.\n\n"
                     "NEVER end the call if:\n"
-                    "- The customer is still mid-sentence, stuttering, or asking a question.\n"
+                    "- The customer only said 'yeah', 'yes', 'okay', 'thank you', or 'hmm' after your goodbye — "
+                    "these are acknowledgments, NOT goodbyes. Wait for them to finish or say an actual goodbye word.\n"
+                    "- The customer is still mid-sentence, stuttering, or starting a new question.\n"
                     "- The customer is hesitant but has NOT explicitly said goodbye or rejected.\n"
                     "- You are unsure whether the customer wants to end — keep the conversation going instead."
                 ),
@@ -513,6 +516,10 @@ async def build_pipeline(
     _user_agg = context_aggregator.user()
     _orig_push_aggregation = _user_agg.push_aggregation
 
+    # Cooldown: min 15s between fallbacks, max 2 per call
+    import time as _time
+    _fallback_state = {"last_fired": 0.0, "count": 0, "max": 2, "cooldown": 15.0}
+
     async def _fallback_push_aggregation():
         from pipecat.frames.frames import TTSSpeakFrame
 
@@ -523,9 +530,23 @@ async def build_pipeline(
             and _user_agg._was_bot_speaking
             and not _user_agg._bot_speaking
         ):
+            now = _time.monotonic()
+            elapsed = now - _fallback_state["last_fired"]
+            if _fallback_state["count"] >= _fallback_state["max"]:
+                logger.debug("stt_fallback_max_reached", call_sid=call_context.call_sid)
+                _user_agg._was_bot_speaking = False
+                return
+            if elapsed < _fallback_state["cooldown"]:
+                logger.debug("stt_fallback_cooldown", call_sid=call_context.call_sid, elapsed=round(elapsed, 1))
+                _user_agg._was_bot_speaking = False
+                return
+
+            _fallback_state["last_fired"] = now
+            _fallback_state["count"] += 1
             logger.warning(
                 "stt_transcript_dropped_pushing_fallback",
                 call_sid=call_context.call_sid,
+                count=_fallback_state["count"],
             )
             _user_agg._was_bot_speaking = False
             await _user_agg.push_frame(

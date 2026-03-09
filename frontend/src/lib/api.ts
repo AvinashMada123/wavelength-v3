@@ -77,6 +77,14 @@ export function fetchCallDetail(callId: string): Promise<CallLog> {
   return apiFetch(`/api/calls/${callId}`);
 }
 
+export function exportCallLogs(botId?: string, goalOutcome?: string): Promise<CallLog[]> {
+  const sp = new URLSearchParams();
+  if (botId) sp.set("bot_id", botId);
+  if (goalOutcome) sp.set("goal_outcome", goalOutcome);
+  const qs = sp.toString();
+  return apiFetch(`/api/calls/export${qs ? `?${qs}` : ""}`);
+}
+
 export async function checkHealth(): Promise<{ status: string }> {
   return apiFetch("/health");
 }

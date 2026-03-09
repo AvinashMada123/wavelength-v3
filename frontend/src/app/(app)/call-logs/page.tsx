@@ -62,7 +62,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { fetchBots, fetchCallLogs, fetchCallDetail, getRecordingUrl } from "@/lib/api";
+import { fetchBots, fetchCallLogs, fetchCallDetail, getRecordingUrl, exportCallLogs } from "@/lib/api";
 import { exportCallsCSV } from "@/lib/call-logs-export";
 import { formatDate, formatDuration, formatPhoneNumber, timeAgo, cn } from "@/lib/utils";
 import type { BotConfig, CallLog, CallAnalyticsData } from "@/types/api";
@@ -337,13 +337,45 @@ function CallLogsPageInner() {
 
   // ---------- Export ----------
 
-  function handleExport() {
-    const toExport =
-      selectedIds.size > 0
-        ? filteredCalls.filter((c) => selectedIds.has(c.id))
-        : filteredCalls;
-    exportCallsCSV(toExport);
-    toast.success(`Exported ${toExport.length} calls`);
+  async function handleExport() {
+    try {
+      toast.info("Fetching full call data for export...");
+      const fullCalls = await exportCallLogs(
+        filterBotId !== "all" ? filterBotId : undefined,
+        filterGoalOutcome !== "all" ? filterGoalOutcome : undefined
+      );
+      // Apply client-side filters (status, search, date) to the full data
+      let toExport = fullCalls;
+      if (filterStatus !== "all") {
+        toExport = toExport.filter((c) => c.status === filterStatus);
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        toExport = toExport.filter(
+          (c) =>
+            c.contact_name.toLowerCase().includes(q) ||
+            c.contact_phone.includes(q) ||
+            (c.summary && c.summary.toLowerCase().includes(q))
+        );
+      }
+      if (dateFrom) {
+        const from = new Date(dateFrom);
+        from.setHours(0, 0, 0, 0);
+        toExport = toExport.filter((c) => new Date(c.created_at) >= from);
+      }
+      if (dateTo) {
+        const to = new Date(dateTo);
+        to.setHours(23, 59, 59, 999);
+        toExport = toExport.filter((c) => new Date(c.created_at) <= to);
+      }
+      if (selectedIds.size > 0) {
+        toExport = toExport.filter((c) => selectedIds.has(c.id));
+      }
+      exportCallsCSV(toExport);
+      toast.success(`Exported ${toExport.length} calls`);
+    } catch {
+      toast.error("Export failed");
+    }
   }
 
   // ---------- Filter state ----------

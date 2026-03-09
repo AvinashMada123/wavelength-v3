@@ -58,6 +58,30 @@ async def list_calls(
     return result.scalars().all()
 
 
+@router.get("/export", response_model=list[CallLogResponse])
+async def export_calls(
+    bot_id: uuid.UUID | None = None,
+    goal_outcome: str | None = None,
+    limit: int = 10000,
+    db: AsyncSession = Depends(get_db),
+):
+    """Full call logs with metadata (transcript + recording) for CSV export."""
+    if goal_outcome:
+        query = (
+            select(CallLog)
+            .join(CallAnalytics, CallAnalytics.call_log_id == CallLog.id)
+            .where(CallAnalytics.goal_outcome == goal_outcome)
+            .order_by(CallLog.created_at.desc())
+        )
+    else:
+        query = select(CallLog).order_by(CallLog.created_at.desc())
+    if bot_id:
+        query = query.where(CallLog.bot_id == bot_id)
+    query = query.limit(limit)
+    result = await db.execute(query)
+    return result.scalars().all()
+
+
 @router.get("/{call_id}", response_model=CallLogResponse)
 async def get_call(call_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(CallLog).where(CallLog.id == call_id))
