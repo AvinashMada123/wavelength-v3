@@ -6,6 +6,7 @@ Returns (PipelineTask, FastAPIWebsocketTransport, OpenAILLMContext).
 
 from __future__ import annotations
 
+import collections
 import time
 
 import pipecat.transports.base_output as _base_output
@@ -187,33 +188,49 @@ class STTAudioGate(FrameProcessor):
 
 
 class TTSJitterBuffer(FrameProcessor):
-    """Pre-buffer TTS audio to absorb streaming jitter from WebSocket TTS.
+    """Continuous reservoir buffer absorbing Sarvam TTS WebSocket jitter.
 
-    Sarvam TTS delivers audio chunks with 200-500ms timing jitter over its
-    WebSocket. Without buffering, each gap = dead silence on the phone.
-    Pipecat's transport sends audio at 2x real-time, but the queue empties
-    during delivery gaps, causing audible drops.
+    Sarvam TTS delivers audio chunks with 200-950ms timing jitter. The
+    transport sends at 2x real-time, so its queue drains fast and every
+    delivery gap = dead silence on the phone.
 
-    This buffer accumulates the first N ms of each utterance before forwarding
-    any frames to the transport. After the initial fill, frames pass through
-    immediately — the 2x send speed in the transport maintains the playback
-    lead from that point.
+    Two-phase approach:
+      1. Initial fill: Accumulates `initial_buffer_ms` before releasing
+         any audio. Only for the first sentence of each bot response.
+      2. Streaming: Releases audio while maintaining `min_reserve_ms` in
+         the reservoir. Continuation sentences skip the initial fill —
+         the min_reserve provides natural buffering at sentence boundaries.
 
-    Net cost: +buffer_ms on first audio of each utterance only.
+    At 2x transport send speed, min_reserve_ms of 400 gives ~200ms of
+    real-time jitter absorption throughout each utterance.
     """
 
-    def __init__(self, buffer_ms: int = 200, call_sid: str = "", **kwargs):
+    def __init__(
+        self,
+        initial_buffer_ms: int = 800,
+        min_reserve_ms: int = 400,
+        call_sid: str = "",
+        **kwargs,
+    ):
         super().__init__(name="TTSJitterBuffer", **kwargs)
-        self._buffer_ms = buffer_ms
         self._call_sid = call_sid
-        self._buffer: list = []
-        self._buffering = False
-        self._accumulated_bytes = 0
-        # Target bytes: buffer_ms worth of 16kHz 16-bit mono PCM
-        self._target_bytes = int(16000 * buffer_ms / 1000 * 2)
+        # Bytes = ms * 16000 samples/sec * 2 bytes/sample / 1000
+        self._initial_target_bytes = int(16000 * initial_buffer_ms / 1000 * 2)
+        self._min_reserve_bytes = int(16000 * min_reserve_ms / 1000 * 2)
+        self._reservoir: collections.deque = collections.deque()
+        self._reservoir_bytes = 0
+        self._phase = "idle"  # idle | filling | streaming
+        self._last_stopped_time: float = 0
 
     async def process_frame(self, frame, direction: FrameDirection):
-        from pipecat.frames.frames import StartFrame, TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame
+        import time
+
+        from pipecat.frames.frames import (
+            StartFrame,
+            TTSAudioRawFrame,
+            TTSStartedFrame,
+            TTSStoppedFrame,
+        )
 
         if isinstance(frame, StartFrame):
             await super().process_frame(frame, direction)
@@ -221,42 +238,54 @@ class TTSJitterBuffer(FrameProcessor):
             return
 
         if isinstance(frame, TTSStartedFrame):
-            # New utterance — start buffering
-            self._buffering = True
-            self._buffer = []
-            self._accumulated_bytes = 0
+            now = time.monotonic()
+            # Continuation sentence (< 2s gap) skips initial fill
+            if self._last_stopped_time and (now - self._last_stopped_time) < 2.0:
+                self._phase = "streaming"
+            else:
+                self._phase = "filling"
+            self._reservoir.clear()
+            self._reservoir_bytes = 0
             await self.push_frame(frame, direction)
             return
 
-        if isinstance(frame, TTSAudioRawFrame) and self._buffering:
-            self._buffer.append((frame, direction))
-            self._accumulated_bytes += len(frame.audio)
-            if self._accumulated_bytes >= self._target_bytes:
-                # Buffer full — flush all accumulated frames at once
-                self._buffering = False
-                for buffered_frame, buffered_dir in self._buffer:
-                    await self.push_frame(buffered_frame, buffered_dir)
-                self._buffer = []
-                logger.debug(
-                    "jitter_buffer_flushed",
-                    call_sid=self._call_sid,
-                    buffered_ms=self._buffer_ms,
-                    bytes=self._accumulated_bytes,
-                )
+        if isinstance(frame, TTSAudioRawFrame) and self._phase in (
+            "filling",
+            "streaming",
+        ):
+            self._reservoir.append((frame, direction))
+            self._reservoir_bytes += len(frame.audio)
+
+            if self._phase == "filling":
+                if self._reservoir_bytes >= self._initial_target_bytes:
+                    self._phase = "streaming"
+                    await self._release_above_reserve()
+            else:
+                await self._release_above_reserve()
             return
 
         if isinstance(frame, TTSStoppedFrame):
-            # Utterance ended — flush any remaining buffer
-            if self._buffer:
-                self._buffering = False
-                for buffered_frame, buffered_dir in self._buffer:
-                    await self.push_frame(buffered_frame, buffered_dir)
-                self._buffer = []
+            await self._flush_all()
+            self._phase = "idle"
+            self._last_stopped_time = time.monotonic()
             await self.push_frame(frame, direction)
             return
 
-        # All other frames pass through immediately
         await self.push_frame(frame, direction)
+
+    async def _release_above_reserve(self):
+        """Release frames while keeping min_reserve_bytes in the reservoir."""
+        while self._reservoir and self._reservoir_bytes > self._min_reserve_bytes:
+            frame, direction = self._reservoir.popleft()
+            self._reservoir_bytes -= len(frame.audio)
+            await self.push_frame(frame, direction)
+
+    async def _flush_all(self):
+        """Release all remaining frames."""
+        for frame, direction in self._reservoir:
+            await self.push_frame(frame, direction)
+        self._reservoir.clear()
+        self._reservoir_bytes = 0
 
 
 class LatencyTracker(FrameProcessor):
@@ -747,7 +776,8 @@ async def build_pipeline(
 
     # --- TTS jitter buffer (absorb Sarvam WebSocket streaming gaps) ---
     jitter_buffer = TTSJitterBuffer(
-        buffer_ms=200,
+        initial_buffer_ms=800,
+        min_reserve_ms=400,
         call_sid=call_context.call_sid,
     ) if tts_provider == "sarvam" else None
 
