@@ -48,7 +48,10 @@ async def run_pipeline(
     greeting_text = f"Hi {ctx.contact_name}, this is {bot_config.agent_name} calling from {bot_config.company_name}. How are you doing today?"
 
     async def send_initial_greeting():
-        await asyncio.sleep(0.5)
+        # Brief yield — just enough for StartFrame to propagate through pipeline.
+        # Frames are queued in order, so greeting always processes after StartFrame.
+        # Previous 0.5s delay added unnecessary silence at call start.
+        await asyncio.sleep(0.1)
         await task.queue_frame(TTSSpeakFrame(text=greeting_text))
         logger.info("initial_greeting_triggered", call_sid=ctx.call_sid, greeting=greeting_text)
 

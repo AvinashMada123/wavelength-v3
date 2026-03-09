@@ -29,6 +29,7 @@ logger = structlog.get_logger(__name__)
 
 POLL_INTERVAL = float(os.environ.get("QUEUE_POLL_INTERVAL", "3"))
 MAX_CONCURRENT_PER_BOT = int(os.environ.get("QUEUE_MAX_CONCURRENT_PER_BOT", "5"))
+STAGGER_DELAY_SECS = float(os.environ.get("QUEUE_STAGGER_DELAY_SECS", "2.0"))
 
 _task: asyncio.Task | None = None
 _shutdown = False
@@ -70,7 +71,11 @@ async def _processor_loop(loader: BotConfigLoader):
 
 
 async def _process_batch(loader: BotConfigLoader):
-    """Process one batch of queued calls across all bots."""
+    """Process one batch of queued calls across all bots.
+
+    Calls are staggered by STAGGER_DELAY_SECS to prevent concurrent pipeline
+    inits from competing for TTS connections (causes 5-6s initial silence).
+    """
     async with get_db_session() as db:
         # Get distinct bot_ids that have queued calls
         result = await db.execute(
@@ -79,6 +84,9 @@ async def _process_batch(loader: BotConfigLoader):
             .distinct()
         )
         bot_ids = [row[0] for row in result.all()]
+
+    # Collect all calls to process, then stagger initiation across all bots
+    calls_to_process: list[tuple] = []  # (queue_id, bot_id)
 
     for bot_id in bot_ids:
         async with get_db_session() as db:
@@ -110,13 +118,21 @@ async def _process_batch(loader: BotConfigLoader):
 
             for queued_call in calls:
                 queued_call.status = "processing"
+                calls_to_process.append((queued_call.id, queued_call.bot_id))
             await db.commit()
 
-        # Process each call (outside the DB session to avoid long transactions)
-        for queued_call in calls:
-            asyncio.create_task(
-                _process_single_call(loader, queued_call.id, queued_call.bot_id)
-            )
+    # Stagger call initiation to avoid concurrent pipeline/TTS contention
+    for i, (queue_id, bot_id) in enumerate(calls_to_process):
+        if i > 0 and STAGGER_DELAY_SECS > 0:
+            await asyncio.sleep(STAGGER_DELAY_SECS)
+        asyncio.create_task(_process_single_call(loader, queue_id, bot_id))
+
+    if len(calls_to_process) > 1:
+        logger.info(
+            "batch_staggered",
+            total=len(calls_to_process),
+            stagger_secs=STAGGER_DELAY_SECS,
+        )
 
 
 async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
