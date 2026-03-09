@@ -324,6 +324,7 @@ class HelloGuard(FrameProcessor):
         self._awaiting_response = False  # between user stop and bot start
         self._bot_speaking = False
         self._suppressed_hello = False
+        self._user_turn_count = 0  # first user response (turn 0) is never suppressed
 
     async def process_frame(self, frame, direction: FrameDirection):
         from pipecat.frames.frames import (
@@ -365,13 +366,16 @@ class HelloGuard(FrameProcessor):
                 return
             # Real user speech — open the processing window
             self._awaiting_response = True
+            self._user_turn_count += 1
             await self.push_frame(frame, direction)
             return
 
-        # Check transcripts during processing or bot speaking
+        # Check transcripts during processing or bot speaking.
+        # Turn 0 (first user response after greeting) is never suppressed —
+        # "Hello" is a legitimate greeting, not an impatient interjection.
         if isinstance(frame, TranscriptionFrame) and (
             self._awaiting_response or self._bot_speaking
-        ):
+        ) and self._user_turn_count > 1:
             cleaned = frame.text.strip().lower().rstrip("?.!,;: ")
             words = cleaned.split()
             if (
