@@ -116,12 +116,17 @@ export const LANGUAGE_OPTIONS = [
   { value: "en-US", label: "English (US)" },
   { value: "en-GB", label: "English (UK)" },
   { value: "hi-IN", label: "Hindi" },
+  { value: "mr-IN", label: "Marathi" },
   { value: "ta-IN", label: "Tamil" },
   { value: "te-IN", label: "Telugu" },
   { value: "bn-IN", label: "Bengali" },
   { value: "kn-IN", label: "Kannada" },
   { value: "ml-IN", label: "Malayalam" },
   { value: "gu-IN", label: "Gujarati" },
+  { value: "pa-IN", label: "Punjabi" },
+  { value: "or-IN", label: "Odia" },
+  { value: "as-IN", label: "Assamese" },
+  { value: "ur-IN", label: "Urdu" },
 ];
 
 // Pre-defined template variables (always available, filled at call time)

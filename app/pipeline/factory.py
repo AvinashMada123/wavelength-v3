@@ -624,7 +624,7 @@ async def build_pipeline(
         from pipecat.services.sarvam.stt import SarvamSTTService
         from pipecat.transcriptions.language import Language as PipecatLanguage
 
-        # Map BCP-47 → Pipecat Language enum for Sarvam
+        # Map BCP-47 → Pipecat Language enum for Sarvam (all 12 pipecat-supported languages)
         _SARVAM_LANG_MAP = {
             "en-IN": PipecatLanguage.EN_IN,
             "hi-IN": PipecatLanguage.HI_IN,
@@ -636,8 +636,11 @@ async def build_pipeline(
             "ta-IN": PipecatLanguage.TA_IN,
             "te-IN": PipecatLanguage.TE_IN,
             "pa-IN": PipecatLanguage.PA_IN,
+            "or-IN": PipecatLanguage.OR_IN,  # Odia (pipecat maps to od-IN for Sarvam)
+            "as-IN": PipecatLanguage.AS_IN,  # Assamese
         }
         sarvam_lang = _SARVAM_LANG_MAP.get(stt_language)
+        # If language not in map, sarvam_lang=None → Sarvam auto-detects
         stt = SarvamSTTService(
             api_key=settings.SARVAM_API_KEY,
             model="saaras:v3",
@@ -648,12 +651,18 @@ async def build_pipeline(
             ),
             keepalive_timeout=30.0,
         )
-        logger.info("stt_provider_selected", provider="sarvam", model="saaras:v3", language=stt_language)
+        logger.info(
+            "stt_provider_selected",
+            provider="sarvam",
+            model="saaras:v3",
+            language=stt_language,
+            pinned=sarvam_lang is not None,
+        )
     else:
         # Use multi-language detection for Indian languages — users frequently
         # code-switch between Hindi/Hinglish/English and en-IN misses Hindi entirely,
         # causing bot to go silent (no transcript → no LLM response).
-        _MULTILANG_PREFIXES = ("en-IN", "hi", "mr", "ta", "te", "bn", "gu", "kn", "ml")
+        _MULTILANG_PREFIXES = ("en-IN", "hi", "mr", "ta", "te", "bn", "gu", "kn", "ml", "pa", "or", "as", "ur")
         deepgram_language = "multi" if stt_language.startswith(_MULTILANG_PREFIXES) else stt_language
         stt = DeepgramSTTService(
             api_key=settings.DEEPGRAM_API_KEY,
