@@ -629,14 +629,18 @@ async def build_pipeline(
 
     if tts_provider == "sarvam":
         from pipecat.services.sarvam.tts import SarvamTTSService
-        from pipecat.services.ai_services import TextAggregationMode
 
+        # NOTE: TOKEN mode deadlocks with Sarvam's pause_frame_processing=True.
+        # Each token triggers run_tts() which pauses the processor, but single
+        # tokens are below min_buffer_size so Sarvam never returns audio →
+        # processor stays paused → no more tokens flow → deadlock.
+        # SENTENCE mode (default) sends full sentences which always exceed
+        # min_buffer_size, avoiding the deadlock.
         tts = SarvamTTSService(
             api_key=settings.SARVAM_API_KEY,
             model="bulbul:v3",
             voice_id=call_context.tts_voice,
             sample_rate=16000,
-            text_aggregation_mode=TextAggregationMode.TOKEN,
             params=SarvamTTSService.InputParams(
                 language=stt_language,
                 min_buffer_size=30,
