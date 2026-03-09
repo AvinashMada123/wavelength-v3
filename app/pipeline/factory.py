@@ -1135,9 +1135,9 @@ async def build_pipeline(
 
     # --- Echo gate (mute echo during ALL bot speech, not just greeting) ---
     echo_gate = EchoGate(
-        greeting_gate_secs=5.0,
+        greeting_gate_secs=0.0,
         call_sid=call_context.call_sid,
-        enabled=settings.ECHO_GATE_ENABLED,
+        enabled=False,
     )
 
     # --- Hello guard (suppress "hello?" cascade during processing) ---
