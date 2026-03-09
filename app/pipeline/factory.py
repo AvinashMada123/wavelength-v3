@@ -303,10 +303,20 @@ class HelloGuard(FrameProcessor):
 
 
 class LatencyTracker(FrameProcessor):
-    """Pass-through processor that logs timestamps for specific frame types.
+    """Pass-through processor that logs timestamps and computes latency deltas.
 
     Inserted at key pipeline positions to measure per-stage latency.
     Passes ALL frames through unconditionally.
+
+    post_stt position computes:
+      - stt_latency_ms: UserStoppedSpeaking → TranscriptionFrame
+
+    post_tts position computes:
+      - llm_ttfb_ms: UserStoppedSpeaking → LLMFullResponseStartFrame
+      - tts_ttfb_ms: LLMFullResponseStart → TTSAudioRawFrame
+      - e2e_latency_ms: UserStoppedSpeaking → BotStartedSpeakingFrame
+
+    Also detects echo: logs any TranscriptionFrame arriving while bot is speaking.
     """
 
     # Import frame types lazily to avoid circular imports at module level.
@@ -318,6 +328,7 @@ class LatencyTracker(FrameProcessor):
             return
         from pipecat.frames.frames import (
             BotStartedSpeakingFrame,
+            BotStoppedSpeakingFrame,
             LLMFullResponseStartFrame,
             LLMTextFrame,
             TTSAudioRawFrame,
@@ -334,6 +345,7 @@ class LatencyTracker(FrameProcessor):
             "tts_first_audio": TTSAudioRawFrame,
             "bot_started_speaking": BotStartedSpeakingFrame,
         }
+        cls._bot_stopped_type = BotStoppedSpeakingFrame
 
     def __init__(self, position: str, call_sid: str, **kwargs):
         super().__init__(name=f"LatencyTracker-{position}", **kwargs)
@@ -343,8 +355,20 @@ class LatencyTracker(FrameProcessor):
         self._seen_this_turn: set[str] = set()
         self._load_frame_types()
 
+        # Delta computation timestamps (per-turn, reset on UserStoppedSpeaking)
+        self._user_stopped_ts: float | None = None
+        self._llm_start_ts: float | None = None
+
+        # Echo detection: track bot speaking state via upstream frames
+        self._bot_is_speaking = False
+
     async def process_frame(self, frame, direction: FrameDirection):
-        from pipecat.frames.frames import StartFrame, UserStoppedSpeakingFrame
+        from pipecat.frames.frames import (
+            BotStartedSpeakingFrame,
+            StartFrame,
+            TranscriptionFrame,
+            UserStoppedSpeakingFrame,
+        )
 
         # Must handle StartFrame to initialize, then push it downstream.
         if isinstance(frame, StartFrame):
@@ -352,12 +376,36 @@ class LatencyTracker(FrameProcessor):
             await self.push_frame(frame, direction)
             return
 
+        # Track bot speaking state for echo detection (upstream SystemFrames)
+        if isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_is_speaking = True
+        elif isinstance(frame, self._bot_stopped_type):
+            self._bot_is_speaking = False
+
+        now = time.monotonic()
+
         # Reset tracking on new turn.
         if isinstance(frame, UserStoppedSpeakingFrame):
             self._turn_id += 1
             self._seen_this_turn = set()
+            self._user_stopped_ts = now
+            self._llm_start_ts = None
 
-        # Log first occurrence of each tracked frame type per turn.
+        # Echo detection: log transcripts arriving while bot is speaking
+        if (
+            isinstance(frame, TranscriptionFrame)
+            and self._bot_is_speaking
+            and self._position == "post_stt"
+        ):
+            _timing_logger.warning(
+                "echo_transcript_during_bot_speech",
+                call_sid=self._call_sid,
+                turn=self._turn_id,
+                text=frame.text[:100] if frame.text else "",
+                ts=now,
+            )
+
+        # Log first occurrence of each tracked frame type per turn + compute deltas.
         for label, frame_type in self._frame_types.items():
             if isinstance(frame, frame_type) and label not in self._seen_this_turn:
                 self._seen_this_turn.add(label)
@@ -367,8 +415,53 @@ class LatencyTracker(FrameProcessor):
                     stage=label,
                     turn=self._turn_id,
                     call_sid=self._call_sid,
-                    ts=time.monotonic(),
+                    ts=now,
                 )
+
+                # Compute deltas based on position
+                if self._user_stopped_ts is not None:
+                    if label == "stt_transcript" and self._position == "post_stt":
+                        delta_ms = round((now - self._user_stopped_ts) * 1000)
+                        _timing_logger.info(
+                            "latency_delta",
+                            metric="stt_latency_ms",
+                            value_ms=delta_ms,
+                            turn=self._turn_id,
+                            call_sid=self._call_sid,
+                        )
+
+                    elif label == "llm_response_start" and self._position == "post_tts":
+                        delta_ms = round((now - self._user_stopped_ts) * 1000)
+                        self._llm_start_ts = now
+                        _timing_logger.info(
+                            "latency_delta",
+                            metric="llm_ttfb_ms",
+                            value_ms=delta_ms,
+                            turn=self._turn_id,
+                            call_sid=self._call_sid,
+                        )
+
+                    elif label == "tts_first_audio" and self._position == "post_tts":
+                        if self._llm_start_ts is not None:
+                            tts_delta = round((now - self._llm_start_ts) * 1000)
+                            _timing_logger.info(
+                                "latency_delta",
+                                metric="tts_ttfb_ms",
+                                value_ms=tts_delta,
+                                turn=self._turn_id,
+                                call_sid=self._call_sid,
+                            )
+
+                    elif label == "bot_started_speaking" and self._position == "post_tts":
+                        e2e_ms = round((now - self._user_stopped_ts) * 1000)
+                        _timing_logger.info(
+                            "latency_delta",
+                            metric="e2e_latency_ms",
+                            value_ms=e2e_ms,
+                            turn=self._turn_id,
+                            call_sid=self._call_sid,
+                        )
+
                 break
 
         await self.push_frame(frame, direction)
@@ -609,7 +702,10 @@ async def build_pipeline(
             serializer=serializer,
             vad_enabled=True,
             vad_audio_passthrough=True,
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(
+                stop_secs=0.2,
+                min_volume=0.8,  # Higher than default 0.6 to reject bot echo
+            )),
             turn_analyzer=LocalSmartTurnAnalyzerV3(
                 params=SmartTurnParams(stop_secs=0.5),
             ),
@@ -648,6 +744,8 @@ async def build_pipeline(
             params=SarvamSTTService.InputParams(
                 language=sarvam_lang,
                 mode="transcribe",
+                vad_signals=True,
+                high_vad_sensitivity=True,
             ),
             keepalive_timeout=30.0,
         )
@@ -696,6 +794,8 @@ async def build_pipeline(
     async def handle_end_call(params):
         reason = params.arguments.get("reason", "conversation_ended")
         logger.info("end_call_triggered", call_sid=call_context.call_sid, reason=reason)
+        # Store LLM's reason on CallGuard so it's available in post-call metadata
+        call_guard.llm_end_reason = reason
         await params.result_callback("Call ending now. Do not say anything else.")
         if _task_ref[0]:
             await _task_ref[0].queue_frame(EndFrame())
