@@ -138,6 +138,121 @@ class GreetingGuard(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
+class STTAudioGate(FrameProcessor):
+    """Mute audio input to STT during the greeting to prevent echo confusion.
+
+    Plivo echoes the bot's greeting back through the WebSocket. This echo
+    reaches Deepgram and causes: false transcripts, language detection confusion
+    (with multi-language mode), and wasted processing. By sending silence to
+    STT during the greeting window, Deepgram starts clean when the user speaks.
+
+    VAD runs in the transport BEFORE this gate, so UserStarted/StoppedSpeaking
+    events are unaffected (handled by GreetingGuard separately).
+    """
+
+    def __init__(self, gate_duration: float = 5.0, call_sid: str = "", **kwargs):
+        super().__init__(name="STTAudioGate", **kwargs)
+        self._gate_duration = gate_duration
+        self._call_sid = call_sid
+        self._start_time: float | None = None
+        self._gate_active = True
+
+    async def process_frame(self, frame, direction: FrameDirection):
+        from pipecat.frames.frames import InputAudioRawFrame, StartFrame
+
+        if isinstance(frame, StartFrame):
+            await super().process_frame(frame, direction)
+            self._start_time = time.monotonic()
+            await self.push_frame(frame, direction)
+            return
+
+        if isinstance(frame, InputAudioRawFrame) and self._gate_active:
+            if self._start_time is not None:
+                elapsed = time.monotonic() - self._start_time
+                if elapsed < self._gate_duration:
+                    # Replace with silence — keeps Deepgram connection alive
+                    # but prevents echo from being transcribed
+                    silent = InputAudioRawFrame(
+                        audio=b"\x00" * len(frame.audio),
+                        sample_rate=frame.sample_rate,
+                        num_channels=frame.num_channels,
+                    )
+                    await self.push_frame(silent, direction)
+                    return
+            self._gate_active = False
+            logger.info("stt_audio_gate_opened", call_sid=self._call_sid)
+
+        await self.push_frame(frame, direction)
+
+
+class TTSJitterBuffer(FrameProcessor):
+    """Pre-buffer TTS audio to absorb streaming jitter from WebSocket TTS.
+
+    Sarvam TTS delivers audio chunks with 200-500ms timing jitter over its
+    WebSocket. Without buffering, each gap = dead silence on the phone.
+    Pipecat's transport sends audio at 2x real-time, but the queue empties
+    during delivery gaps, causing audible drops.
+
+    This buffer accumulates the first N ms of each utterance before forwarding
+    any frames to the transport. After the initial fill, frames pass through
+    immediately — the 2x send speed in the transport maintains the playback
+    lead from that point.
+
+    Net cost: +buffer_ms on first audio of each utterance only.
+    """
+
+    def __init__(self, buffer_ms: int = 200, call_sid: str = "", **kwargs):
+        super().__init__(name="TTSJitterBuffer", **kwargs)
+        self._buffer_ms = buffer_ms
+        self._call_sid = call_sid
+        self._buffer: list = []
+        self._buffering = False
+        self._accumulated_bytes = 0
+        # Target bytes: buffer_ms worth of 16kHz 16-bit mono PCM
+        self._target_bytes = int(16000 * buffer_ms / 1000 * 2)
+
+    async def process_frame(self, frame, direction: FrameDirection):
+        from pipecat.frames.frames import TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame
+
+        if isinstance(frame, TTSStartedFrame):
+            # New utterance — start buffering
+            self._buffering = True
+            self._buffer = []
+            self._accumulated_bytes = 0
+            await self.push_frame(frame, direction)
+            return
+
+        if isinstance(frame, TTSAudioRawFrame) and self._buffering:
+            self._buffer.append((frame, direction))
+            self._accumulated_bytes += len(frame.audio)
+            if self._accumulated_bytes >= self._target_bytes:
+                # Buffer full — flush all accumulated frames at once
+                self._buffering = False
+                for buffered_frame, buffered_dir in self._buffer:
+                    await self.push_frame(buffered_frame, buffered_dir)
+                self._buffer = []
+                logger.debug(
+                    "jitter_buffer_flushed",
+                    call_sid=self._call_sid,
+                    buffered_ms=self._buffer_ms,
+                    bytes=self._accumulated_bytes,
+                )
+            return
+
+        if isinstance(frame, TTSStoppedFrame):
+            # Utterance ended — flush any remaining buffer
+            if self._buffer:
+                self._buffering = False
+                for buffered_frame, buffered_dir in self._buffer:
+                    await self.push_frame(buffered_frame, buffered_dir)
+                self._buffer = []
+            await self.push_frame(frame, direction)
+            return
+
+        # All other frames pass through immediately
+        await self.push_frame(frame, direction)
+
+
 class LatencyTracker(FrameProcessor):
     """Pass-through processor that logs timestamps for specific frame types.
 
@@ -614,14 +729,32 @@ async def build_pipeline(
         call_sid=call_context.call_sid,
     )
 
+    # --- STT audio gate (mute echo during greeting so Deepgram starts clean) ---
+    stt_gate = STTAudioGate(
+        gate_duration=5.0,
+        call_sid=call_context.call_sid,
+    )
+
+    # --- TTS jitter buffer (absorb Sarvam WebSocket streaming gaps) ---
+    jitter_buffer = TTSJitterBuffer(
+        buffer_ms=200,
+        call_sid=call_context.call_sid,
+    ) if tts_provider == "sarvam" else None
+
     # --- Latency trackers ---
     tracker_post_stt = LatencyTracker(position="post_stt", call_sid=call_context.call_sid)
     tracker_post_tts = LatencyTracker(position="post_tts", call_sid=call_context.call_sid)
 
     # --- Pipeline ---
+    # Build processor list — jitter buffer is only added for Sarvam TTS
+    post_tts_processors = [tracker_post_tts]
+    if jitter_buffer:
+        post_tts_processors.append(jitter_buffer)
+
     pipeline = Pipeline(
         [
             transport.input(),
+            stt_gate,
             stt,
             call_guard,
             tracker_post_stt,
@@ -630,7 +763,7 @@ async def build_pipeline(
             context_aggregator.user(),
             llm,
             tts,
-            tracker_post_tts,
+            *post_tts_processors,
             transport.output(),
             context_aggregator.assistant(),
         ]
