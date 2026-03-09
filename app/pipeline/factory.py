@@ -642,11 +642,8 @@ async def build_pipeline(
             api_key=settings.SARVAM_API_KEY,
             model="saaras:v3",
             sample_rate=16000,
-            input_audio_codec="pcm_s16le",
-            params=SarvamSTTService.InputParams(
-                language=sarvam_lang,  # None → auto-detect ("unknown")
-                mode="transcribe",
-            ),
+            language=sarvam_lang,
+            mode="transcribe",
             keepalive_timeout=30.0,
         )
         logger.info("stt_provider_selected", provider="sarvam", model="saaras:v3", language=stt_language)
