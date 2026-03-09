@@ -946,17 +946,27 @@ async def build_pipeline(
         from pipecat.services.openai.base_llm import BaseOpenAILLMService
         from pipecat.services.groq.llm import GroqLLMService
 
-        llm = GroqLLMService(
-            api_key=settings.GROQ_API_KEY,
-            model=getattr(bot_config, "llm_model", "openai/gpt-oss-20b"),
-            params=BaseOpenAILLMService.InputParams(
+        groq_model = getattr(bot_config, "llm_model", "llama-3.3-70b-versatile")
+        # Reasoning models (gpt-oss) need reasoning_effort + max_completion_tokens;
+        # standard models (llama) use plain max_tokens.
+        if "gpt-oss" in groq_model:
+            groq_params = BaseOpenAILLMService.InputParams(
                 temperature=0.7,
                 max_completion_tokens=1024,
                 extra={"reasoning_effort": "low"},
-            ),
+            )
+        else:
+            groq_params = BaseOpenAILLMService.InputParams(
+                temperature=0.7,
+                max_tokens=1024,
+            )
+
+        llm = GroqLLMService(
+            api_key=settings.GROQ_API_KEY,
+            model=groq_model,
+            params=groq_params,
         )
-        logger.info("llm_provider_selected", provider="groq",
-                     model=getattr(bot_config, "llm_model", "openai/gpt-oss-20b"))
+        logger.info("llm_provider_selected", provider="groq", model=groq_model)
     else:
         llm = GoogleVertexLLMService(
             credentials_path=settings.GOOGLE_APPLICATION_CREDENTIALS,
