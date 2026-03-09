@@ -36,6 +36,24 @@ class Settings(BaseSettings):
     # Sarvam AI TTS
     SARVAM_API_KEY: str = ""
 
+    # Groq (OpenAI-compatible LLM)
+    GROQ_API_KEY: str = ""
+
+    # --- Audio quality feature flags (Phase 0-4) ---
+    # Phase 1: Plivo server-side noise cancellation on incoming audio
+    PLIVO_NOISE_CANCEL: bool = True
+    # Phase 2: Full echo gate — mutes incoming audio during bot speech + echo tail
+    ECHO_GATE_ENABLED: bool = True
+    # Echo tail delay (ms) after BotStoppedSpeakingFrame before gate opens.
+    # Set from Phase 0 measurement (p95 RTT + 100ms margin). 500ms is a safe default.
+    ECHO_TAIL_MS: float = 500.0
+    # Phase 3: Pre-synthesize greeting and send directly to Plivo (bypass pipeline)
+    GREETING_DIRECT_PLAY: bool = True
+    # Phase 4: Adaptive phrase aggregation (lower first-phrase, higher subsequent)
+    ADAPTIVE_PHRASE_CHARS: bool = True
+    # Phase 4: Comfort noise during inter-sentence silence gaps
+    COMFORT_NOISE_ENABLED: bool = False
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 

@@ -44,6 +44,8 @@ class BotConfig(Base):
     twilio_auth_token: Mapped[str | None] = mapped_column(Text)
     twilio_phone_number: Mapped[str | None] = mapped_column(Text)
     greeting_template: Mapped[str | None] = mapped_column(Text)
+    llm_provider: Mapped[str] = mapped_column(Text, nullable=False, server_default="google")
+    llm_model: Mapped[str] = mapped_column(Text, nullable=False, server_default="gemini-2.5-flash")
     goal_config: Mapped[dict | None] = mapped_column(JSONB)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     created_at: Mapped[datetime] = mapped_column(

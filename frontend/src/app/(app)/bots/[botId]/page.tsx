@@ -49,7 +49,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 import { fetchBot, createBot, updateBot } from "@/lib/api";
-import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS } from "@/lib/constants";
+import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS, LLM_PROVIDER_OPTIONS, LLM_MODEL_OPTIONS } from "@/lib/constants";
 import type { BotConfig, GHLWorkflow, GoalConfig, SuccessCriterion, RedFlagConfig, DataCaptureField } from "@/types/api";
 
 // ---------------------------------------------------------------------------
@@ -68,6 +68,8 @@ interface BotForm {
   tts_provider: "gemini" | "sarvam";
   tts_voice: string;
   tts_style_prompt: string;
+  llm_provider: "google" | "groq";
+  llm_model: string;
   language: string;
   system_prompt_template: string;
   context_variables: Record<string, string>;
@@ -99,6 +101,8 @@ const EMPTY_FORM: BotForm = {
   tts_provider: "gemini",
   tts_voice: "Kore",
   tts_style_prompt: "",
+  llm_provider: "google",
+  llm_model: "gemini-2.5-flash",
   language: "en-IN",
   system_prompt_template: "",
   context_variables: {},
@@ -147,6 +151,8 @@ function botToForm(bot: BotConfig): BotForm {
     tts_provider: bot.tts_provider || "gemini",
     tts_voice: bot.tts_voice,
     tts_style_prompt: bot.tts_style_prompt || "",
+    llm_provider: bot.llm_provider || "google",
+    llm_model: bot.llm_model || "gemini-2.5-flash",
     language: bot.language || "en-IN",
     system_prompt_template: bot.system_prompt_template,
     context_variables: bot.context_variables || {},
@@ -816,6 +822,58 @@ export default function BotEditorPage() {
                                   {LANGUAGE_OPTIONS.map((l) => (
                                     <SelectItem key={l.value} value={l.value}>
                                       {l.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        </Section>
+
+                        <Separator />
+
+                        <Section
+                          title="LLM"
+                          description="Choose the LLM provider and model for conversation intelligence."
+                        >
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label>LLM Provider</Label>
+                              <Select
+                                value={form.llm_provider}
+                                onValueChange={(v) => {
+                                  const provider = v as "google" | "groq";
+                                  setField("llm_provider", provider);
+                                  // Reset model to provider default
+                                  const defaultModel = LLM_MODEL_OPTIONS[provider]?.[0]?.value ?? "";
+                                  setField("llm_model", defaultModel);
+                                }}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select LLM provider..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {LLM_PROVIDER_OPTIONS.map((p) => (
+                                    <SelectItem key={p.value} value={p.value}>
+                                      {p.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Model</Label>
+                              <Select
+                                value={form.llm_model}
+                                onValueChange={(v) => setField("llm_model", v)}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select model..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {(LLM_MODEL_OPTIONS[form.llm_provider] || []).map((m) => (
+                                    <SelectItem key={m.value} value={m.value}>
+                                      {m.label}
                                     </SelectItem>
                                   ))}
                                 </SelectContent>

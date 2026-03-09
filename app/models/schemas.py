@@ -127,6 +127,8 @@ class CreateBotConfigRequest(BaseModel):
     tts_provider: str = "gemini"
     tts_voice: str = "Kore"
     tts_style_prompt: str | None = None
+    llm_provider: Literal["google", "groq"] = "google"
+    llm_model: str = "gemini-2.5-flash"
     language: str = "en-IN"
     system_prompt_template: str
     context_variables: dict[str, str] = Field(default_factory=dict)
@@ -159,6 +161,8 @@ class UpdateBotConfigRequest(BaseModel):
     tts_provider: str | None = None
     tts_voice: str | None = None
     tts_style_prompt: str | None = None
+    llm_provider: Literal["google", "groq"] | None = None
+    llm_model: str | None = None
     language: str | None = None
     system_prompt_template: str | None = None
     context_variables: dict[str, str] | None = None
@@ -201,6 +205,8 @@ class BotConfigResponse(BaseModel):
     tts_provider: str
     tts_voice: str
     tts_style_prompt: str | None
+    llm_provider: str
+    llm_model: str
     language: str
     system_prompt_template: str
     context_variables: dict[str, str]

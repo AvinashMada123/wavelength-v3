@@ -20,6 +20,8 @@ export interface BotConfig {
   tts_provider: "gemini" | "sarvam";
   tts_voice: string;
   tts_style_prompt: string | null;
+  llm_provider: "google" | "groq";
+  llm_model: string;
   language: string;
   system_prompt_template: string;
   context_variables: Record<string, string>;
@@ -51,6 +53,8 @@ export interface CreateBotConfigRequest {
   tts_provider?: "gemini" | "sarvam";
   tts_voice?: string;
   tts_style_prompt?: string | null;
+  llm_provider?: "google" | "groq";
+  llm_model?: string;
   language?: string;
   system_prompt_template: string;
   context_variables?: Record<string, string>;
@@ -83,6 +87,8 @@ export interface UpdateBotConfigRequest {
   tts_provider?: "gemini" | "sarvam" | null;
   tts_voice?: string | null;
   tts_style_prompt?: string | null;
+  llm_provider?: "google" | "groq" | null;
+  llm_model?: string | null;
   language?: string | null;
   system_prompt_template?: string | null;
   context_variables?: Record<string, string> | null;

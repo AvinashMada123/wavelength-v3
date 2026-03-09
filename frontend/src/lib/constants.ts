@@ -111,6 +111,21 @@ export const TTS_PROVIDER_OPTIONS = [
   { value: "sarvam", label: "Sarvam AI" },
 ] as const;
 
+export const LLM_PROVIDER_OPTIONS = [
+  { value: "google", label: "Google Gemini" },
+  { value: "groq", label: "Groq" },
+] as const;
+
+export const LLM_MODEL_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  google: [
+    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+  ],
+  groq: [
+    { value: "openai/gpt-oss-20b", label: "GPT-OSS 20B" },
+    { value: "llama-3.3-70b-versatile", label: "Llama 3.3 70B" },
+  ],
+};
+
 export const LANGUAGE_OPTIONS = [
   { value: "en-IN", label: "English (India)" },
   { value: "en-US", label: "English (US)" },

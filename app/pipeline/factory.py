@@ -162,50 +162,140 @@ class GreetingGuard(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-class STTAudioGate(FrameProcessor):
-    """Mute echo audio during the initial greeting only.
+class EchoGate(FrameProcessor):
+    """Mute Plivo echo during ALL bot speech, not just the greeting.
 
-    Plivo echoes bot audio back through the WebSocket. During the greeting,
-    this echo can confuse Deepgram (especially multi-language mode). This
-    gate sends silence to STT for the first `gate_secs` seconds after the
-    pipeline starts, then permanently opens.
+    Plivo echoes bot audio back through the WebSocket. This echo triggers
+    false VAD events and phantom STT transcripts, which can cause
+    MinWordsInterruptionStrategy to fire and destroy the audio queue.
 
-    Only the greeting is gated — subsequent bot speech is NOT muted, because
-    BotStoppedSpeakingFrame fires BOT_VAD_STOP_SECS (1.5s) late, which
-    would eat the start of user responses (short utterances like "Yeah"
-    are lost entirely).
+    The gate closes when BotStartedSpeakingFrame arrives (upstream SystemFrame
+    from BaseOutputTransport) and re-opens after BotStoppedSpeakingFrame +
+    a configurable echo tail delay (ECHO_TAIL_MS) to account for the
+    round-trip time of echo returning from Plivo.
+
+    For the initial greeting window, the gate starts closed unconditionally
+    for GREETING_GATE_SECS to handle the pre-pipeline greeting (Phase 3).
+
+    Safety valve: max continuous gate-closed duration of 30s.
     """
 
-    def __init__(self, gate_secs: float = 5.0, call_sid: str = "", **kwargs):
-        super().__init__(name="STTAudioGate", **kwargs)
+    def __init__(
+        self,
+        echo_tail_ms: float = 500.0,
+        greeting_gate_secs: float = 5.0,
+        max_gate_secs: float = 30.0,
+        call_sid: str = "",
+        enabled: bool = True,
+        **kwargs,
+    ):
+        super().__init__(name="EchoGate", **kwargs)
         self._call_sid = call_sid
-        self._gate_secs = gate_secs
+        self._enabled = enabled
+        self._echo_tail_s = echo_tail_ms / 1000.0
+        self._greeting_gate_secs = greeting_gate_secs
+        self._max_gate_secs = max_gate_secs
+
         self._start_time: float | None = None
+        self._bot_speaking = False
+        self._bot_stopped_ts: float | None = None  # when BotStoppedSpeakingFrame arrived
+        self._gate_closed_since: float | None = None  # for safety valve
+
+        # Metrics
+        self._frames_silenced = 0
+        self._gate_transitions = 0
+
+    def _is_gate_closed(self, now: float) -> bool:
+        """Determine if the gate should be closed (muting audio)."""
+        if not self._enabled:
+            return False
+
+        # Initial greeting window — always closed
+        if self._start_time is not None and (now - self._start_time) < self._greeting_gate_secs:
+            return True
+
+        # Safety valve — force open after max_gate_secs
+        if self._gate_closed_since is not None and (now - self._gate_closed_since) > self._max_gate_secs:
+            logger.error(
+                "echo_gate_safety_valve",
+                call_sid=self._call_sid,
+                closed_for_s=round(now - self._gate_closed_since, 1),
+            )
+            self._bot_speaking = False
+            self._gate_closed_since = None
+            return False
+
+        # Bot is currently speaking — gate closed
+        if self._bot_speaking:
+            return True
+
+        # Echo tail delay after bot stopped speaking
+        if self._bot_stopped_ts is not None:
+            if (now - self._bot_stopped_ts) < self._echo_tail_s:
+                return True
+            # Tail expired — fully open
+            self._bot_stopped_ts = None
+            if self._gate_closed_since is not None:
+                self._gate_transitions += 1
+                logger.debug(
+                    "echo_gate_opened",
+                    call_sid=self._call_sid,
+                    closed_for_ms=round((now - self._gate_closed_since) * 1000),
+                    transitions=self._gate_transitions,
+                )
+                self._gate_closed_since = None
+
+        return False
 
     async def process_frame(self, frame, direction: FrameDirection):
-        import time
-
-        from pipecat.frames.frames import InputAudioRawFrame, StartFrame
+        from pipecat.frames.frames import (
+            BotStartedSpeakingFrame,
+            BotStoppedSpeakingFrame,
+            InputAudioRawFrame,
+            StartFrame,
+        )
 
         if isinstance(frame, StartFrame):
             await super().process_frame(frame, direction)
             self._start_time = time.monotonic()
+            self._gate_closed_since = self._start_time
             await self.push_frame(frame, direction)
             return
 
-        # Only mute during the greeting window
-        if (
-            isinstance(frame, InputAudioRawFrame)
-            and self._start_time is not None
-            and (time.monotonic() - self._start_time) < self._gate_secs
-        ):
-            silent = InputAudioRawFrame(
-                audio=b"\x00" * len(frame.audio),
-                sample_rate=frame.sample_rate,
-                num_channels=frame.num_channels,
-            )
-            await self.push_frame(silent, direction)
+        # Track bot speaking state from upstream SystemFrames
+        if isinstance(frame, BotStartedSpeakingFrame):
+            now = time.monotonic()
+            self._bot_speaking = True
+            self._bot_stopped_ts = None
+            if self._gate_closed_since is None:
+                self._gate_closed_since = now
+                self._gate_transitions += 1
+                logger.debug(
+                    "echo_gate_closed",
+                    call_sid=self._call_sid,
+                    transitions=self._gate_transitions,
+                )
+            await self.push_frame(frame, direction)
             return
+
+        if isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+            self._bot_stopped_ts = time.monotonic()
+            await self.push_frame(frame, direction)
+            return
+
+        # Gate incoming audio
+        if isinstance(frame, InputAudioRawFrame):
+            now = time.monotonic()
+            if self._is_gate_closed(now):
+                self._frames_silenced += 1
+                silent = InputAudioRawFrame(
+                    audio=b"\x00" * len(frame.audio),
+                    sample_rate=frame.sample_rate,
+                    num_channels=frame.num_channels,
+                )
+                await self.push_frame(silent, direction)
+                return
 
         await self.push_frame(frame, direction)
 
@@ -489,6 +579,8 @@ def _get_gemini_tts_class():
 
 def _build_workflow_tools(bot_config: BotConfig, call_context: CallContext):
     """Build LLM tool definitions and handler for during-call CRM workflows."""
+    from pipecat.adapters.schemas.function_schema import FunctionSchema
+
     workflows = getattr(bot_config, "ghl_workflows", None) or []
     if isinstance(workflows, str):
         import json
@@ -515,33 +607,22 @@ def _build_workflow_tools(bot_config: BotConfig, call_context: CallContext):
         for wf in during_call
     )
 
-    from google.genai import types
-
-    tools = [
-        types.Tool(
-            function_declarations=[
-                types.FunctionDeclaration(
-                    name="trigger_crm_workflow",
-                    description=(
-                        "Trigger a CRM workflow to tag the contact. "
-                        "Use this when the conversation matches a workflow's trigger condition.\n\n"
-                        f"Available workflows:\n{wf_descriptions}"
-                    ),
-                    parameters=types.Schema(
-                        type="OBJECT",
-                        properties={
-                            "workflow_id": types.Schema(
-                                type="STRING",
-                                description="The ID of the workflow to trigger",
-                                enum=[wf["id"] for wf in during_call],
-                            )
-                        },
-                        required=["workflow_id"],
-                    ),
-                )
-            ]
-        )
-    ]
+    tool_schema = FunctionSchema(
+        name="trigger_crm_workflow",
+        description=(
+            "Trigger a CRM workflow to tag the contact. "
+            "Use this when the conversation matches a workflow's trigger condition.\n\n"
+            f"Available workflows:\n{wf_descriptions}"
+        ),
+        properties={
+            "workflow_id": {
+                "type": "string",
+                "description": "The ID of the workflow to trigger",
+                "enum": [wf["id"] for wf in during_call],
+            }
+        },
+        required=["workflow_id"],
+    )
 
     wf_lookup = {wf["id"]: wf for wf in during_call}
 
@@ -614,46 +695,39 @@ def _build_workflow_tools(bot_config: BotConfig, call_context: CallContext):
 
         asyncio.create_task(_tag_in_background())
 
-    return tools, handle_trigger_workflow
+    return tool_schema, handle_trigger_workflow
 
 
 def _build_end_call_tool():
-    """Build the end_call LLM tool definition in Google-native format."""
-    from google.genai import types
+    """Build the end_call LLM tool definition as a provider-agnostic FunctionSchema."""
+    from pipecat.adapters.schemas.function_schema import FunctionSchema
 
-    return types.Tool(
-        function_declarations=[
-            types.FunctionDeclaration(
-                name="end_call",
-                description=(
-                    "End the phone call. Call this ONLY when:\n"
-                    "1) Both you AND the customer have exchanged EXPLICIT goodbye words "
-                    "(bye/goodbye/take care/see you) — call end_call with NO additional text.\n"
-                    "2) The customer says 'not interested', 'don't call me', 'wrong number', or any clear rejection "
-                    "after you've attempted to address their concern.\n"
-                    "3) The customer explicitly asks to hang up or end the call.\n\n"
-                    "IMPORTANT: If you already said goodbye and the customer responds with "
-                    "'bye'/'okay bye'/'thanks bye', call end_call IMMEDIATELY without saying anything else. "
-                    "Do NOT say goodbye twice.\n\n"
-                    "NEVER end the call if:\n"
-                    "- The customer only said 'yeah', 'yes', 'okay', 'thank you', or 'hmm' after your goodbye — "
-                    "these are acknowledgments, NOT goodbyes. Wait for them to finish or say an actual goodbye word.\n"
-                    "- The customer is still mid-sentence, stuttering, or starting a new question.\n"
-                    "- The customer is hesitant but has NOT explicitly said goodbye or rejected.\n"
-                    "- You are unsure whether the customer wants to end — keep the conversation going instead."
-                ),
-                parameters=types.Schema(
-                    type="OBJECT",
-                    properties={
-                        "reason": types.Schema(
-                            type="STRING",
-                            description="Brief reason for ending the call (e.g., 'mutual_goodbye', 'not_interested', 'wrong_number')",
-                        )
-                    },
-                    required=["reason"],
-                ),
-            )
-        ]
+    return FunctionSchema(
+        name="end_call",
+        description=(
+            "End the phone call. Call this ONLY when:\n"
+            "1) Both you AND the customer have exchanged EXPLICIT goodbye words "
+            "(bye/goodbye/take care/see you) — call end_call with NO additional text.\n"
+            "2) The customer says 'not interested', 'don't call me', 'wrong number', or any clear rejection "
+            "after you've attempted to address their concern.\n"
+            "3) The customer explicitly asks to hang up or end the call.\n\n"
+            "IMPORTANT: If you already said goodbye and the customer responds with "
+            "'bye'/'okay bye'/'thanks bye', call end_call IMMEDIATELY without saying anything else. "
+            "Do NOT say goodbye twice.\n\n"
+            "NEVER end the call if:\n"
+            "- The customer only said 'yeah', 'yes', 'okay', 'thank you', or 'hmm' after your goodbye — "
+            "these are acknowledgments, NOT goodbyes. Wait for them to finish or say an actual goodbye word.\n"
+            "- The customer is still mid-sentence, stuttering, or starting a new question.\n"
+            "- The customer is hesitant but has NOT explicitly said goodbye or rejected.\n"
+            "- You are unsure whether the customer wants to end — keep the conversation going instead."
+        ),
+        properties={
+            "reason": {
+                "type": "string",
+                "description": "Brief reason for ending the call (e.g., 'mutual_goodbye', 'not_interested', 'wrong_number')",
+            }
+        },
+        required=["reason"],
     )
 
 
@@ -663,6 +737,7 @@ async def build_pipeline(
     websocket: WebSocket,
     provider: str = "plivo",
     stream_sid: str = "",
+    plivo_stream_id: str = "",
 ) -> tuple[PipelineTask, FastAPIWebsocketTransport, OpenAILLMContext, CallGuard]:
     """
     Construct an isolated Pipecat pipeline for a single call.
@@ -672,6 +747,8 @@ async def build_pipeline(
         call_context: Per-call data — filled prompt, contact info, call_sid.
         websocket: The accepted FastAPI WebSocket connection from Plivo/Twilio.
         provider: "plivo" or "twilio" — determines serializer and audio format.
+        plivo_stream_id: Pre-captured Plivo stream ID from start event (Phase 3).
+            If provided, serializer skips waiting for start event.
 
     Returns:
         (task, transport, context, call_guard).
@@ -688,6 +765,7 @@ async def build_pipeline(
     else:
         serializer = PlivoPCMFrameSerializer(
             stream_id=call_context.call_sid,
+            plivo_stream_id=plivo_stream_id,
         )
 
     # --- Transport ---
@@ -825,25 +903,55 @@ async def build_pipeline(
         )
         logger.info("stt_provider_selected", provider="deepgram", model="nova-2-general", language=deepgram_language)
 
-    # --- LLM (Vertex AI) ---
-    llm = GoogleVertexLLMService(
-        credentials_path=settings.GOOGLE_APPLICATION_CREDENTIALS,
-        project_id=settings.GOOGLE_CLOUD_PROJECT,
-        location=settings.VERTEX_AI_LOCATION,
-        model="gemini-2.5-flash",
-        params=GoogleLLMService.InputParams(
-            temperature=0.7,
-            max_tokens=256,
-        ),
-    )
+    # --- LLM ---
+    llm_provider = getattr(bot_config, "llm_provider", "google")
+
+    if llm_provider == "groq":
+        from pipecat.services.openai.base_llm import BaseOpenAILLMService
+        from pipecat.services.groq.llm import GroqLLMService
+
+        llm = GroqLLMService(
+            api_key=settings.GROQ_API_KEY,
+            model=getattr(bot_config, "llm_model", "openai/gpt-oss-20b"),
+            params=BaseOpenAILLMService.InputParams(
+                temperature=0.7,
+                max_completion_tokens=1024,
+                extra={"reasoning_effort": "medium"},
+            ),
+        )
+        logger.info("llm_provider_selected", provider="groq",
+                     model=getattr(bot_config, "llm_model", "openai/gpt-oss-20b"))
+    else:
+        llm = GoogleVertexLLMService(
+            credentials_path=settings.GOOGLE_APPLICATION_CREDENTIALS,
+            project_id=settings.GOOGLE_CLOUD_PROJECT,
+            location=settings.VERTEX_AI_LOCATION,
+            model=getattr(bot_config, "llm_model", "gemini-2.5-flash"),
+            params=GoogleLLMService.InputParams(
+                temperature=0.7,
+                max_tokens=256,
+            ),
+        )
+        logger.info("llm_provider_selected", provider="google",
+                     model=getattr(bot_config, "llm_model", "gemini-2.5-flash"))
 
     # --- End-call tool ---
     # Task ref is set after PipelineTask creation (handler needs it to queue EndFrame)
     _task_ref: list[PipelineTask | None] = [None]
 
     async def handle_end_call(params):
+        # Safety guard for Groq: block premature end_call (known tool-calling instability)
+        if llm_provider == "groq":
+            user_msgs = [m for m in context.get_messages() if isinstance(m, dict) and m.get("role") == "user"]
+            if len(user_msgs) < 2:
+                logger.warning("end_call_blocked_too_early", call_sid=call_context.call_sid,
+                               user_turns=len(user_msgs), provider="groq")
+                await params.result_callback("Cannot end call yet. Continue the conversation.")
+                return
+
         reason = params.arguments.get("reason", "conversation_ended")
-        logger.info("end_call_triggered", call_sid=call_context.call_sid, reason=reason)
+        logger.info("end_call_triggered", call_sid=call_context.call_sid, reason=reason,
+                     provider=llm_provider)
         # Store LLM's reason on CallGuard so it's available in post-call metadata
         call_guard.llm_end_reason = reason
         await params.result_callback("Call ending now. Do not say anything else.")
@@ -853,7 +961,7 @@ async def build_pipeline(
     llm.register_function("end_call", handle_end_call)
 
     # --- During-call workflow tools ---
-    workflow_tools, workflow_handler = _build_workflow_tools(bot_config, call_context)
+    workflow_tool_schema, workflow_handler = _build_workflow_tools(bot_config, call_context)
     if workflow_handler:
         llm.register_function("trigger_crm_workflow", workflow_handler)
 
@@ -903,7 +1011,11 @@ async def build_pipeline(
         tts = GeminiTTS(
             model="gemini-2.5-flash-tts",
             voice_id=voice_id,
-            text_aggregator=PhraseTextAggregator(min_phrase_chars=10),
+            text_aggregator=PhraseTextAggregator(
+                min_phrase_chars=10,
+                subsequent_phrase_chars=25,
+                adaptive=settings.ADAPTIVE_PHRASE_CHARS,
+            ),
             params=GeminiTTSService.InputParams(
                 language=tts_language,
             ),
@@ -929,11 +1041,13 @@ async def build_pipeline(
         ],
     )
 
-    # Set tools in Google-native format (context.tools property has no setter, use set_tools)
-    all_tools = [_build_end_call_tool()]
-    if workflow_tools:
-        all_tools.extend(workflow_tools)
-    context.set_tools(all_tools)
+    # Set tools as provider-agnostic ToolsSchema — adapters auto-convert per LLM provider
+    from pipecat.adapters.schemas.tools_schema import ToolsSchema
+
+    standard_tools = [_build_end_call_tool()]
+    if workflow_tool_schema:
+        standard_tools.append(workflow_tool_schema)
+    context.set_tools(ToolsSchema(standard_tools=standard_tools))
 
     # --- Context aggregator ---
     context_aggregator = llm.create_context_aggregator(context)
@@ -975,10 +1089,12 @@ async def build_pipeline(
         call_sid=call_context.call_sid,
     )
 
-    # --- STT audio gate (mute echo during greeting only) ---
-    stt_gate = STTAudioGate(
-        gate_secs=5.0,
+    # --- Echo gate (mute echo during ALL bot speech, not just greeting) ---
+    echo_gate = EchoGate(
+        echo_tail_ms=settings.ECHO_TAIL_MS,
+        greeting_gate_secs=5.0,
         call_sid=call_context.call_sid,
+        enabled=settings.ECHO_GATE_ENABLED,
     )
 
     # --- Hello guard (suppress "hello?" cascade during processing) ---
@@ -992,7 +1108,7 @@ async def build_pipeline(
     pipeline = Pipeline(
         [
             transport.input(),
-            stt_gate,
+            echo_gate,
             stt,
             call_guard,
             tracker_post_stt,
