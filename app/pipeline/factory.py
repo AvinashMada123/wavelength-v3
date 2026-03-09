@@ -204,7 +204,9 @@ class EchoGate(FrameProcessor):
 
         # Metrics
         self._frames_silenced = 0
+        self._frames_passed = 0
         self._gate_transitions = 0
+        self._last_gate_log_time = 0.0
 
     def _is_gate_closed(self, now: float) -> bool:
         """Determine if the gate should be closed (muting audio)."""
@@ -297,6 +299,19 @@ class EchoGate(FrameProcessor):
                 )
                 await self.push_frame(silent, direction)
                 return
+            else:
+                self._frames_passed += 1
+                # Log audio passthrough stats every 5 seconds
+                if now - self._last_gate_log_time >= 5.0:
+                    logger.info(
+                        "echo_gate_audio_stats",
+                        call_sid=self._call_sid,
+                        frames_passed=self._frames_passed,
+                        frames_silenced=self._frames_silenced,
+                        gate_open=True,
+                        bot_speaking=self._bot_speaking,
+                    )
+                    self._last_gate_log_time = now
 
         await self.push_frame(frame, direction)
 
@@ -373,6 +388,13 @@ class HelloGuard(FrameProcessor):
         # When pipeline is idle (bot finished speaking, no pending LLM),
         # "Hello" is a legitimate new turn — always let it through.
         if isinstance(frame, TranscriptionFrame):
+            logger.info(
+                "hello_guard_transcript",
+                call_sid=self._call_sid,
+                text=frame.text,
+                bot_speaking=self._bot_speaking,
+                pending_llm=self._pending_llm,
+            )
             if self._bot_speaking or self._pending_llm:
                 cleaned = frame.text.strip().lower().rstrip("?.!,;: ")
                 words = cleaned.split()
@@ -391,6 +413,11 @@ class HelloGuard(FrameProcessor):
             # Real (non-hello) transcript passed through — LLM will process it
             self._suppressed_hello = False
             self._pending_llm = True
+            logger.info(
+                "hello_guard_passed",
+                call_sid=self._call_sid,
+                text=frame.text,
+            )
 
         await self.push_frame(frame, direction)
 
@@ -837,17 +864,55 @@ async def build_pipeline(
                 super().__init__(**kwargs)
                 self._end_speech_pending = False
                 self._end_speech_timeout_task: asyncio.Task | None = None
+                self._audio_frames_sent = 0
+                self._last_audio_log_time = 0.0
+                self._call_sid_tag = ""  # Set after pipeline starts
+
+            async def process_frame(self, frame, direction: FrameDirection):
+                from pipecat.frames.frames import InputAudioRawFrame, StartFrame
+                # Count audio frames reaching Sarvam STT
+                if isinstance(frame, InputAudioRawFrame):
+                    self._audio_frames_sent += 1
+                    now = time.monotonic()
+                    # Log every 5 seconds
+                    if now - self._last_audio_log_time >= 5.0:
+                        # Check if audio is silent (all zeros)
+                        is_silent = frame.audio == b"\x00" * len(frame.audio)
+                        logger.info(
+                            "sarvam_stt_audio_stats",
+                            call_sid=self._call_sid_tag,
+                            frames_total=self._audio_frames_sent,
+                            latest_frame_bytes=len(frame.audio),
+                            is_silent=is_silent,
+                            end_speech_pending=self._end_speech_pending,
+                        )
+                        self._last_audio_log_time = now
+                await super().process_frame(frame, direction)
 
             async def _handle_message(self, message):
                 try:
+                    logger.info(
+                        "sarvam_stt_ws_message",
+                        call_sid=self._call_sid_tag,
+                        msg_type=message.type,
+                        detail=str(message.data)[:200] if hasattr(message, 'data') else "no_data",
+                    )
                     if message.type == "events":
                         signal = message.data.signal_type
                         if signal == "START_SPEECH":
+                            logger.info("sarvam_stt_start_speech",
+                                        call_sid=self._call_sid_tag,
+                                        audio_frames_so_far=self._audio_frames_sent)
                             await self._start_metrics()
                             await self._call_event_handler("on_speech_started")
                             await self.broadcast_frame(UserStartedSpeakingFrame)
+                            logger.info("sarvam_stt_broadcast_user_started",
+                                        call_sid=self._call_sid_tag)
                             # NOTE: no broadcast_interruption() — let pipeline strategy decide
                         elif signal == "END_SPEECH":
+                            logger.info("sarvam_stt_end_speech",
+                                        call_sid=self._call_sid_tag,
+                                        pending_before=self._end_speech_pending)
                             await self._call_event_handler("on_speech_stopped")
                             # Buffer stop frame — wait for transcript before broadcasting
                             self._end_speech_pending = True
@@ -857,7 +922,16 @@ async def build_pipeline(
                             self._end_speech_timeout_task = asyncio.create_task(
                                 self._end_speech_timeout()
                             )
+                        else:
+                            logger.warning("sarvam_stt_unknown_signal",
+                                           call_sid=self._call_sid_tag,
+                                           signal=signal)
                     elif message.type == "data":
+                        transcript = getattr(message.data, 'transcript', None)
+                        logger.info("sarvam_stt_transcript_received",
+                                    call_sid=self._call_sid_tag,
+                                    transcript=transcript,
+                                    end_speech_pending=self._end_speech_pending)
                         # Cancel timeout — transcript arrived
                         if self._end_speech_timeout_task:
                             self._end_speech_timeout_task.cancel()
@@ -867,8 +941,19 @@ async def build_pipeline(
                         # NOW send the buffered stop frame so aggregator has the transcript
                         if self._end_speech_pending:
                             self._end_speech_pending = False
+                            logger.info("sarvam_stt_broadcast_user_stopped_after_transcript",
+                                        call_sid=self._call_sid_tag,
+                                        transcript=transcript)
                             await self.broadcast_frame(UserStoppedSpeakingFrame)
+                    else:
+                        logger.warning("sarvam_stt_unknown_msg_type",
+                                       call_sid=self._call_sid_tag,
+                                       msg_type=message.type)
                 except Exception as e:
+                    logger.error("sarvam_stt_handle_error",
+                                 call_sid=self._call_sid_tag,
+                                 error=str(e),
+                                 msg_type=getattr(message, 'type', 'unknown'))
                     await self.push_error(error_msg=f"Failed to handle message: {e}", exception=e)
                     await self.stop_all_metrics()
 
@@ -879,7 +964,8 @@ async def build_pipeline(
                     if self._end_speech_pending:
                         self._end_speech_pending = False
                         logger.warning("sarvam_stt_end_speech_timeout",
-                                       extra={"detail": "No transcript after END_SPEECH, sending stop frame"})
+                                       call_sid=self._call_sid_tag,
+                                       detail="No transcript after END_SPEECH, sending stop frame")
                         await self.broadcast_frame(UserStoppedSpeakingFrame)
                 except asyncio.CancelledError:
                     pass
@@ -913,6 +999,7 @@ async def build_pipeline(
             ),
             keepalive_timeout=30.0,
         )
+        stt._call_sid_tag = call_context.call_sid
         logger.info(
             "stt_provider_selected",
             provider="sarvam",
