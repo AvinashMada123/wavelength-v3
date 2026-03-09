@@ -139,69 +139,42 @@ class GreetingGuard(FrameProcessor):
 
 
 class STTAudioGate(FrameProcessor):
-    """Mute echo audio from reaching Deepgram to prevent STT confusion.
+    """Mute echo audio during the initial greeting only.
 
-    Plivo echoes all bot audio back through the WebSocket. Deepgram's
-    multi-language mode stalls for 5-10+ seconds when it receives mixed
-    echo + user speech. This gate sends silence to STT whenever the bot
-    is speaking and the user is NOT speaking.
+    Plivo echoes bot audio back through the WebSocket. During the greeting,
+    this echo can confuse Deepgram (especially multi-language mode). This
+    gate sends silence to STT for the first `gate_secs` seconds after the
+    pipeline starts, then permanently opens.
 
-    When VAD detects user speech (UserStartedSpeakingFrame), the gate
-    opens immediately so Deepgram gets clean user audio. When the user
-    stops and the bot starts speaking again, the gate closes.
-
-    VAD runs in the transport BEFORE this gate, so UserStarted/Stopped
-    events are unaffected. BotStarted/StoppedSpeaking flow upstream
-    through the pipeline and are tracked here.
+    Only the greeting is gated — subsequent bot speech is NOT muted, because
+    BotStoppedSpeakingFrame fires BOT_VAD_STOP_SECS (1.5s) late, which
+    would eat the start of user responses (short utterances like "Yeah"
+    are lost entirely).
     """
 
-    def __init__(self, call_sid: str = "", **kwargs):
+    def __init__(self, gate_secs: float = 5.0, call_sid: str = "", **kwargs):
         super().__init__(name="STTAudioGate", **kwargs)
         self._call_sid = call_sid
-        self._bot_speaking = False
-        self._user_speaking = False
-
-    def _should_mute(self) -> bool:
-        """Mute when bot is speaking and user is not."""
-        return self._bot_speaking and not self._user_speaking
+        self._gate_secs = gate_secs
+        self._start_time: float | None = None
 
     async def process_frame(self, frame, direction: FrameDirection):
-        from pipecat.frames.frames import (
-            BotStartedSpeakingFrame,
-            BotStoppedSpeakingFrame,
-            InputAudioRawFrame,
-            StartFrame,
-            UserStartedSpeakingFrame,
-            UserStoppedSpeakingFrame,
-        )
+        import time
+
+        from pipecat.frames.frames import InputAudioRawFrame, StartFrame
 
         if isinstance(frame, StartFrame):
             await super().process_frame(frame, direction)
+            self._start_time = time.monotonic()
             await self.push_frame(frame, direction)
             return
 
-        # Track bot speaking state (these flow UPSTREAM from transport.output)
-        if isinstance(frame, BotStartedSpeakingFrame):
-            self._bot_speaking = True
-            await self.push_frame(frame, direction)
-            return
-        if isinstance(frame, BotStoppedSpeakingFrame):
-            self._bot_speaking = False
-            await self.push_frame(frame, direction)
-            return
-
-        # Track user speaking state (these flow DOWNSTREAM from transport.input)
-        if isinstance(frame, UserStartedSpeakingFrame):
-            self._user_speaking = True
-            await self.push_frame(frame, direction)
-            return
-        if isinstance(frame, UserStoppedSpeakingFrame):
-            self._user_speaking = False
-            await self.push_frame(frame, direction)
-            return
-
-        # Gate audio: send silence when bot is speaking and user is not
-        if isinstance(frame, InputAudioRawFrame) and self._should_mute():
+        # Only mute during the greeting window
+        if (
+            isinstance(frame, InputAudioRawFrame)
+            and self._start_time is not None
+            and (time.monotonic() - self._start_time) < self._gate_secs
+        ):
             silent = InputAudioRawFrame(
                 audio=b"\x00" * len(frame.audio),
                 sample_rate=frame.sample_rate,
@@ -766,8 +739,9 @@ async def build_pipeline(
         call_sid=call_context.call_sid,
     )
 
-    # --- STT audio gate (mute echo whenever bot is speaking) ---
+    # --- STT audio gate (mute echo during greeting only) ---
     stt_gate = STTAudioGate(
+        gate_secs=5.0,
         call_sid=call_context.call_sid,
     )
 
