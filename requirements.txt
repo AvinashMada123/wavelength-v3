@@ -1,5 +1,5 @@
 # Voice framework
-pipecat-ai[google,deepgram,silero,local-smart-turn,websocket]==0.0.104
+pipecat-ai[google,deepgram,sarvam,silero,local-smart-turn,websocket]==0.0.104
 
 # Web framework (pipecat requires >=0.115.6)
 fastapi>=0.115.6,<0.128.0

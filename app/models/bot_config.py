@@ -22,6 +22,7 @@ class BotConfig(Base):
     event_name: Mapped[str | None] = mapped_column(Text)
     event_date: Mapped[str | None] = mapped_column(Text)
     event_time: Mapped[str | None] = mapped_column(Text)
+    stt_provider: Mapped[str] = mapped_column(Text, nullable=False, server_default="deepgram")
     tts_provider: Mapped[str] = mapped_column(Text, nullable=False, server_default="gemini")
     tts_voice: Mapped[str] = mapped_column(Text, nullable=False, server_default="Kore")
     tts_style_prompt: Mapped[str | None] = mapped_column(Text)
