@@ -44,8 +44,33 @@ async def run_pipeline(
 
     runner = PipelineRunner()
 
-    # Send a fixed greeting directly via TTS (bypasses LLM — instant, no interruptions).
-    greeting_text = f"Hi {ctx.contact_name}, this is {bot_config.agent_name} calling from {bot_config.company_name}. How are you doing today?"
+    # Resolve configurable greeting template (falls back to default if not set).
+    _DEFAULT_GREETING = "Hi {contact_name}, this is {agent_name} calling from {company_name}. How are you doing today?"
+    greeting_template = getattr(bot_config, "greeting_template", None) or _DEFAULT_GREETING
+
+    # Build template variables from both CallContext and BotConfig.
+    # Uses a defaultdict wrapper that logs warnings for missing variables
+    # instead of raising KeyError or silently returning empty string.
+    _greeting_vars = {
+        "contact_name": ctx.contact_name or "there",
+        "agent_name": bot_config.agent_name,
+        "company_name": bot_config.company_name,
+        "event_name": getattr(bot_config, "event_name", None) or "",
+        "event_date": getattr(bot_config, "event_date", None) or "",
+        "event_time": getattr(bot_config, "event_time", None) or "",
+        "location": getattr(bot_config, "location", None) or "",
+    }
+
+    class _WarnMissing(dict):
+        """dict subclass that logs a warning for missing template variables."""
+        def __missing__(self, key):
+            logger.warning("greeting_template_missing_var", var=key, call_sid=ctx.call_sid)
+            return ""
+
+    greeting_text = greeting_template.format_map(_WarnMissing(_greeting_vars))
+    # Validate: if rendered greeting is empty/whitespace, fall back to default
+    if not greeting_text.strip():
+        greeting_text = _DEFAULT_GREETING.format_map(_greeting_vars)
 
     async def send_initial_greeting():
         # Brief yield — just enough for StartFrame to propagate through pipeline.
@@ -96,7 +121,9 @@ async def run_pipeline(
 
     return {
         "messages": context.messages,
+        "greeting_text": greeting_text,
         "end_reason": guard.end_reason,
+        "llm_end_reason": guard.llm_end_reason,
         "dnd_detected": guard.dnd_detected,
         "dnd_reason": guard.dnd_reason,
         "realtime_red_flags": guard.detected_red_flags,

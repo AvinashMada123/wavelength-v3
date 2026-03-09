@@ -335,10 +335,11 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         pipeline_result = await run_pipeline(websocket, ctx, bot_config)
         conversation_messages = pipeline_result["messages"]
         end_reason = pipeline_result.get("end_reason")
+        llm_end_reason = pipeline_result.get("llm_end_reason")
         dnd_detected = pipeline_result.get("dnd_detected", False)
         dnd_reason = pipeline_result.get("dnd_reason")
         logger.info("post_call_pipeline_done", call_sid=call_sid, msg_count=len(conversation_messages),
-                     end_reason=end_reason, dnd=dnd_detected)
+                     end_reason=end_reason, llm_end_reason=llm_end_reason, dnd=dnd_detected)
 
         # If voicemail or hold/IVR detected, short-circuit post-call processing
         if end_reason in ("voicemail", "hold_ivr"):
@@ -374,6 +375,11 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
                 logger.info("raw_ctx_message", idx=i, role=role, preview=text)
 
         transcript_entries = [e for m in conversation_messages if (e := _extract_message(m)) is not None]
+        # Filter empty / punctuation-only entries (STT noise)
+        transcript_entries = [
+            e for e in transcript_entries
+            if e["content"].strip().strip(".,;:!?-")
+        ]
         # Filter system prompt (may be stored as "user" or "system" role by Google)
         # Actual content is filled_prompt + _CONVERSATION_RULES, so use startswith
         transcript_entries = [
@@ -381,8 +387,11 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
             if not e["content"].startswith(ctx.filled_prompt[:200])
         ]
 
-        # Prepend greeting (sent via TTSSpeakFrame, bypasses context aggregator)
-        greeting_text = f"Hi {ctx.contact_name}, this is {bot_config.agent_name} calling from {bot_config.company_name}. How are you doing today?"
+        # Prepend greeting (sent via TTSSpeakFrame, bypasses context aggregator).
+        # Use the single-sourced greeting from pipeline result to stay in sync with runner.py.
+        greeting_text = pipeline_result.get("greeting_text") or (
+            f"Hi {ctx.contact_name}, this is {bot_config.agent_name} calling from {bot_config.company_name}. How are you doing today?"
+        )
         # Remove LLM's duplicate greeting echo
         transcript_entries = [
             e for e in transcript_entries
@@ -443,6 +452,8 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
             existing_meta["dnd_reason"] = dnd_reason
         if end_reason:
             existing_meta["end_reason"] = end_reason
+        if llm_end_reason:
+            existing_meta["llm_end_reason"] = llm_end_reason
 
         # Add goal-based analytics to metadata if available
         if analysis and analysis.goal_outcome:

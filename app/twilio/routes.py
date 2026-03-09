@@ -169,6 +169,22 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
             return None
 
         transcript_entries = [e for m in conversation_messages if (e := _extract_message(m)) is not None]
+        # Filter empty / punctuation-only entries (STT noise)
+        transcript_entries = [
+            e for e in transcript_entries
+            if e["content"].strip().strip(".,;:!?-")
+        ]
+
+        # Prepend greeting (sent via TTSSpeakFrame, bypasses context aggregator).
+        greeting_text = pipeline_result.get("greeting_text") or (
+            f"Hi {ctx.contact_name}, this is {bot_config.agent_name} calling from {bot_config.company_name}. How are you doing today?"
+        )
+        # Remove LLM's duplicate greeting echo
+        transcript_entries = [
+            e for e in transcript_entries
+            if not (e["role"] == "assistant" and bot_config.agent_name in e["content"][:60] and "calling from" in e["content"][:80])
+        ]
+        transcript_entries.insert(0, {"role": "assistant", "content": greeting_text})
 
         # Generate analysis — goal-aware if configured, generic fallback otherwise
         goal_cfg = getattr(bot_config, "goal_config", None)

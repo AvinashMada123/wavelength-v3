@@ -15,6 +15,7 @@ export interface BotConfig {
   event_name: string | null;
   event_date: string | null;
   event_time: string | null;
+  greeting_template: string | null;
   stt_provider: "deepgram" | "sarvam";
   tts_provider: "gemini" | "sarvam";
   tts_voice: string;
@@ -45,6 +46,7 @@ export interface CreateBotConfigRequest {
   event_name?: string | null;
   event_date?: string | null;
   event_time?: string | null;
+  greeting_template?: string | null;
   stt_provider?: "deepgram" | "sarvam";
   tts_provider?: "gemini" | "sarvam";
   tts_voice?: string;
@@ -76,6 +78,7 @@ export interface UpdateBotConfigRequest {
   event_name?: string | null;
   event_date?: string | null;
   event_time?: string | null;
+  greeting_template?: string | null;
   stt_provider?: "deepgram" | "sarvam" | null;
   tts_provider?: "gemini" | "sarvam" | null;
   tts_voice?: string | null;

@@ -11,13 +11,15 @@ On DND detection: flags for post-call metadata (doesn't auto-hangup).
 
 from __future__ import annotations
 
+import re
+
 import structlog
 from pipecat.frames.frames import EndFrame, TranscriptionFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 logger = structlog.get_logger(__name__)
 
-# Voicemail detection phrases (checked in first 2 user turns)
+# Voicemail detection phrases (checked in first 2 conversational turns)
 _VOICEMAIL_PHRASES = frozenset({
     "leave a message",
     "after the tone",
@@ -28,14 +30,27 @@ _VOICEMAIL_PHRASES = frozenset({
     "please record your message",
     "leave your name",
     "leave your message",
-    "not available right now",
-    "unavailable",
     "cannot take your call",
     "can't take your call",
     "message after",
+    # Indian carrier phrases
+    "the number you have dialed",
+    "subscriber you have dialed",
+    "is currently switched off",
+    "is out of coverage area",
+    "number does not exist",
+    "number is not in service",
 })
 
-# Hold/IVR detection phrases (checked in first 3 user turns)
+# Phrases only checked on the very first STT segment (turn 1).
+# These are common in voicemail greetings but also in normal human speech
+# at later turns (e.g., "I'm not available right now, call me later").
+_VOICEMAIL_TURN1_ONLY = frozenset({
+    "not available right now",
+    "unavailable",
+})
+
+# Hold/IVR detection phrases (checked in first 3 conversational turns)
 _HOLD_IVR_PHRASES = frozenset({
     "please hold",
     "your call is important",
@@ -52,6 +67,10 @@ _HOLD_IVR_PHRASES = frozenset({
     "press one",
     "press 2",
     "press two",
+    "please stay on the line",
+    "routing your call",
+    "connecting you",
+    "transferring your call",
 })
 
 # DND — strong signals (permanent opt-out intent)
@@ -82,6 +101,10 @@ _DND_PHRASES_SOFT = frozenset({
     "dont want",
 })
 
+# First-person pronouns — if present in transcript, it's likely a real person
+# speaking, not a carrier/voicemail recording. Used to skip voicemail detection.
+_FIRST_PERSON_RE = re.compile(r"\b(i'm|i am|my |me |we )\b", re.IGNORECASE)
+
 
 class CallGuard(FrameProcessor):
     """Monitor STT transcripts for voicemail, hold/IVR, and DND signals.
@@ -91,16 +114,19 @@ class CallGuard(FrameProcessor):
       dnd_detected: bool
       dnd_reason: str | None (e.g. "strong: stop calling")
       detected_red_flags: list[dict] — accumulated real-time red flag detections
+      llm_end_reason: str | None — reason from LLM's end_call tool invocation
     """
 
     def __init__(self, call_sid: str, goal_config: dict | None = None, **kwargs):
         super().__init__(name="CallGuard", **kwargs)
         self._call_sid = call_sid
         self._user_turn_count = 0
+        self._bot_has_spoken = False  # Track conversational turns, not STT segments
         self._end_reason: str | None = None
         self._dnd_detected = False
         self._dnd_reason: str | None = None
         self._ended = False
+        self.llm_end_reason: str | None = None
 
         # Custom keyword-based red flags from goal_config (realtime only)
         self._custom_realtime_flags: list[dict] = []
@@ -123,10 +149,18 @@ class CallGuard(FrameProcessor):
         return self._dnd_reason
 
     async def process_frame(self, frame, direction: FrameDirection):
-        from pipecat.frames.frames import StartFrame
+        from pipecat.frames.frames import BotStartedSpeakingFrame, StartFrame
 
         if isinstance(frame, StartFrame):
             await super().process_frame(frame, direction)
+            await self.push_frame(frame, direction)
+            return
+
+        # Track when bot has spoken (upstream frame from transport.output).
+        # Used to distinguish carrier recordings (multiple STT segments before
+        # bot speaks = turn 0) from real conversational turns.
+        if isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_has_spoken = True
             await self.push_frame(frame, direction)
             return
 
@@ -134,14 +168,24 @@ class CallGuard(FrameProcessor):
         if isinstance(frame, TranscriptionFrame) and not self._ended:
             text = frame.text.strip().lower()
             if text:
-                self._user_turn_count += 1
+                # Only increment turn count when user speaks AFTER bot has spoken.
+                # A carrier recording producing 3 STT segments before the bot
+                # speaks stays at turn 0 — all segments are pre-conversation.
+                if self._bot_has_spoken:
+                    self._user_turn_count += 1
+                    self._bot_has_spoken = False
                 await self._check_transcript(text)
 
         await self.push_frame(frame, direction)
 
     async def _check_transcript(self, text: str):
-        # Voicemail detection (first 2 turns only — voicemail greetings happen immediately)
-        if self._user_turn_count <= 2:
+        # Pronoun guard for voicemail: if transcript contains first-person
+        # pronouns, it's likely a real human, not a carrier recording.
+        # Only applies to voicemail detection, NOT IVR (IVR says "I'll connect you").
+        has_first_person = bool(_FIRST_PERSON_RE.search(text))
+
+        # Voicemail detection (first 2 conversational turns)
+        if self._user_turn_count <= 2 and not has_first_person:
             for phrase in _VOICEMAIL_PHRASES:
                 if phrase in text:
                     logger.info("voicemail_detected", call_sid=self._call_sid, phrase=phrase, text=text[:100])
@@ -150,7 +194,18 @@ class CallGuard(FrameProcessor):
                     await self.push_frame(EndFrame())
                     return
 
-        # Hold/IVR detection (first 3 turns — IVR menus play early)
+            # Turn-1-only phrases: common in voicemail but also in human speech
+            if self._user_turn_count <= 1:
+                for phrase in _VOICEMAIL_TURN1_ONLY:
+                    if phrase in text:
+                        logger.info("voicemail_detected", call_sid=self._call_sid, phrase=phrase, text=text[:100])
+                        self._end_reason = "voicemail"
+                        self._ended = True
+                        await self.push_frame(EndFrame())
+                        return
+
+        # Hold/IVR detection (first 3 conversational turns — no pronoun guard,
+        # IVR systems commonly use first-person like "I'll connect you")
         if self._user_turn_count <= 3:
             for phrase in _HOLD_IVR_PHRASES:
                 if phrase in text:

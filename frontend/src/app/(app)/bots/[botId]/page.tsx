@@ -63,6 +63,7 @@ interface BotForm {
   event_name: string;
   event_date: string;
   event_time: string;
+  greeting_template: string;
   stt_provider: "deepgram" | "sarvam";
   tts_provider: "gemini" | "sarvam";
   tts_voice: string;
@@ -93,6 +94,7 @@ const EMPTY_FORM: BotForm = {
   event_name: "",
   event_date: "",
   event_time: "",
+  greeting_template: "",
   stt_provider: "deepgram",
   tts_provider: "gemini",
   tts_voice: "Kore",
@@ -140,7 +142,8 @@ function botToForm(bot: BotConfig): BotForm {
     event_name: bot.event_name || "",
     event_date: bot.event_date || "",
     event_time: bot.event_time || "",
-    stt_provider: (bot as any).stt_provider || "deepgram",
+    greeting_template: bot.greeting_template || "",
+    stt_provider: bot.stt_provider || "deepgram",
     tts_provider: bot.tts_provider || "gemini",
     tts_voice: bot.tts_voice,
     tts_style_prompt: bot.tts_style_prompt || "",
@@ -631,6 +634,30 @@ export default function BotEditorPage() {
                               The organization the agent represents.
                             </p>
                           </div>
+                        </div>
+                      </Section>
+
+                      <Separator />
+
+                      <Section
+                        title="Greeting"
+                        description="The opening line when the bot calls. Leave blank for the default greeting."
+                      >
+                        <div className="space-y-2">
+                          <Label htmlFor="greeting_template">
+                            Greeting Template
+                          </Label>
+                          <Input
+                            id="greeting_template"
+                            value={form.greeting_template}
+                            onChange={(e) =>
+                              setField("greeting_template", e.target.value)
+                            }
+                            placeholder="Hi {contact_name}, this is {agent_name} calling from {company_name}. How are you doing today?"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Available variables: {"{contact_name}"}, {"{agent_name}"}, {"{company_name}"}, {"{event_name}"}, {"{event_date}"}, {"{event_time}"}, {"{location}"}
+                          </p>
                         </div>
                       </Section>
 
