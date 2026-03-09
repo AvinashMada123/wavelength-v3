@@ -321,10 +321,9 @@ class HelloGuard(FrameProcessor):
     def __init__(self, call_sid: str = "", **kwargs):
         super().__init__(name="HelloGuard", **kwargs)
         self._call_sid = call_sid
-        self._awaiting_response = False  # between user stop and bot start
         self._bot_speaking = False
+        self._pending_llm = False  # True after real transcript sent, cleared on BotStartedSpeaking
         self._suppressed_hello = False
-        self._user_turn_count = 0  # first user response (turn 0) is never suppressed
 
     async def process_frame(self, frame, direction: FrameDirection):
         from pipecat.frames.frames import (
@@ -340,10 +339,10 @@ class HelloGuard(FrameProcessor):
             await self.push_frame(frame, direction)
             return
 
-        # Bot started speaking — processing window closed
+        # Bot started speaking — LLM responded, pipeline no longer idle
         if isinstance(frame, BotStartedSpeakingFrame):
             self._bot_speaking = True
-            self._awaiting_response = False
+            self._pending_llm = False
             self._suppressed_hello = False
             await self.push_frame(frame, direction)
             return
@@ -364,34 +363,33 @@ class HelloGuard(FrameProcessor):
                     call_sid=self._call_sid,
                 )
                 return
-            # Real user speech — open the processing window
-            self._awaiting_response = True
-            self._user_turn_count += 1
             await self.push_frame(frame, direction)
             return
 
-        # Check transcripts during processing or bot speaking.
-        # Turn 0 (first user response after greeting) is never suppressed —
-        # "Hello" is a legitimate greeting, not an impatient interjection.
-        if isinstance(frame, TranscriptionFrame) and (
-            self._awaiting_response or self._bot_speaking
-        ) and self._user_turn_count > 1:
-            cleaned = frame.text.strip().lower().rstrip("?.!,;: ")
-            words = cleaned.split()
-            if (
-                words
-                and len(words) <= 2
-                and all(w in self._HELLO_WORDS for w in words)
-            ):
-                self._suppressed_hello = True
-                logger.info(
-                    "hello_guard_suppressed",
-                    call_sid=self._call_sid,
-                    text=frame.text,
-                )
-                return
-            # Real speech — don't suppress the next UserStoppedSpeaking
+        # Only suppress "hello?" when the pipeline is busy:
+        #   - _bot_speaking: bot is actively outputting audio
+        #   - _pending_llm: real transcript was sent, waiting for bot to start speaking
+        # When pipeline is idle (bot finished speaking, no pending LLM),
+        # "Hello" is a legitimate new turn — always let it through.
+        if isinstance(frame, TranscriptionFrame):
+            if self._bot_speaking or self._pending_llm:
+                cleaned = frame.text.strip().lower().rstrip("?.!,;: ")
+                words = cleaned.split()
+                if (
+                    words
+                    and len(words) <= 2
+                    and all(w in self._HELLO_WORDS for w in words)
+                ):
+                    self._suppressed_hello = True
+                    logger.info(
+                        "hello_guard_suppressed",
+                        call_sid=self._call_sid,
+                        text=frame.text,
+                    )
+                    return
+            # Real (non-hello) transcript passed through — LLM will process it
             self._suppressed_hello = False
+            self._pending_llm = True
 
         await self.push_frame(frame, direction)
 
