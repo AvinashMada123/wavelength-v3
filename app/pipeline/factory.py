@@ -139,48 +139,76 @@ class GreetingGuard(FrameProcessor):
 
 
 class STTAudioGate(FrameProcessor):
-    """Mute audio input to STT during the greeting to prevent echo confusion.
+    """Mute echo audio from reaching Deepgram to prevent STT confusion.
 
-    Plivo echoes the bot's greeting back through the WebSocket. This echo
-    reaches Deepgram and causes: false transcripts, language detection confusion
-    (with multi-language mode), and wasted processing. By sending silence to
-    STT during the greeting window, Deepgram starts clean when the user speaks.
+    Plivo echoes all bot audio back through the WebSocket. Deepgram's
+    multi-language mode stalls for 5-10+ seconds when it receives mixed
+    echo + user speech. This gate sends silence to STT whenever the bot
+    is speaking and the user is NOT speaking.
 
-    VAD runs in the transport BEFORE this gate, so UserStarted/StoppedSpeaking
-    events are unaffected (handled by GreetingGuard separately).
+    When VAD detects user speech (UserStartedSpeakingFrame), the gate
+    opens immediately so Deepgram gets clean user audio. When the user
+    stops and the bot starts speaking again, the gate closes.
+
+    VAD runs in the transport BEFORE this gate, so UserStarted/Stopped
+    events are unaffected. BotStarted/StoppedSpeaking flow upstream
+    through the pipeline and are tracked here.
     """
 
-    def __init__(self, gate_duration: float = 5.0, call_sid: str = "", **kwargs):
+    def __init__(self, call_sid: str = "", **kwargs):
         super().__init__(name="STTAudioGate", **kwargs)
-        self._gate_duration = gate_duration
         self._call_sid = call_sid
-        self._start_time: float | None = None
-        self._gate_active = True
+        self._bot_speaking = False
+        self._user_speaking = False
+
+    def _should_mute(self) -> bool:
+        """Mute when bot is speaking and user is not."""
+        return self._bot_speaking and not self._user_speaking
 
     async def process_frame(self, frame, direction: FrameDirection):
-        from pipecat.frames.frames import InputAudioRawFrame, StartFrame
+        from pipecat.frames.frames import (
+            BotStartedSpeakingFrame,
+            BotStoppedSpeakingFrame,
+            InputAudioRawFrame,
+            StartFrame,
+            UserStartedSpeakingFrame,
+            UserStoppedSpeakingFrame,
+        )
 
         if isinstance(frame, StartFrame):
             await super().process_frame(frame, direction)
-            self._start_time = time.monotonic()
             await self.push_frame(frame, direction)
             return
 
-        if isinstance(frame, InputAudioRawFrame) and self._gate_active:
-            if self._start_time is not None:
-                elapsed = time.monotonic() - self._start_time
-                if elapsed < self._gate_duration:
-                    # Replace with silence — keeps Deepgram connection alive
-                    # but prevents echo from being transcribed
-                    silent = InputAudioRawFrame(
-                        audio=b"\x00" * len(frame.audio),
-                        sample_rate=frame.sample_rate,
-                        num_channels=frame.num_channels,
-                    )
-                    await self.push_frame(silent, direction)
-                    return
-            self._gate_active = False
-            logger.info("stt_audio_gate_opened", call_sid=self._call_sid)
+        # Track bot speaking state (these flow UPSTREAM from transport.output)
+        if isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+            await self.push_frame(frame, direction)
+            return
+        if isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+            await self.push_frame(frame, direction)
+            return
+
+        # Track user speaking state (these flow DOWNSTREAM from transport.input)
+        if isinstance(frame, UserStartedSpeakingFrame):
+            self._user_speaking = True
+            await self.push_frame(frame, direction)
+            return
+        if isinstance(frame, UserStoppedSpeakingFrame):
+            self._user_speaking = False
+            await self.push_frame(frame, direction)
+            return
+
+        # Gate audio: send silence when bot is speaking and user is not
+        if isinstance(frame, InputAudioRawFrame) and self._should_mute():
+            silent = InputAudioRawFrame(
+                audio=b"\x00" * len(frame.audio),
+                sample_rate=frame.sample_rate,
+                num_channels=frame.num_channels,
+            )
+            await self.push_frame(silent, direction)
+            return
 
         await self.push_frame(frame, direction)
 
@@ -738,9 +766,8 @@ async def build_pipeline(
         call_sid=call_context.call_sid,
     )
 
-    # --- STT audio gate (mute echo during greeting so Deepgram starts clean) ---
+    # --- STT audio gate (mute echo whenever bot is speaking) ---
     stt_gate = STTAudioGate(
-        gate_duration=5.0,
         call_sid=call_context.call_sid,
     )
 
