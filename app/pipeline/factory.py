@@ -164,28 +164,20 @@ class GreetingGuard(FrameProcessor):
 
 
 class EchoGate(FrameProcessor):
-    """Mute Plivo echo during ALL bot speech, not just the greeting.
+    """Greeting-only audio gate for Plivo echo suppression.
 
-    Plivo echoes bot audio back through the WebSocket. This echo triggers
-    false VAD events and phantom STT transcripts, which can cause
-    MinWordsInterruptionStrategy to fire and destroy the audio queue.
+    Plivo echoes bot audio back through the WebSocket. During the initial
+    greeting, this echo is strongest (no user audio to mix with). The gate
+    mutes incoming audio for the first GREETING_GATE_SECS after pipeline
+    start, then permanently opens.
 
-    The gate closes when BotStartedSpeakingFrame arrives (upstream SystemFrame
-    from BaseOutputTransport) and re-opens after BotStoppedSpeakingFrame +
-    a configurable echo tail delay (ECHO_TAIL_MS) to account for the
-    round-trip time of echo returning from Plivo.
-
-    For the initial greeting window, the gate starts closed unconditionally
-    for GREETING_GATE_SECS to handle the pre-pipeline greeting (Phase 3).
-
-    Safety valve: max continuous gate-closed duration of 30s.
+    After the greeting window, audio flows freely — Sarvam's cloud VAD and
+    MinWordsInterruptionStrategy handle any residual echo.
     """
 
     def __init__(
         self,
-        echo_tail_ms: float = 500.0,
         greeting_gate_secs: float = 5.0,
-        max_gate_secs: float = 30.0,
         call_sid: str = "",
         enabled: bool = True,
         **kwargs,
@@ -193,104 +185,24 @@ class EchoGate(FrameProcessor):
         super().__init__(name="EchoGate", **kwargs)
         self._call_sid = call_sid
         self._enabled = enabled
-        self._echo_tail_s = echo_tail_ms / 1000.0
         self._greeting_gate_secs = greeting_gate_secs
-        self._max_gate_secs = max_gate_secs
-
         self._start_time: float | None = None
-        self._bot_speaking = False
-        self._bot_stopped_ts: float | None = None  # when BotStoppedSpeakingFrame arrived
-        self._gate_closed_since: float | None = None  # for safety valve
-
-        # Metrics
+        self._gate_opened = False
         self._frames_silenced = 0
-        self._frames_passed = 0
-        self._gate_transitions = 0
-        self._last_gate_log_time = 0.0
-
-    def _is_gate_closed(self, now: float) -> bool:
-        """Determine if the gate should be closed (muting audio)."""
-        if not self._enabled:
-            return False
-
-        # Initial greeting window — always closed
-        if self._start_time is not None and (now - self._start_time) < self._greeting_gate_secs:
-            return True
-
-        # Safety valve — force open after max_gate_secs
-        if self._gate_closed_since is not None and (now - self._gate_closed_since) > self._max_gate_secs:
-            logger.error(
-                "echo_gate_safety_valve",
-                call_sid=self._call_sid,
-                closed_for_s=round(now - self._gate_closed_since, 1),
-            )
-            self._bot_speaking = False
-            self._gate_closed_since = None
-            return False
-
-        # Bot is currently speaking — gate closed
-        if self._bot_speaking:
-            return True
-
-        # Echo tail delay after bot stopped speaking
-        if self._bot_stopped_ts is not None:
-            if (now - self._bot_stopped_ts) < self._echo_tail_s:
-                return True
-            # Tail expired — fully open
-            self._bot_stopped_ts = None
-            if self._gate_closed_since is not None:
-                self._gate_transitions += 1
-                logger.debug(
-                    "echo_gate_opened",
-                    call_sid=self._call_sid,
-                    closed_for_ms=round((now - self._gate_closed_since) * 1000),
-                    transitions=self._gate_transitions,
-                )
-                self._gate_closed_since = None
-
-        return False
 
     async def process_frame(self, frame, direction: FrameDirection):
-        from pipecat.frames.frames import (
-            BotStartedSpeakingFrame,
-            BotStoppedSpeakingFrame,
-            InputAudioRawFrame,
-            StartFrame,
-        )
+        from pipecat.frames.frames import InputAudioRawFrame, StartFrame
 
         if isinstance(frame, StartFrame):
             await super().process_frame(frame, direction)
             self._start_time = time.monotonic()
-            self._gate_closed_since = self._start_time
             await self.push_frame(frame, direction)
             return
 
-        # Track bot speaking state from upstream SystemFrames
-        if isinstance(frame, BotStartedSpeakingFrame):
+        # Gate incoming audio only during greeting window
+        if isinstance(frame, InputAudioRawFrame) and self._enabled and not self._gate_opened:
             now = time.monotonic()
-            self._bot_speaking = True
-            self._bot_stopped_ts = None
-            if self._gate_closed_since is None:
-                self._gate_closed_since = now
-                self._gate_transitions += 1
-                logger.debug(
-                    "echo_gate_closed",
-                    call_sid=self._call_sid,
-                    transitions=self._gate_transitions,
-                )
-            await self.push_frame(frame, direction)
-            return
-
-        if isinstance(frame, BotStoppedSpeakingFrame):
-            self._bot_speaking = False
-            self._bot_stopped_ts = time.monotonic()
-            await self.push_frame(frame, direction)
-            return
-
-        # Gate incoming audio
-        if isinstance(frame, InputAudioRawFrame):
-            now = time.monotonic()
-            if self._is_gate_closed(now):
+            if self._start_time is not None and (now - self._start_time) < self._greeting_gate_secs:
                 self._frames_silenced += 1
                 silent = InputAudioRawFrame(
                     audio=b"\x00" * len(frame.audio),
@@ -300,18 +212,15 @@ class EchoGate(FrameProcessor):
                 await self.push_frame(silent, direction)
                 return
             else:
-                self._frames_passed += 1
-                # Log audio passthrough stats every 5 seconds
-                if now - self._last_gate_log_time >= 5.0:
+                # Greeting window expired — permanently open
+                if not self._gate_opened:
+                    self._gate_opened = True
                     logger.info(
-                        "echo_gate_audio_stats",
+                        "echo_gate_permanently_opened",
                         call_sid=self._call_sid,
-                        frames_passed=self._frames_passed,
-                        frames_silenced=self._frames_silenced,
-                        gate_open=True,
-                        bot_speaking=self._bot_speaking,
+                        silenced_frames=self._frames_silenced,
+                        gate_secs=self._greeting_gate_secs,
                     )
-                    self._last_gate_log_time = now
 
         await self.push_frame(frame, direction)
 
@@ -1226,8 +1135,7 @@ async def build_pipeline(
 
     # --- Echo gate (mute echo during ALL bot speech, not just greeting) ---
     echo_gate = EchoGate(
-        echo_tail_ms=settings.ECHO_TAIL_MS,
-        greeting_gate_secs=5.0,
+        greeting_gate_secs=8.0,  # Cover full greeting TTS (~7s) + margin
         call_sid=call_context.call_sid,
         enabled=settings.ECHO_GATE_ENABLED,
     )
