@@ -918,7 +918,7 @@ async def build_pipeline(
             params=BaseOpenAILLMService.InputParams(
                 temperature=0.7,
                 max_completion_tokens=1024,
-                extra={"reasoning_effort": "medium"},
+                extra={"reasoning_effort": "low"},
             ),
         )
         logger.info("llm_provider_selected", provider="groq",
