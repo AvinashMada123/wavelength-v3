@@ -49,7 +49,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 import { fetchBot, createBot, updateBot } from "@/lib/api";
-import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS } from "@/lib/constants";
+import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS } from "@/lib/constants";
 import type { BotConfig, GHLWorkflow, GoalConfig, SuccessCriterion, RedFlagConfig, DataCaptureField } from "@/types/api";
 
 // ---------------------------------------------------------------------------
@@ -63,6 +63,7 @@ interface BotForm {
   event_name: string;
   event_date: string;
   event_time: string;
+  stt_provider: "deepgram" | "sarvam";
   tts_provider: "gemini" | "sarvam";
   tts_voice: string;
   tts_style_prompt: string;
@@ -92,6 +93,7 @@ const EMPTY_FORM: BotForm = {
   event_name: "",
   event_date: "",
   event_time: "",
+  stt_provider: "deepgram",
   tts_provider: "gemini",
   tts_voice: "Kore",
   tts_style_prompt: "",
@@ -138,6 +140,7 @@ function botToForm(bot: BotConfig): BotForm {
     event_name: bot.event_name || "",
     event_date: bot.event_date || "",
     event_time: bot.event_time || "",
+    stt_provider: (bot as any).stt_provider || "deepgram",
     tts_provider: bot.tts_provider || "gemini",
     tts_voice: bot.tts_voice,
     tts_style_prompt: bot.tts_style_prompt || "",
@@ -698,9 +701,29 @@ export default function BotEditorPage() {
                       <CardContent className="pt-6 space-y-8">
                         <Section
                           title="Voice & Language"
-                          description="Choose the TTS provider, voice personality, and language for your agent."
+                          description="Choose the STT/TTS providers, voice personality, and language for your agent."
                         >
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                            <div className="space-y-2">
+                              <Label>STT Provider</Label>
+                              <Select
+                                value={form.stt_provider}
+                                onValueChange={(v) =>
+                                  setField("stt_provider", v as "deepgram" | "sarvam")
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select STT provider..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {STT_PROVIDER_OPTIONS.map((p) => (
+                                    <SelectItem key={p.value} value={p.value}>
+                                      {p.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
                             <div className="space-y-2">
                               <Label>TTS Provider</Label>
                               <Select

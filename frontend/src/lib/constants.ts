@@ -101,6 +101,11 @@ export const VOICE_GROUPS = GEMINI_VOICE_GROUPS;
 
 export const ALL_VOICES: VoiceOption[] = GEMINI_VOICE_GROUPS.flatMap((g) => g.voices);
 
+export const STT_PROVIDER_OPTIONS = [
+  { value: "deepgram", label: "Deepgram" },
+  { value: "sarvam", label: "Sarvam AI" },
+] as const;
+
 export const TTS_PROVIDER_OPTIONS = [
   { value: "gemini", label: "Gemini" },
   { value: "sarvam", label: "Sarvam AI" },
