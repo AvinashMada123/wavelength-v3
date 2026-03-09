@@ -212,7 +212,12 @@ class TTSJitterBuffer(FrameProcessor):
         self._target_bytes = int(16000 * buffer_ms / 1000 * 2)
 
     async def process_frame(self, frame, direction: FrameDirection):
-        from pipecat.frames.frames import TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame
+        from pipecat.frames.frames import StartFrame, TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame
+
+        if isinstance(frame, StartFrame):
+            await super().process_frame(frame, direction)
+            await self.push_frame(frame, direction)
+            return
 
         if isinstance(frame, TTSStartedFrame):
             # New utterance — start buffering
