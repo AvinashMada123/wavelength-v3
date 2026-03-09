@@ -692,9 +692,26 @@ async def build_pipeline(
 
     # --- Transport ---
     # VAD and turn analyzer go on transport params in pipecat 0.0.104.
-    transport = FastAPIWebsocketTransport(
-        websocket=websocket,
-        params=FastAPIWebsocketParams(
+    # Sarvam STT has server-side VAD (vad_signals=True) so we skip local
+    # Silero VAD to avoid double-interrupt cascades that kill in-flight LLM/TTS.
+    stt_language = getattr(call_context, "language", "en-IN") or "en-IN"
+    stt_provider = getattr(bot_config, "stt_provider", "deepgram") or "deepgram"
+
+    if stt_provider == "sarvam":
+        # Sarvam server-side VAD handles START/END_SPEECH — no local VAD needed.
+        # Still need vad_enabled + passthrough so audio frames reach the STT service.
+        transport_params = FastAPIWebsocketParams(
+            audio_out_enabled=True,
+            audio_out_sample_rate=16000,
+            audio_out_10ms_chunks=2,
+            add_wav_header=False,
+            serializer=serializer,
+            vad_enabled=True,
+            vad_audio_passthrough=True,
+        )
+    else:
+        # Deepgram: use local Silero VAD + SmartTurn for turn detection.
+        transport_params = FastAPIWebsocketParams(
             audio_out_enabled=True,
             audio_out_sample_rate=16000,
             audio_out_10ms_chunks=2,
@@ -704,21 +721,54 @@ async def build_pipeline(
             vad_audio_passthrough=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(
                 stop_secs=0.2,
-                min_volume=0.8,  # Higher than default 0.6 to reject bot echo
+                min_volume=0.8,
             )),
             turn_analyzer=LocalSmartTurnAnalyzerV3(
                 params=SmartTurnParams(stop_secs=0.5),
             ),
-        ),
-    )
+        )
 
-    # --- STT ---
-    stt_language = getattr(call_context, "language", "en-IN") or "en-IN"
-    stt_provider = getattr(bot_config, "stt_provider", "deepgram") or "deepgram"
+    transport = FastAPIWebsocketTransport(
+        websocket=websocket,
+        params=transport_params,
+    )
 
     if stt_provider == "sarvam":
         from pipecat.services.sarvam.stt import SarvamSTTService
+        from pipecat.frames.frames import UserStartedSpeakingFrame, UserStoppedSpeakingFrame
         from pipecat.transcriptions.language import Language as PipecatLanguage
+
+        class _SafeSarvamSTT(SarvamSTTService):
+            """Sarvam STT without broadcast_interruption on START_SPEECH.
+
+            Upstream SarvamSTTService calls broadcast_interruption() on every
+            START_SPEECH VAD event, which directly kills in-flight LLM/TTS —
+            bypassing MinWordsInterruptionStrategy. This causes cascading
+            cancellations when users speak in multi-sentence bursts.
+
+            We override _handle_message to only push UserStartedSpeakingFrame
+            (no broadcast_interruption). The pipeline's interruption strategy
+            then decides whether to actually interrupt based on STT word count.
+            """
+
+            async def _handle_message(self, message):
+                try:
+                    if message.type == "events":
+                        signal = message.data.signal_type
+                        if signal == "START_SPEECH":
+                            await self._start_metrics()
+                            await self._call_event_handler("on_speech_started")
+                            await self.broadcast_frame(UserStartedSpeakingFrame)
+                            # NOTE: no broadcast_interruption() — let pipeline strategy decide
+                        elif signal == "END_SPEECH":
+                            await self._call_event_handler("on_speech_stopped")
+                            await self.broadcast_frame(UserStoppedSpeakingFrame)
+                    elif message.type == "data":
+                        # Delegate transcript handling to parent
+                        await super()._handle_message(message)
+                except Exception as e:
+                    await self.push_error(error_msg=f"Failed to handle message: {e}", exception=e)
+                    await self.stop_all_metrics()
 
         # Map BCP-47 → Pipecat Language enum for Sarvam (all 12 pipecat-supported languages)
         _SARVAM_LANG_MAP = {
@@ -737,7 +787,7 @@ async def build_pipeline(
         }
         sarvam_lang = _SARVAM_LANG_MAP.get(stt_language)
         # If language not in map, sarvam_lang=None → Sarvam auto-detects
-        stt = SarvamSTTService(
+        stt = _SafeSarvamSTT(
             api_key=settings.SARVAM_API_KEY,
             model="saaras:v3",
             sample_rate=16000,
