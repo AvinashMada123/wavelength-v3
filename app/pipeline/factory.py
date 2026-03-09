@@ -509,14 +509,19 @@ async def build_pipeline(
 
     if tts_provider == "sarvam":
         from pipecat.services.sarvam.tts import SarvamTTSService
+        from pipecat.services.ai_services import TextAggregationMode
 
         tts = SarvamTTSService(
             api_key=settings.SARVAM_API_KEY,
             model="bulbul:v3",
             voice_id=call_context.tts_voice,
             sample_rate=16000,
+            text_aggregation_mode=TextAggregationMode.TOKEN,
             params=SarvamTTSService.InputParams(
                 language=stt_language,
+                min_buffer_size=30,
+                max_chunk_length=100,
+                temperature=0.4,
             ),
         )
         logger.info("tts_sarvam_init", voice=call_context.tts_voice, model="bulbul:v3")
