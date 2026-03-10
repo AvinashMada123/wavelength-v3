@@ -960,7 +960,7 @@ async def build_pipeline(
                 min_volume=0.8,
             )),
             turn_analyzer=LocalSmartTurnAnalyzerV3(
-                params=SmartTurnParams(stop_secs=0.5),
+                params=SmartTurnParams(stop_secs=0.3),
             ),
         )
 
@@ -1289,6 +1289,11 @@ async def build_pipeline(
             model="bulbul:v3",
             voice_id=call_context.tts_voice,
             sample_rate=16000,
+            text_aggregator=PhraseTextAggregator(
+                min_phrase_chars=30,
+                subsequent_phrase_chars=50,
+                adaptive=settings.ADAPTIVE_PHRASE_CHARS,
+            ),
             params=SarvamTTSService.InputParams(
                 language=stt_language,
                 min_buffer_size=30,
