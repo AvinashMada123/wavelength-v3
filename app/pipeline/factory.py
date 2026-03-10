@@ -14,7 +14,7 @@ import structlog
 from deepgram import LiveOptions
 
 # Keep a wider bot-stop window to survive telephony/TTS inter-sentence gaps.
-_base_output.BOT_VAD_STOP_SECS = 2.0
+_base_output.BOT_VAD_STOP_SECS = 0.6
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
