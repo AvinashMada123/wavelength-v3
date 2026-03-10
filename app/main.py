@@ -48,6 +48,7 @@ async def lifespan(app: FastAPI):
     # Init asyncpg pool for BotConfigLoader
     pool = await init_asyncpg_pool()
     bot_config_loader = BotConfigLoader(db_pool=pool)
+    await bot_config_loader.start()
 
     # Init GHL client
     ghl_client = GHLClient()
@@ -69,6 +70,7 @@ async def lifespan(app: FastAPI):
     # --- Shutdown ---
     logger.info("app_shutting_down")
     await queue_processor.stop()
+    await bot_config_loader.stop()
     await ghl_client.close()
     await close_asyncpg_pool()
     logger.info("app_shutdown_complete")

@@ -53,6 +53,8 @@ async def create_bot(req: CreateBotConfigRequest, db: AsyncSession = Depends(get
     db.add(bot)
     await db.commit()
     await db.refresh(bot)
+    if bot_config_loader:
+        await bot_config_loader.publish_invalidation(str(bot.id))
     logger.info("bot_config_created", bot_id=str(bot.id))
     return bot
 
@@ -99,6 +101,7 @@ async def update_bot(bot_id: uuid.UUID, req: UpdateBotConfigRequest, db: AsyncSe
     # Invalidate cache
     if bot_config_loader:
         bot_config_loader.invalidate(str(bot_id))
+        await bot_config_loader.publish_invalidation(str(bot_id))
 
     logger.info("bot_config_updated", bot_id=str(bot_id), fields=list(update_data.keys()))
     return bot
@@ -145,6 +148,8 @@ async def clone_bot(bot_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     db.add(clone)
     await db.commit()
     await db.refresh(clone)
+    if bot_config_loader:
+        await bot_config_loader.publish_invalidation(str(clone.id))
     logger.info("bot_config_cloned", original_id=str(bot_id), clone_id=str(clone.id))
     return clone
 
@@ -163,5 +168,6 @@ async def delete_bot(bot_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
 
     if bot_config_loader:
         bot_config_loader.invalidate(str(bot_id))
+        await bot_config_loader.publish_invalidation(str(bot_id))
 
     logger.info("bot_config_deleted", bot_id=str(bot_id))

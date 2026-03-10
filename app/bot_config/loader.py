@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from typing import Any
@@ -11,6 +12,8 @@ from app.models.bot_config import BotConfig
 
 logger = structlog.get_logger(__name__)
 
+_BOT_CONFIG_UPDATES_CHANNEL = "bot_config_updates"
+
 
 class BotConfigLoader:
     """Loads bot configs from Postgres with an in-memory TTL cache."""
@@ -19,6 +22,39 @@ class BotConfigLoader:
         self._db_pool = db_pool
         self._cache: dict[str, tuple[BotConfig, float]] = {}
         self._cache_ttl = cache_ttl
+        self._listener_conn: asyncpg.Connection | None = None
+        self._listener_lock = asyncio.Lock()
+
+    async def start(self):
+        """Start listening for cross-worker bot-config invalidation events."""
+        async with self._listener_lock:
+            if self._listener_conn is not None:
+                return
+
+            conn = await self._db_pool.acquire()
+            await conn.add_listener(
+                _BOT_CONFIG_UPDATES_CHANNEL,
+                self._handle_invalidation_notification,
+            )
+            self._listener_conn = conn
+            logger.info("bot_config_loader_listener_started", channel=_BOT_CONFIG_UPDATES_CHANNEL)
+
+    async def stop(self):
+        """Stop listening for invalidation events and release the dedicated connection."""
+        async with self._listener_lock:
+            if self._listener_conn is None:
+                return
+
+            conn = self._listener_conn
+            self._listener_conn = None
+            try:
+                await conn.remove_listener(
+                    _BOT_CONFIG_UPDATES_CHANNEL,
+                    self._handle_invalidation_notification,
+                )
+            finally:
+                await self._db_pool.release(conn)
+            logger.info("bot_config_loader_listener_stopped", channel=_BOT_CONFIG_UPDATES_CHANNEL)
 
     async def get(self, bot_id: str | uuid.UUID) -> BotConfig | None:
         bot_id_str = str(bot_id)
@@ -45,6 +81,29 @@ class BotConfigLoader:
 
     def invalidate(self, bot_id: str | uuid.UUID):
         self._cache.pop(str(bot_id), None)
+
+    def invalidate_all(self):
+        self._cache.clear()
+
+    async def publish_invalidation(self, bot_id: str | uuid.UUID):
+        """Broadcast a bot-config cache invalidation to all workers."""
+        payload = str(bot_id)
+        async with self._db_pool.acquire() as conn:
+            await conn.execute(
+                "SELECT pg_notify($1, $2)",
+                _BOT_CONFIG_UPDATES_CHANNEL,
+                payload,
+            )
+        logger.info("bot_config_invalidation_published", bot_id=payload)
+
+    def _handle_invalidation_notification(self, connection, pid, channel, payload):
+        if payload == "*":
+            self.invalidate_all()
+            logger.info("bot_config_cache_invalidated_all", channel=channel, source_pid=pid)
+            return
+
+        self.invalidate(payload)
+        logger.info("bot_config_cache_invalidated", bot_id=payload, channel=channel, source_pid=pid)
 
 
 def _row_to_bot_config(row: dict[str, Any]) -> BotConfig:
