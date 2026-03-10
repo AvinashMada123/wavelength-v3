@@ -37,7 +37,7 @@ PLIVO_FRAME_BYTES = int(PLIVO_SAMPLE_RATE * 2 * 0.02)
 # Ring buffer of recently sent audio frames for echo RTT estimation.
 # Each entry: (timestamp, rms_energy, byte_count)
 _ECHO_RTT_HISTORY_SIZE = 200  # ~4s of 20ms frames
-_ECHO_RTT_ENABLED = os.environ.get("ECHO_RTT_ENABLED", "true").lower() == "true"
+_ECHO_RTT_ENABLED = os.environ.get("ECHO_RTT_ENABLED", "false").lower() == "true"
 
 
 def _rms_energy(pcm_bytes: bytes) -> float:

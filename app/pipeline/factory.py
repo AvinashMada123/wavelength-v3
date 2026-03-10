@@ -1395,12 +1395,6 @@ async def build_pipeline(
         goal_cfg = json.loads(goal_cfg)
     call_guard = CallGuard(call_sid=call_context.call_sid, goal_config=goal_cfg)
 
-    # --- Greeting guard (suppress phantom VAD during initial greeting) ---
-    greeting_guard = GreetingGuard(
-        guard_duration=5.0,
-        call_sid=call_context.call_sid,
-    )
-
     # --- Echo gate (mute inbound audio while bot is speaking) ---
     echo_gate = EchoGate(
         call_sid=call_context.call_sid,
@@ -1408,14 +1402,16 @@ async def build_pipeline(
         echo_tail_ms=settings.ECHO_TAIL_MS,
     )
 
-    # --- Hello guard (suppress "hello?" cascade during processing) ---
-    hello_guard = HelloGuard(call_sid=call_context.call_sid)
-
     # --- Latency trackers ---
     tracker_post_stt = LatencyTracker(position="post_stt", call_sid=call_context.call_sid)
     tracker_post_tts = LatencyTracker(position="post_tts", call_sid=call_context.call_sid)
 
     # --- Pipeline ---
+    # TTSTailTrim only needed for Sarvam (drops pathological silent tails)
+    tts_processors = [tts]
+    if tts_provider == "sarvam":
+        tts_processors.append(TTSTailTrim(call_sid=call_context.call_sid))
+
     pipeline = Pipeline(
         [
             transport.input(),
@@ -1424,13 +1420,9 @@ async def build_pipeline(
             call_guard,
             tracker_post_stt,
             user_idle,
-            greeting_guard,
-            hello_guard,
             context_aggregator.user(),
             llm,
-            tts,
-            TTSTailTrim(call_sid=call_context.call_sid),
-            TTSAudioLogger(call_sid=call_context.call_sid, save_audio=False),
+            *tts_processors,
             tracker_post_tts,
             transport.output(),
             context_aggregator.assistant(),
@@ -1441,7 +1433,7 @@ async def build_pipeline(
         pipeline,
         params=PipelineParams(
             allow_interruptions=True,
-            interruption_strategies=[MinWordsInterruptionStrategy(min_words=3)],
+            interruption_strategies=[MinWordsInterruptionStrategy(min_words=2)],
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
