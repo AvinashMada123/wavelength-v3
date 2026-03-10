@@ -9,7 +9,10 @@ and classify the lead's interest level.
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import re
+import time
 
 import structlog
 from pipecat.frames.frames import EndFrame, TTSSpeakFrame
@@ -20,37 +23,16 @@ from app.config import gemini_key_pool, settings
 from app.models.bot_config import BotConfig
 from app.models.schemas import CallContext
 from app.pipeline.factory import build_pipeline
+from app.serializers.plivo_pcm import PLIVO_SAMPLE_RATE, ComfortNoiseInjector
 
 logger = structlog.get_logger(__name__)
 
+_DEFAULT_GREETING = "Hi {contact_name}, this is {agent_name} calling from {company_name}. How are you doing today?"
 
-async def run_pipeline(
-    websocket: WebSocket,
-    ctx: CallContext,
-    bot_config: BotConfig,
-    provider: str = "plivo",
-    stream_sid: str = "",
-) -> dict:
-    """
-    Build and run the Pipecat pipeline for a single call.
 
-    Returns dict with:
-      - "messages": conversation message history (list of {role, content} dicts)
-    """
-    task, transport, context, guard = await build_pipeline(bot_config, ctx, websocket, provider=provider, stream_sid=stream_sid)
-
-    max_duration = getattr(bot_config, "max_call_duration", 480) or 480
-    logger.info("pipeline_starting", call_sid=ctx.call_sid, voice=ctx.tts_voice, max_duration=max_duration)
-
-    runner = PipelineRunner()
-
-    # Resolve configurable greeting template (falls back to default if not set).
-    _DEFAULT_GREETING = "Hi {contact_name}, this is {agent_name} calling from {company_name}. How are you doing today?"
+def _resolve_greeting_text(ctx: CallContext, bot_config: BotConfig) -> str:
+    """Resolve the greeting template into final text."""
     greeting_template = getattr(bot_config, "greeting_template", None) or _DEFAULT_GREETING
-
-    # Build template variables from both CallContext and BotConfig.
-    # Uses a defaultdict wrapper that logs warnings for missing variables
-    # instead of raising KeyError or silently returning empty string.
     _greeting_vars = {
         "contact_name": ctx.contact_name or "there",
         "agent_name": bot_config.agent_name,
@@ -62,25 +44,206 @@ async def run_pipeline(
     }
 
     class _WarnMissing(dict):
-        """dict subclass that logs a warning for missing template variables."""
         def __missing__(self, key):
             logger.warning("greeting_template_missing_var", var=key, call_sid=ctx.call_sid)
             return ""
 
-    greeting_text = greeting_template.format_map(_WarnMissing(_greeting_vars))
-    # Validate: if rendered greeting is empty/whitespace, fall back to default
-    if not greeting_text.strip():
-        greeting_text = _DEFAULT_GREETING.format_map(_greeting_vars)
+    text = greeting_template.format_map(_WarnMissing(_greeting_vars))
+    if not text.strip():
+        text = _DEFAULT_GREETING.format_map(_greeting_vars)
+    return text
 
-    async def send_initial_greeting():
-        # Brief yield — just enough for StartFrame to propagate through pipeline.
-        # Frames are queued in order, so greeting always processes after StartFrame.
-        # Previous 0.5s delay added unnecessary silence at call start.
-        await asyncio.sleep(0.1)
-        await task.queue_frame(TTSSpeakFrame(text=greeting_text))
-        logger.info("initial_greeting_triggered", call_sid=ctx.call_sid, greeting=greeting_text)
 
-    asyncio.create_task(send_initial_greeting())
+async def _synthesize_greeting(
+    greeting_text: str,
+    bot_config: BotConfig,
+    call_context: CallContext,
+) -> bytes | None:
+    """Synthesize greeting audio using a standalone TTS instance.
+
+    Returns raw PCM bytes at 16kHz, or None on failure.
+    """
+    tts_provider = getattr(bot_config, "tts_provider", "gemini")
+    stt_language = getattr(call_context, "language", "en-IN") or "en-IN"
+
+    try:
+        if tts_provider == "gemini":
+            from app.pipeline.factory import _get_gemini_tts_class, _CHIRP_TO_GEMINI_VOICE, _LANG_CODE_TO_ENUM
+            from pipecat.services.google.tts import GeminiTTSService
+            from pipecat.transcriptions.language import Language
+
+            voice_id = _CHIRP_TO_GEMINI_VOICE.get(call_context.tts_voice, call_context.tts_voice)
+            lang_enum_name = _LANG_CODE_TO_ENUM.get(stt_language, "EN_IN")
+            tts_language = getattr(Language, lang_enum_name, Language.EN_IN)
+
+            GeminiTTS = _get_gemini_tts_class()
+            tts = GeminiTTS(
+                model="gemini-2.5-flash-tts",
+                voice_id=voice_id,
+                params=GeminiTTSService.InputParams(language=tts_language),
+            )
+        elif tts_provider == "sarvam":
+            from pipecat.services.sarvam.tts import SarvamTTSService
+
+            tts = SarvamTTSService(
+                api_key=settings.SARVAM_API_KEY,
+                model="bulbul:v3",
+                voice_id=call_context.tts_voice,
+                sample_rate=16000,
+                params=SarvamTTSService.InputParams(
+                    language=stt_language,
+                    min_buffer_size=30,
+                    max_chunk_length=100,
+                    temperature=0.4,
+                ),
+            )
+        else:
+            # Google Cloud TTS — not easily usable standalone, fall back
+            return None
+
+        # Collect all audio frames from the async generator
+        audio_chunks: list[bytes] = []
+        start = time.monotonic()
+        async for frame in tts.run_tts(greeting_text):
+            if hasattr(frame, "audio") and frame.audio:
+                audio_chunks.append(frame.audio)
+
+        synth_ms = round((time.monotonic() - start) * 1000)
+        if not audio_chunks:
+            logger.warning("greeting_synth_empty", call_sid=call_context.call_sid)
+            return None
+
+        pcm_bytes = b"".join(audio_chunks)
+        logger.info(
+            "greeting_synth_ok",
+            call_sid=call_context.call_sid,
+            synth_ms=synth_ms,
+            bytes=len(pcm_bytes),
+            duration_ms=round(len(pcm_bytes) / (PLIVO_SAMPLE_RATE * 2) * 1000),
+        )
+        return pcm_bytes
+
+    except Exception as e:
+        logger.error("greeting_synth_failed", call_sid=call_context.call_sid, error=str(e))
+        return None
+
+
+async def _send_greeting_to_plivo(
+    websocket: WebSocket,
+    pcm_bytes: bytes,
+    call_sid: str,
+    chunk_size: int = 640,
+) -> bool:
+    """Send pre-synthesized greeting audio directly to Plivo via playAudio frames.
+
+    Returns True if all frames were sent successfully.
+    """
+    try:
+        n_chunks = 0
+        for offset in range(0, len(pcm_bytes), chunk_size):
+            chunk = pcm_bytes[offset: offset + chunk_size]
+            payload = base64.b64encode(chunk).decode("utf-8")
+            msg = json.dumps({
+                "event": "playAudio",
+                "media": {
+                    "contentType": "audio/x-l16",
+                    "sampleRate": PLIVO_SAMPLE_RATE,
+                    "payload": payload,
+                },
+            })
+            await websocket.send_text(msg)
+            n_chunks += 1
+
+        # Send checkpoint to confirm greeting delivery
+        await websocket.send_text(json.dumps({
+            "event": "checkpoint",
+            "name": "greeting_complete",
+        }))
+
+        logger.info(
+            "greeting_direct_play_sent",
+            call_sid=call_sid,
+            chunks=n_chunks,
+            bytes=len(pcm_bytes),
+        )
+        return True
+    except Exception as e:
+        logger.error("greeting_direct_play_failed", call_sid=call_sid, error=str(e))
+        return False
+
+
+async def run_pipeline(
+    websocket: WebSocket,
+    ctx: CallContext,
+    bot_config: BotConfig,
+    provider: str = "plivo",
+    stream_sid: str = "",
+    plivo_stream_id: str = "",
+    greeting_audio: bytes | None = None,
+) -> dict:
+    """
+    Build and run the Pipecat pipeline for a single call.
+
+    Args:
+        plivo_stream_id: Pre-captured Plivo stream ID from start event (Phase 3).
+        greeting_audio: Pre-synthesized greeting PCM bytes (Phase 3).
+            If provided, sent directly to Plivo before pipeline starts.
+
+    Returns dict with:
+      - "messages": conversation message history (list of {role, content} dicts)
+    """
+    # Resolve greeting text (needed for both direct play and fallback)
+    greeting_text = _resolve_greeting_text(ctx, bot_config)
+
+    # Phase 3: Send pre-synthesized greeting directly to Plivo if available
+    greeting_sent_directly = False
+    if settings.GREETING_DIRECT_PLAY and greeting_audio is not None:
+        greeting_sent_directly = await _send_greeting_to_plivo(
+            websocket, greeting_audio, ctx.call_sid
+        )
+        if greeting_sent_directly:
+            # Wait briefly for playedStream confirmation (non-blocking with timeout)
+            try:
+                # Don't block too long — Plivo may not support checkpoint on all plans
+                await asyncio.sleep(0.05)
+            except Exception:
+                pass
+
+    task, transport, context, guard = await build_pipeline(
+        bot_config, ctx, websocket,
+        provider=provider, stream_sid=stream_sid,
+        plivo_stream_id=plivo_stream_id,
+    )
+
+    max_duration = getattr(bot_config, "max_call_duration", 480) or 480
+    logger.info(
+        "pipeline_starting",
+        call_sid=ctx.call_sid,
+        voice=ctx.tts_voice,
+        max_duration=max_duration,
+        greeting_direct=greeting_sent_directly,
+    )
+
+    runner = PipelineRunner()
+
+    # Phase 4b: Comfort noise injector (sends directly to WS, bypasses pipeline)
+    comfort_noise = None
+    if provider == "plivo" and hasattr(transport, '_params') and hasattr(transport._params, 'serializer'):
+        comfort_noise = ComfortNoiseInjector(
+            websocket=websocket,
+            serializer=transport._params.serializer,
+            enabled=settings.COMFORT_NOISE_ENABLED,
+        )
+        comfort_noise.start()
+
+    # Fallback: if greeting wasn't sent directly, send through pipeline
+    if not greeting_sent_directly:
+        async def send_initial_greeting():
+            await asyncio.sleep(0.1)
+            await task.queue_frame(TTSSpeakFrame(text=greeting_text))
+            logger.info("initial_greeting_triggered", call_sid=ctx.call_sid, greeting=greeting_text, fallback=True)
+
+        asyncio.create_task(send_initial_greeting())
 
     # Max call duration enforcement
     async def enforce_max_duration():
@@ -95,11 +258,9 @@ async def run_pipeline(
 
     # Watchdog: detect WebSocket closure and stop pipeline
     async def ws_watchdog():
-        """Monitor WebSocket state and cancel pipeline when connection drops."""
         while True:
             await asyncio.sleep(1)
             try:
-                # Starlette WebSocket: client_state becomes DISCONNECTED on close
                 if websocket.client_state.name == "DISCONNECTED":
                     logger.info("ws_watchdog_disconnect", call_sid=ctx.call_sid)
                     await task.queue_frame(EndFrame())
@@ -116,6 +277,8 @@ async def run_pipeline(
     finally:
         duration_task.cancel()
         watchdog_task.cancel()
+        if comfort_noise:
+            comfort_noise.stop()
 
     logger.info("pipeline_ended", call_sid=ctx.call_sid)
 

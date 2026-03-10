@@ -26,7 +26,12 @@ from app.models.call_log import CallLog
 from app.models.schemas import CallContext
 from app.models.call_analytics import CallAnalytics
 from app.models.schemas import CallAnalysis
-from app.pipeline.runner import generate_call_summary, run_pipeline
+from app.pipeline.runner import (
+    generate_call_summary,
+    run_pipeline,
+    _resolve_greeting_text,
+    _synthesize_greeting,
+)
 from app.services.call_analyzer import CallAnalyzer
 from app.plivo.xml_responses import build_hangup_xml, build_stream_xml
 
@@ -289,6 +294,7 @@ async def plivo_answer(call_sid: str, db: AsyncSession = Depends(get_db)):
         stream_timeout=3600,
         keep_call_alive=True,
         recording_callback_url=recording_cb,
+        noise_cancellation=settings.PLIVO_NOISE_CANCEL,
     )
     logger.info("plivo_answer_stream_xml", call_sid=call_sid, ws_url=ws_url)
     return Response(content=xml, media_type="application/xml")
@@ -331,8 +337,62 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         # Run pre-call GHL workflows (tag contacts before call starts)
         await _run_ghl_workflows(ctx, bot_config, "pre_call")
 
+        # Phase 3: Capture Plivo start event and synthesize greeting BEFORE pipeline.
+        # These run concurrently: reading first WS message + TTS synthesis overlap.
+        plivo_stream_id = ""
+        greeting_audio = None
+
+        if settings.GREETING_DIRECT_PLAY:
+            import asyncio
+            import json as _json
+
+            async def _capture_start_event():
+                """Read first WS message to get Plivo streamId."""
+                try:
+                    raw = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+                    msg = _json.loads(raw)
+                    if msg.get("event") == "start":
+                        sid = msg.get("start", {}).get("streamId", "")
+                        logger.info("plivo_start_event_captured", call_sid=call_sid, stream_id=sid)
+                        return sid
+                    logger.warning("plivo_first_msg_not_start", call_sid=call_sid, event=msg.get("event"))
+                except Exception as e:
+                    logger.error("plivo_start_event_failed", call_sid=call_sid, error=str(e))
+                return ""
+
+            async def _synth_greeting():
+                """Pre-synthesize greeting audio."""
+                try:
+                    text = _resolve_greeting_text(ctx, bot_config)
+                    return await asyncio.wait_for(
+                        _synthesize_greeting(text, bot_config, ctx),
+                        timeout=3.0,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("greeting_synth_timeout", call_sid=call_sid)
+                except Exception as e:
+                    logger.error("greeting_synth_error", call_sid=call_sid, error=str(e))
+                return None
+
+            # Run both concurrently
+            start_task = asyncio.create_task(_capture_start_event())
+            synth_task = asyncio.create_task(_synth_greeting())
+            plivo_stream_id, greeting_audio = await asyncio.gather(start_task, synth_task)
+
+            if greeting_audio:
+                logger.info(
+                    "greeting_presynth_ready",
+                    call_sid=call_sid,
+                    audio_bytes=len(greeting_audio),
+                    stream_id=plivo_stream_id,
+                )
+
         # Run pipeline — returns conversation history + recording paths + guard results
-        pipeline_result = await run_pipeline(websocket, ctx, bot_config)
+        pipeline_result = await run_pipeline(
+            websocket, ctx, bot_config,
+            plivo_stream_id=plivo_stream_id,
+            greeting_audio=greeting_audio,
+        )
         conversation_messages = pipeline_result["messages"]
         end_reason = pipeline_result.get("end_reason")
         llm_end_reason = pipeline_result.get("llm_end_reason")

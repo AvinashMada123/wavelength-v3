@@ -14,8 +14,7 @@ import structlog
 from deepgram import LiveOptions
 
 # Increase from 0.35s default to survive inter-sentence TTS gaps.
-# 1.5s is safe for Sarvam TTS (0.2s TTFB) while reducing post-speech dead zone.
-_base_output.BOT_VAD_STOP_SECS = 1.5
+_base_output.BOT_VAD_STOP_SECS = 2.0
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -256,6 +255,7 @@ class HelloGuard(FrameProcessor):
             BotStoppedSpeakingFrame,
             StartFrame,
             TranscriptionFrame,
+            UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
         )
 
@@ -274,6 +274,17 @@ class HelloGuard(FrameProcessor):
 
         if isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_speaking = False
+            await self.push_frame(frame, direction)
+            return
+
+        # New user speech turn — clear any stale echo suppression flag
+        if isinstance(frame, UserStartedSpeakingFrame):
+            if self._suppressed_hello:
+                logger.info(
+                    "hello_guard_reset_on_new_turn",
+                    call_sid=self._call_sid,
+                )
+            self._suppressed_hello = False
             await self.push_frame(frame, direction)
             return
 
@@ -329,6 +340,72 @@ class HelloGuard(FrameProcessor):
             )
 
         await self.push_frame(frame, direction)
+
+
+class TTSAudioLogger(FrameProcessor):
+    """Logs TTS audio frames and saves raw PCM to disk for diagnostics."""
+
+    def __init__(self, call_sid="", save_audio=True, **kwargs):
+        super().__init__(name="TTSAudioLogger", **kwargs)
+        self._call_sid = call_sid
+        self._frame_count = 0
+        self._save_audio = save_audio
+        self._audio_file = None
+        self._sample_rate = None
+        self._total_bytes = 0
+
+    def _ensure_file(self, sample_rate: int):
+        if self._audio_file is None:
+            import os
+            dump_dir = "/tmp/tts_dumps"
+            os.makedirs(dump_dir, exist_ok=True)
+            safe_sid = self._call_sid.replace("/", "_")[:40]
+            self._audio_file = open(f"{dump_dir}/{safe_sid}.raw", "wb")
+            self._sample_rate = sample_rate
+            logger.info("tts_dump_started", call_sid=self._call_sid,
+                        path=f"{dump_dir}/{safe_sid}.raw", sample_rate=sample_rate)
+
+    async def process_frame(self, frame, direction):
+        from pipecat.frames.frames import EndFrame, StartFrame, TTSAudioRawFrame
+        if isinstance(frame, StartFrame):
+            await super().process_frame(frame, direction)
+            await self.push_frame(frame, direction)
+            return
+        if isinstance(frame, EndFrame):
+            self._close_file()
+        if isinstance(frame, TTSAudioRawFrame):
+            self._frame_count += 1
+            # Save raw PCM to file
+            if self._save_audio and frame.audio:
+                self._ensure_file(frame.sample_rate)
+                self._audio_file.write(frame.audio)
+                self._total_bytes += len(frame.audio)
+            if self._frame_count <= 3 or self._frame_count % 50 == 0:
+                import numpy as np
+                audio_np = np.frombuffer(frame.audio, dtype=np.int16)
+                rms = float(np.sqrt(np.mean(audio_np.astype(np.float64) ** 2)))
+                max_amp = int(np.abs(audio_np).max()) if len(audio_np) > 0 else 0
+                duration_ms = len(audio_np) / frame.sample_rate * 1000
+                logger.info(
+                    "tts_audio_frame",
+                    call_sid=self._call_sid,
+                    frame_num=self._frame_count,
+                    sample_rate=frame.sample_rate,
+                    audio_bytes=len(frame.audio),
+                    duration_ms=round(duration_ms, 1),
+                    rms=round(rms, 1),
+                    max_amp=max_amp,
+                    total_dumped=self._total_bytes,
+                )
+        await self.push_frame(frame, direction)
+
+    def _close_file(self):
+        if self._audio_file:
+            self._audio_file.close()
+            duration_s = self._total_bytes / (self._sample_rate * 2) if self._sample_rate else 0
+            logger.info("tts_dump_finished", call_sid=self._call_sid,
+                        total_bytes=self._total_bytes, duration_s=round(duration_s, 1))
+            self._audio_file = None
 
 
 class LatencyTracker(FrameProcessor):
@@ -716,11 +793,11 @@ async def build_pipeline(
 
     if stt_provider == "sarvam":
         # Sarvam server-side VAD handles START/END_SPEECH — no local VAD needed.
-        # Still need vad_enabled + passthrough so audio frames reach the STT service.
+        # vad_enabled + passthrough ensures audio frames reach the STT service.
         transport_params = FastAPIWebsocketParams(
             audio_out_enabled=True,
             audio_out_sample_rate=16000,
-            audio_out_10ms_chunks=2,
+            audio_out_10ms_chunks=10,
             add_wav_header=False,
             serializer=serializer,
             vad_enabled=True,
@@ -731,7 +808,7 @@ async def build_pipeline(
         transport_params = FastAPIWebsocketParams(
             audio_out_enabled=True,
             audio_out_sample_rate=16000,
-            audio_out_10ms_chunks=2,
+            audio_out_10ms_chunks=10,
             add_wav_header=False,
             serializer=serializer,
             vad_enabled=True,
@@ -778,7 +855,12 @@ async def build_pipeline(
                 self._call_sid_tag = ""  # Set after pipeline starts
 
             async def process_frame(self, frame, direction: FrameDirection):
-                from pipecat.frames.frames import InputAudioRawFrame, StartFrame
+                from pipecat.frames.frames import (
+                    InputAudioRawFrame,
+                    StartFrame,
+                    VADUserStartedSpeakingFrame,
+                    VADUserStoppedSpeakingFrame,
+                )
                 # Count audio frames reaching Sarvam STT
                 if isinstance(frame, InputAudioRawFrame):
                     self._audio_frames_sent += 1
@@ -796,6 +878,42 @@ async def build_pipeline(
                             end_speech_pending=self._end_speech_pending,
                         )
                         self._last_audio_log_time = now
+
+                # When using Pipecat VAD (vad_signals=False), Silero sends
+                # VADUserStoppedSpeakingFrame. The base class pushes this downstream
+                # AND calls flush(). But the frame reaches the aggregator BEFORE
+                # flush returns the transcript — same race condition as Sarvam's
+                # END_SPEECH. Fix: intercept, buffer, flush, emit after transcript.
+                if isinstance(frame, VADUserStoppedSpeakingFrame):
+                    logger.info(
+                        "sarvam_stt_vad_stopped",
+                        call_sid=self._call_sid_tag,
+                        end_speech_pending=self._end_speech_pending,
+                    )
+                    self._end_speech_pending = True
+                    if self._end_speech_timeout_task:
+                        self._end_speech_timeout_task.cancel()
+                    self._end_speech_timeout_task = asyncio.create_task(
+                        self._end_speech_timeout()
+                    )
+                    # Flush Sarvam to finalize transcript
+                    if self._socket_client:
+                        try:
+                            await self._socket_client.flush()
+                        except Exception as e:
+                            logger.warning(
+                                "sarvam_stt_flush_error",
+                                call_sid=self._call_sid_tag,
+                                error=str(e),
+                            )
+                    # Don't call super — prevents frame from reaching aggregator
+                    # before transcript. Also skip base class's redundant flush().
+                    return
+
+                # Let VADUserStartedSpeakingFrame through and start metrics
+                if isinstance(frame, VADUserStartedSpeakingFrame):
+                    await self._start_metrics()
+
                 await super().process_frame(frame, direction)
 
             async def _handle_message(self, message):
@@ -900,11 +1018,12 @@ async def build_pipeline(
             api_key=settings.SARVAM_API_KEY,
             model="saaras:v3",
             sample_rate=16000,
+            input_audio_codec="wav",
             params=SarvamSTTService.InputParams(
                 language=sarvam_lang,
                 mode="transcribe",
                 vad_signals=True,
-                high_vad_sensitivity=True,
+                high_vad_sensitivity=False,
             ),
             keepalive_timeout=30.0,
         )
@@ -1027,7 +1146,7 @@ async def build_pipeline(
             api_key=settings.SARVAM_API_KEY,
             model="bulbul:v3",
             voice_id=call_context.tts_voice,
-            sample_rate=16000,
+            sample_rate=22050,
             params=SarvamTTSService.InputParams(
                 language=stt_language,
                 min_buffer_size=30,
@@ -1161,6 +1280,7 @@ async def build_pipeline(
             context_aggregator.user(),
             llm,
             tts,
+            TTSAudioLogger(call_sid=call_context.call_sid, save_audio=False),
             tracker_post_tts,
             transport.output(),
             context_aggregator.assistant(),
@@ -1171,7 +1291,7 @@ async def build_pipeline(
         pipeline,
         params=PipelineParams(
             allow_interruptions=True,
-            interruption_strategies=[MinWordsInterruptionStrategy(min_words=1)],
+            interruption_strategies=[MinWordsInterruptionStrategy(min_words=3)],
             enable_metrics=True,
             enable_usage_metrics=True,
         ),

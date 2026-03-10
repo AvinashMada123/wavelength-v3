@@ -31,15 +31,30 @@ class PhraseTextAggregator(BaseTextAggregator):
     Sentence endings always trigger a split. Phrase delimiters only trigger
     a split when the accumulated text meets min_phrase_chars, preventing
     excessively short TTS fragments.
+
+    When adaptive=True, uses a lower threshold for the first phrase (fast TTFB)
+    and a higher threshold for subsequent phrases (fewer TTS round-trips,
+    fewer inter-phrase gaps).
     """
 
     _PHRASE_DELIMS = frozenset(",;:")
     _SENTENCE_ENDS = frozenset(".!?")
 
-    def __init__(self, *, min_phrase_chars: int = 10, **kwargs):
+    def __init__(
+        self,
+        *,
+        min_phrase_chars: int = 10,
+        subsequent_phrase_chars: int = 25,
+        adaptive: bool = False,
+        **kwargs,
+    ):
         super().__init__(aggregation_type=AggregationType.SENTENCE, **kwargs)
         self._text = ""
-        self._min_phrase_chars = min_phrase_chars
+        self._first_phrase_chars = min_phrase_chars
+        self._subsequent_phrase_chars = subsequent_phrase_chars
+        self._adaptive = adaptive
+        self._min_phrase_chars = min_phrase_chars  # active threshold
+        self._emissions = 0
         self._pending_pos: int | None = None
         self._is_sentence_end: bool = False
 
@@ -67,6 +82,10 @@ class PhraseTextAggregator(BaseTextAggregator):
                     self._text = remainder
                     self._pending_pos = None
                     self._is_sentence_end = False
+                    self._emissions += 1
+                    # Adaptive: raise threshold after first phrase for fewer gaps
+                    if self._adaptive and self._emissions == 1:
+                        self._min_phrase_chars = self._subsequent_phrase_chars
                     yield Aggregation(text=split_text, type="phrase")
                     # Check if the lookahead char is itself a delimiter
                     self._check_delimiter(char)
@@ -97,8 +116,15 @@ class PhraseTextAggregator(BaseTextAggregator):
         self._text = ""
         self._pending_pos = None
         self._is_sentence_end = False
+        # Reset adaptive threshold so next response starts with fast TTFB
+        self._emissions = 0
+        if self._adaptive:
+            self._min_phrase_chars = self._first_phrase_chars
 
     async def reset(self):
         self._text = ""
         self._pending_pos = None
         self._is_sentence_end = False
+        self._emissions = 0
+        if self._adaptive:
+            self._min_phrase_chars = self._first_phrase_chars
