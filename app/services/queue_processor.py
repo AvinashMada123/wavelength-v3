@@ -242,6 +242,7 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
             # Create call log
             call_sid = str(uuid4())
             call_log = CallLog(
+                org_id=bot_config.org_id,
                 bot_id=bot_config.id,
                 call_sid=call_sid,
                 contact_name=queued_call.contact_name,

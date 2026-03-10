@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.dependencies import get_current_user, get_current_org
 from app.database import get_db
 from app.models.bot_config import BotConfig
 from app.models.call_queue import CircuitBreakerState, QueuedCall
@@ -35,11 +36,13 @@ async def list_queued_calls(
     limit: int = Query(default=200, le=1000),
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
 ):
     """List calls in the queue with optional filters."""
     query = (
         select(QueuedCall, BotConfig.agent_name)
         .join(BotConfig, QueuedCall.bot_id == BotConfig.id, isouter=True)
+        .where(QueuedCall.org_id == org_id)
         .order_by(QueuedCall.created_at.desc())
     )
     if bot_id:
@@ -60,7 +63,10 @@ async def list_queued_calls(
 
 
 @router.get("/stats", response_model=list[QueueStatsResponse])
-async def queue_stats(db: AsyncSession = Depends(get_db)):
+async def queue_stats(
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
     """Get queue counts grouped by bot and status."""
     query = (
         select(
@@ -70,6 +76,7 @@ async def queue_stats(db: AsyncSession = Depends(get_db)):
             func.count().label("count"),
         )
         .join(BotConfig, QueuedCall.bot_id == BotConfig.id, isouter=True)
+        .where(QueuedCall.org_id == org_id)
         .group_by(QueuedCall.bot_id, BotConfig.agent_name, QueuedCall.status)
     )
     result = await db.execute(query)
@@ -89,9 +96,13 @@ async def queue_stats(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{queue_id}/cancel")
-async def cancel_queued_call(queue_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def cancel_queued_call(
+    queue_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
     """Cancel a single queued/held call."""
-    result = await db.execute(select(QueuedCall).where(QueuedCall.id == queue_id))
+    result = await db.execute(select(QueuedCall).where(QueuedCall.id == queue_id, QueuedCall.org_id == org_id))
     call = result.scalar_one_or_none()
     if not call:
         raise HTTPException(status_code=404, detail="Queue entry not found")
@@ -104,12 +115,16 @@ async def cancel_queued_call(queue_id: uuid.UUID, db: AsyncSession = Depends(get
 
 
 @router.post("/{queue_id}/trigger")
-async def trigger_queued_call(queue_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def trigger_queued_call(
+    queue_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
     """Force-trigger a single queued/held call, bypassing circuit breaker.
 
     Useful for testing individual calls when the bot is paused.
     """
-    result = await db.execute(select(QueuedCall).where(QueuedCall.id == queue_id))
+    result = await db.execute(select(QueuedCall).where(QueuedCall.id == queue_id, QueuedCall.org_id == org_id))
     call = result.scalar_one_or_none()
     if not call:
         raise HTTPException(status_code=404, detail="Queue entry not found")
@@ -135,11 +150,13 @@ async def trigger_queued_call(queue_id: uuid.UUID, db: AsyncSession = Depends(ge
 async def bulk_cancel(
     queue_ids: list[uuid.UUID],
     db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
 ):
     """Cancel multiple queued/held calls."""
     result = await db.execute(
         select(QueuedCall).where(
             QueuedCall.id.in_(queue_ids),
+            QueuedCall.org_id == org_id,
             QueuedCall.status.in_(["queued", "held"]),
         )
     )
@@ -156,8 +173,15 @@ async def bulk_cancel(
 async def bulk_approve(
     bot_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
 ):
     """Approve all held calls for a bot — resets circuit breaker and releases calls."""
+    # Verify the bot belongs to the user's org
+    bot_result = await db.execute(
+        select(BotConfig).where(BotConfig.id == bot_id, BotConfig.org_id == org_id)
+    )
+    if not bot_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Bot config not found")
     await circuit_breaker.reset(db, bot_id)
     await db.commit()
     return {"status": "approved", "bot_id": str(bot_id)}
@@ -167,11 +191,15 @@ async def bulk_approve(
 
 
 @router.get("/circuit-breaker", response_model=list[CircuitBreakerResponse])
-async def list_circuit_breakers(db: AsyncSession = Depends(get_db)):
+async def list_circuit_breakers(
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
     """List circuit breaker state for all bots."""
     result = await db.execute(
         select(CircuitBreakerState, BotConfig.agent_name)
         .join(BotConfig, CircuitBreakerState.bot_id == BotConfig.id, isouter=True)
+        .where(BotConfig.org_id == org_id)
     )
     rows = result.all()
     return [
@@ -184,8 +212,16 @@ async def list_circuit_breakers(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/circuit-breaker/{bot_id}", response_model=CircuitBreakerResponse)
-async def get_circuit_breaker(bot_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_circuit_breaker(
+    bot_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
     """Get circuit breaker state for a specific bot."""
+    # Verify the bot belongs to the user's org
+    bot_result = await db.execute(select(BotConfig).where(BotConfig.id == bot_id, BotConfig.org_id == org_id))
+    if not bot_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Bot config not found")
     cb = await circuit_breaker.get_or_create(db, bot_id)
     await db.commit()
     result = await db.execute(select(BotConfig.agent_name).where(BotConfig.id == bot_id))
@@ -197,16 +233,32 @@ async def get_circuit_breaker(bot_id: uuid.UUID, db: AsyncSession = Depends(get_
 
 
 @router.post("/circuit-breaker/{bot_id}/open")
-async def open_circuit_breaker(bot_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def open_circuit_breaker(
+    bot_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
     """Manually pause calls for a bot."""
+    # Verify the bot belongs to the user's org
+    bot_result = await db.execute(select(BotConfig).where(BotConfig.id == bot_id, BotConfig.org_id == org_id))
+    if not bot_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Bot config not found")
     await circuit_breaker.manual_open(db, bot_id)
     await db.commit()
     return {"status": "open", "bot_id": str(bot_id)}
 
 
 @router.post("/circuit-breaker/{bot_id}/reset")
-async def reset_circuit_breaker(bot_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def reset_circuit_breaker(
+    bot_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
     """Reset circuit breaker — resumes call processing and releases held calls."""
+    # Verify the bot belongs to the user's org
+    bot_result = await db.execute(select(BotConfig).where(BotConfig.id == bot_id, BotConfig.org_id == org_id))
+    if not bot_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Bot config not found")
     await circuit_breaker.reset(db, bot_id)
     await db.commit()
     return {"status": "closed", "bot_id": str(bot_id)}
@@ -217,8 +269,13 @@ async def update_circuit_breaker_settings(
     bot_id: uuid.UUID,
     failure_threshold: int = Query(ge=1, le=50),
     db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
 ):
     """Update circuit breaker threshold for a bot."""
+    # Verify the bot belongs to the user's org
+    bot_result = await db.execute(select(BotConfig).where(BotConfig.id == bot_id, BotConfig.org_id == org_id))
+    if not bot_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Bot config not found")
     await circuit_breaker.update_threshold(db, bot_id, failure_threshold)
     await db.commit()
     return {"status": "updated", "failure_threshold": failure_threshold}

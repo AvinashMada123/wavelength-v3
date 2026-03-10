@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.dependencies import get_current_user, get_current_org
 from app.database import get_db
 from app.models.call_analytics import CallAnalytics
 from app.models.call_log import CallLog
@@ -103,9 +104,10 @@ async def get_analytics_summary(
     start_date: datetime | None = Query(None),
     end_date: datetime | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
 ):
     """Goal completion rates, outcome breakdown, avg duration, red flag rate."""
-    query = select(CallAnalytics).where(CallAnalytics.bot_id == bot_id)
+    query = select(CallAnalytics).where(CallAnalytics.bot_id == bot_id, CallAnalytics.org_id == org_id)
     if start_date:
         query = query.where(CallAnalytics.created_at >= start_date)
     if end_date:
@@ -171,9 +173,10 @@ async def get_analytics_outcomes(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
 ):
     """Paginated list of calls with goal outcomes."""
-    query = select(CallAnalytics).where(CallAnalytics.bot_id == bot_id)
+    query = select(CallAnalytics).where(CallAnalytics.bot_id == bot_id, CallAnalytics.org_id == org_id)
     if outcome:
         query = query.where(CallAnalytics.goal_outcome == outcome)
     if has_red_flags is not None:
@@ -198,10 +201,12 @@ async def get_analytics_red_flags(
     start_date: datetime | None = Query(None),
     end_date: datetime | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
 ):
     """Red flags grouped by severity with evidence quotes."""
     query = select(CallAnalytics).where(
         CallAnalytics.bot_id == bot_id,
+        CallAnalytics.org_id == org_id,
         CallAnalytics.has_red_flags == True,
     )
     if severity:
@@ -249,6 +254,7 @@ async def get_analytics_red_flags(
 async def get_analytics_alerts(
     bot_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
 ):
     """Unacknowledged critical/high red flags. Designed for GHL/n8n polling."""
     now = datetime.now(timezone.utc)
@@ -257,6 +263,7 @@ async def get_analytics_alerts(
         select(CallAnalytics)
         .where(
             CallAnalytics.bot_id == bot_id,
+            CallAnalytics.org_id == org_id,
             CallAnalytics.has_red_flags == True,
             CallAnalytics.acknowledged_at.is_(None),
             # Respect snooze: show if not snoozed or snooze has expired
@@ -301,6 +308,7 @@ async def get_analytics_alerts(
         .select_from(CallAnalytics)
         .where(
             CallAnalytics.bot_id == bot_id,
+            CallAnalytics.org_id == org_id,
             CallAnalytics.has_red_flags == True,
             CallAnalytics.acknowledged_at.is_(None),
             (CallAnalytics.snoozed_until.is_(None)) | (CallAnalytics.snoozed_until < now),
@@ -317,12 +325,14 @@ async def acknowledge_alert(
     analytics_id: uuid.UUID,
     body: dict,
     db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
 ):
     """Mark a red flag alert as acknowledged."""
     result = await db.execute(
         select(CallAnalytics).where(
             CallAnalytics.id == analytics_id,
             CallAnalytics.bot_id == bot_id,
+            CallAnalytics.org_id == org_id,
         )
     )
     row = result.scalar_one_or_none()
@@ -342,6 +352,7 @@ async def snooze_alert(
     analytics_id: uuid.UUID,
     body: dict,
     db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
 ):
     """Snooze a red flag alert until a specified time."""
     snooze_until = body.get("snooze_until")
@@ -357,6 +368,7 @@ async def snooze_alert(
         select(CallAnalytics).where(
             CallAnalytics.id == analytics_id,
             CallAnalytics.bot_id == bot_id,
+            CallAnalytics.org_id == org_id,
         )
     )
     row = result.scalar_one_or_none()
@@ -376,6 +388,7 @@ async def get_analytics_trends(
     start_date: datetime | None = Query(None),
     end_date: datetime | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
 ):
     """Time-series: daily/weekly goal completion rate and red flag rate."""
     if interval == "daily":
@@ -390,7 +403,7 @@ async def get_analytics_trends(
             func.count().label("cnt"),
             func.sum(case((CallAnalytics.has_red_flags == True, 1), else_=0)).label("rf_cnt"),
         )
-        .where(CallAnalytics.bot_id == bot_id)
+        .where(CallAnalytics.bot_id == bot_id, CallAnalytics.org_id == org_id)
         .group_by("period", CallAnalytics.goal_outcome)
         .order_by("period")
     )
@@ -421,12 +434,14 @@ async def get_captured_data_summary(
     start_date: datetime | None = Query(None),
     end_date: datetime | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
 ):
     """Aggregated captured data per field. Enum fields: exact counts. String fields: raw values."""
     query = (
         select(CallAnalytics.captured_data, CallAnalytics.call_log_id)
         .where(
             CallAnalytics.bot_id == bot_id,
+            CallAnalytics.org_id == org_id,
             CallAnalytics.captured_data.isnot(None),
         )
     )

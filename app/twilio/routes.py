@@ -250,6 +250,7 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
                     turn_count=turn_count,
                     call_duration=existing_log.call_duration if existing_log else None,
                     transcript=transcript_entries,
+                    org_id=bot_config.org_id,
                 )
             except Exception as e:
                 logger.error("twilio_save_analytics_failed", call_sid=call_sid, error=str(e))

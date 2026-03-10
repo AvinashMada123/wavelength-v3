@@ -28,7 +28,8 @@ if _env_file.exists():
             if key and key not in os.environ:
                 os.environ[key] = value
 
-from app.api import analytics, bots, calls, health, queue, webhook
+from app.api import analytics, bots, calls, campaigns, health, leads, queue, webhook
+from app.auth import router as auth_router
 from app.bot_config.loader import BotConfigLoader
 from app.database import close_asyncpg_pool, init_asyncpg_pool
 from app.ghl.client import GHLClient
@@ -85,10 +86,13 @@ app = FastAPI(
 
 # Mount routers
 app.include_router(health.router)
+app.include_router(auth_router.router)
 app.include_router(calls.router)
 app.include_router(bots.router)
 app.include_router(webhook.router)
 app.include_router(queue.router)
 app.include_router(analytics.router)
+app.include_router(leads.router)
+app.include_router(campaigns.router)
 app.include_router(plivo_routes.router)
 app.include_router(twilio_routes.router)

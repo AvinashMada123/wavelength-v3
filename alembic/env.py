@@ -15,6 +15,12 @@ from app.models.bot_config import Base
 
 # Import all models so Alembic sees them
 import app.models.call_log  # noqa: F401
+import app.models.call_queue  # noqa: F401
+import app.models.call_analytics  # noqa: F401
+import app.models.organization  # noqa: F401
+import app.models.user  # noqa: F401
+import app.models.lead  # noqa: F401
+import app.models.campaign  # noqa: F401
 
 config = context.config
 

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.dependencies import get_current_user, get_current_org
 from app.bot_config.loader import BotConfigLoader
 from app.database import get_db
 from app.models.call_log import CallLog
@@ -38,17 +39,18 @@ async def list_calls(
     limit: int = 10000,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
 ):
     if goal_outcome:
         # Join with call_analytics to filter by goal_outcome
         query = (
             select(CallLog)
             .join(CallAnalytics, CallAnalytics.call_log_id == CallLog.id)
-            .where(CallAnalytics.goal_outcome == goal_outcome)
+            .where(CallAnalytics.goal_outcome == goal_outcome, CallLog.org_id == org_id)
             .order_by(CallLog.created_at.desc())
         )
     else:
-        query = select(CallLog).order_by(CallLog.created_at.desc())
+        query = select(CallLog).where(CallLog.org_id == org_id).order_by(CallLog.created_at.desc())
     if bot_id:
         query = query.where(CallLog.bot_id == bot_id)
     if status:
@@ -64,17 +66,18 @@ async def export_calls(
     goal_outcome: str | None = None,
     limit: int = 10000,
     db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
 ):
     """Full call logs with metadata (transcript + recording) for CSV export."""
     if goal_outcome:
         query = (
             select(CallLog)
             .join(CallAnalytics, CallAnalytics.call_log_id == CallLog.id)
-            .where(CallAnalytics.goal_outcome == goal_outcome)
+            .where(CallAnalytics.goal_outcome == goal_outcome, CallLog.org_id == org_id)
             .order_by(CallLog.created_at.desc())
         )
     else:
-        query = select(CallLog).order_by(CallLog.created_at.desc())
+        query = select(CallLog).where(CallLog.org_id == org_id).order_by(CallLog.created_at.desc())
     if bot_id:
         query = query.where(CallLog.bot_id == bot_id)
     query = query.limit(limit)
@@ -83,8 +86,12 @@ async def export_calls(
 
 
 @router.get("/{call_id}", response_model=CallLogResponse)
-async def get_call(call_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(CallLog).where(CallLog.id == call_id))
+async def get_call(
+    call_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
+    result = await db.execute(select(CallLog).where(CallLog.id == call_id, CallLog.org_id == org_id))
     call_log = result.scalar_one_or_none()
     if not call_log:
         raise HTTPException(status_code=404, detail="Call not found")
@@ -111,15 +118,20 @@ async def get_call(call_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/trigger", response_model=QueueEnqueueResponse, status_code=202)
-async def trigger_call(req: TriggerCallRequest, db: AsyncSession = Depends(get_db)):
+async def trigger_call(
+    req: TriggerCallRequest,
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
     """Enqueue a call for processing by the background queue processor."""
-    # 1. Validate bot config exists
+    # 1. Validate bot config exists and belongs to the user's org
     bot_config = await bot_config_loader.get(str(req.bot_id))
-    if not bot_config:
+    if not bot_config or bot_config.org_id != org_id:
         raise HTTPException(status_code=404, detail="Bot config not found")
 
     # 2. Enqueue call
     queued_call = QueuedCall(
+        org_id=org_id,
         bot_id=bot_config.id,
         contact_name=req.contact_name,
         contact_phone=req.contact_phone,
@@ -137,9 +149,13 @@ async def trigger_call(req: TriggerCallRequest, db: AsyncSession = Depends(get_d
 
 
 @router.get("/{call_sid}/recording")
-async def get_recording(call_sid: str, db: AsyncSession = Depends(get_db)):
+async def get_recording(
+    call_sid: str,
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
     """Redirect to Plivo-hosted recording URL."""
-    result = await db.execute(select(CallLog).where(CallLog.call_sid == call_sid))
+    result = await db.execute(select(CallLog).where(CallLog.call_sid == call_sid, CallLog.org_id == org_id))
     call_log = result.scalar_one_or_none()
     if not call_log:
         raise HTTPException(status_code=404, detail="Call not found")

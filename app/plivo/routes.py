@@ -210,6 +210,7 @@ async def _save_call_analytics(
     turn_count: int,
     call_duration: int | None,
     transcript: list[dict],
+    org_id=None,
 ) -> None:
     """Write a CallAnalytics row after goal-based analysis."""
     red_flags_dicts = [rf.model_dump() for rf in analysis.red_flags]
@@ -218,6 +219,7 @@ async def _save_call_analytics(
 
     row = CallAnalytics(
         call_log_id=call_log_id,
+        org_id=org_id,
         bot_id=bot_id,
         goal_type=goal_type,
         goal_outcome=analysis.goal_outcome,
@@ -550,6 +552,7 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
                     turn_count=turn_count,
                     call_duration=existing_log.call_duration if existing_log else None,
                     transcript=transcript_entries,
+                    org_id=bot_config.org_id,
                 )
             except Exception as e:
                 logger.error("save_call_analytics_failed", call_sid=call_sid, error=str(e), exc_info=True)

@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     DATABASE_POOL_SIZE: int = 10
     DATABASE_MAX_OVERFLOW: int = 5
 
+    # JWT Authentication
+    JWT_SECRET: str = "CHANGE-ME-IN-PRODUCTION"
+    JWT_ALGORITHM: str = "HS256"
+
     # Public URL (for Plivo webhooks)
     PUBLIC_BASE_URL: str = "http://localhost:8080"
     PUBLIC_HOST: str = "localhost:8080"

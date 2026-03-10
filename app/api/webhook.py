@@ -125,6 +125,7 @@ async def webhook_trigger_call(request: Request):
     # --- Enqueue call instead of firing immediately ---
     async with get_db_session() as db:
         queued_call = QueuedCall(
+            org_id=bot_config.org_id,
             bot_id=bot_config.id,
             contact_name=contact_name,
             contact_phone=phone_number,

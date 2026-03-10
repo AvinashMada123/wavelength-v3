@@ -26,5 +26,10 @@ python-multipart>=0.0.9
 # Settings
 pydantic-settings>=2.7.0,<3
 
+# Authentication
+python-jose[cryptography]>=3.3.0,<4
+passlib[bcrypt]>=1.7.4,<2
+pydantic[email]>=2.0.0
+
 # Logging
 structlog>=24.4.0,<25

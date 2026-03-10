@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.dependencies import get_current_user, get_current_org
 from app.bot_config.loader import BotConfigLoader
 from app.database import get_db
 from app.models.bot_config import BotConfig
@@ -29,8 +30,13 @@ def set_dependencies(loader: BotConfigLoader):
 
 
 @router.post("", response_model=BotConfigResponse, status_code=201)
-async def create_bot(req: CreateBotConfigRequest, db: AsyncSession = Depends(get_db)):
+async def create_bot(
+    req: CreateBotConfigRequest,
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
     bot = BotConfig(
+        org_id=org_id,
         agent_name=req.agent_name,
         company_name=req.company_name,
         location=req.location,
@@ -60,14 +66,25 @@ async def create_bot(req: CreateBotConfigRequest, db: AsyncSession = Depends(get
 
 
 @router.get("", response_model=list[BotConfigResponse])
-async def list_bots(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(BotConfig).where(BotConfig.is_active == True).order_by(BotConfig.created_at.desc()))
+async def list_bots(
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
+    result = await db.execute(
+        select(BotConfig)
+        .where(BotConfig.is_active == True, BotConfig.org_id == org_id)
+        .order_by(BotConfig.created_at.desc())
+    )
     return result.scalars().all()
 
 
 @router.get("/{bot_id}", response_model=BotConfigResponse)
-async def get_bot(bot_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(BotConfig).where(BotConfig.id == bot_id))
+async def get_bot(
+    bot_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
+    result = await db.execute(select(BotConfig).where(BotConfig.id == bot_id, BotConfig.org_id == org_id))
     bot = result.scalar_one_or_none()
     if not bot:
         raise HTTPException(status_code=404, detail="Bot config not found")
@@ -75,8 +92,13 @@ async def get_bot(bot_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.patch("/{bot_id}", response_model=BotConfigResponse)
-async def update_bot(bot_id: uuid.UUID, req: UpdateBotConfigRequest, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(BotConfig).where(BotConfig.id == bot_id))
+async def update_bot(
+    bot_id: uuid.UUID,
+    req: UpdateBotConfigRequest,
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
+    result = await db.execute(select(BotConfig).where(BotConfig.id == bot_id, BotConfig.org_id == org_id))
     bot = result.scalar_one_or_none()
     if not bot:
         raise HTTPException(status_code=404, detail="Bot config not found")
@@ -108,14 +130,19 @@ async def update_bot(bot_id: uuid.UUID, req: UpdateBotConfigRequest, db: AsyncSe
 
 
 @router.post("/{bot_id}/clone", response_model=BotConfigResponse, status_code=201)
-async def clone_bot(bot_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def clone_bot(
+    bot_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
     """Clone an existing bot config with a new ID and '(Copy)' suffix on the name."""
-    result = await db.execute(select(BotConfig).where(BotConfig.id == bot_id))
+    result = await db.execute(select(BotConfig).where(BotConfig.id == bot_id, BotConfig.org_id == org_id))
     original = result.scalar_one_or_none()
     if not original:
         raise HTTPException(status_code=404, detail="Bot config not found")
 
     clone = BotConfig(
+        org_id=org_id,
         agent_name=original.agent_name + " (Copy)",
         company_name=original.company_name,
         location=original.location,
@@ -155,9 +182,13 @@ async def clone_bot(bot_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/{bot_id}", status_code=204)
-async def delete_bot(bot_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def delete_bot(
+    bot_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
     """Soft-delete: set is_active = false."""
-    result = await db.execute(select(BotConfig).where(BotConfig.id == bot_id))
+    result = await db.execute(select(BotConfig).where(BotConfig.id == bot_id, BotConfig.org_id == org_id))
     bot = result.scalar_one_or_none()
     if not bot:
         raise HTTPException(status_code=404, detail="Bot config not found")

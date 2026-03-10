@@ -20,9 +20,13 @@ class CallLog(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False
+    )
     bot_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("bot_configs.id"), nullable=False
     )
+    lead_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     call_sid: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     contact_name: Mapped[str] = mapped_column(Text, nullable=False)
     contact_phone: Mapped[str] = mapped_column(Text, nullable=False)
