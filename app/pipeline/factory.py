@@ -62,45 +62,14 @@ _DEFAULT_STYLE_PROMPT = (
     "Never robotic."
 )
 
-# Universal phone call quality rules appended to every system prompt.
+# Minimal universal guardrails appended to every system prompt.
 _CONVERSATION_RULES = """
 
-PHONE CALL RULES (always follow):
+UNIVERSAL PHONE RULES (always follow):
 - HARD LIMIT: Maximum 2 sentences per turn, then STOP and let the customer speak.
-- Default turns: under 25 words. Detailed answers: under 40 words.
-- After asking ANY question, your turn is OVER. Do NOT continue talking. Do NOT answer your own question.
+- Ask at most 1 question per turn.
 - NEVER repeat a question you already asked, even rephrased.
-- Use a DIFFERENT acknowledgment each turn. Never start two consecutive turns the same way.
-  Rotate from: "Right" / "Accha" / "I see" / "Interesting" / "Got it" / "Fair enough" / "Okay so" / "Makes sense" / "Nice"
-  Use "Right" max 2 times per call. Distribute evenly.
-- BANNED phrases: "umm", "Hmm", "great question", "Absolutely", "That is absolutely correct", "I appreciate your time"
-- "Not interested" is not always goodbye — explore what's holding them back before ending.
-- If you already said goodbye and the customer responds with bye, do NOT say goodbye again.
-- If you said goodbye but the customer says "wait" or keeps talking, you MUST respond.
-
-"HELLO?" HANDLING (CRITICAL — follow exactly):
-- "Hello?" means the user is checking if you are there. It is NOT a connection failure.
-- Respond: "Yeah, I am here!" and continue the conversation from where you left off.
-- NEVER dump all remaining information and say goodbye after a "Hello?" exchange.
-- NEVER say "seems like connection issues" after only 1-2 "Hello?" exchanges. Only consider audio problems after 4+ unanswered "Hello?" exchanges.
-- After a "Hello?" recovery, move FORWARD. Do NOT repeat what you just said.
-
-AUDIO ISSUE PATIENCE (CRITICAL):
-- If the user mentions audio quality ("voice is not clear", "you're breaking up"):
-  1. FIRST: "Sorry about that! Can you hear me now?" and continue normally.
-  2. SECOND (if they complain again): "Let me try again. Is this better?" and continue.
-  3. THIRD (only after 2 failed recovery attempts): Do compressed exit with key info.
-- If the user is STILL ANSWERING your questions despite audio complaints, do NOT exit. They can hear enough. Continue normally.
-- NEVER exit on a single audio complaint if the user is otherwise participating.
-
-BUSY / OCCUPIED DETECTION:
-- If the user says ANYTHING indicating they are busy — eating, lunch, driving, meeting, gym, cooking, sleeping, at work, with someone, stepping out, in class, praying, getting ready, in the middle of something — treat it as "not now."
-- Acknowledge, share ONE key piece of info, and let them go warmly.
-- NEVER ignore a busy signal and ask an unrelated question.
-
-PACING:
-- NEVER combine information dump + goodbye in one turn. Share info, wait for response, then close.
-- If the user says ANYTHING after your goodbye (even "So", "Okay", "Wait"), STAY and respond.
+- If the user says they already answered, already have the details, is not interested, asks not to be called again, or says they are busy, driving, or unwell, acknowledge briefly and end the call.
 """
 
 # Map BCP-47 language codes → pipecat Language enum names
@@ -1356,7 +1325,9 @@ async def build_pipeline(
         )
 
     # --- Context ---
-    system_prompt = call_context.filled_prompt + _CONVERSATION_RULES
+    system_prompt = call_context.filled_prompt.strip()
+    if _CONVERSATION_RULES.strip():
+        system_prompt = f"{system_prompt}\n\n{_CONVERSATION_RULES.strip()}"
     # NOTE: Greeting is NOT seeded here — TTSSpeakFrame goes through TTS →
     # context_aggregator.assistant() which adds it automatically. Adding it
     # here too causes a duplicate greeting in LLM context (wastes tokens).
