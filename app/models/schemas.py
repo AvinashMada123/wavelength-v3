@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # --- Goal Config schemas ---
@@ -108,11 +108,22 @@ class CallAnalysis(BaseModel):
 
 
 class TriggerCallRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     bot_id: uuid.UUID
     contact_name: str
     contact_phone: str
     ghl_contact_id: str | None = None
     extra_vars: dict[str, str] = Field(default_factory=dict)
+
+    def merged_extra_vars(self) -> dict[str, str]:
+        merged = dict(self.extra_vars)
+        for key, value in (self.model_extra or {}).items():
+            if value is None or key in merged:
+                continue
+            if isinstance(value, (str, int, float, bool)):
+                merged[key] = str(value)
+        return merged
 
 
 class CreateBotConfigRequest(BaseModel):

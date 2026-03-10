@@ -41,9 +41,30 @@ def _normalize_template_vars(template_vars: dict[str, str]) -> dict[str, str]:
     normalized = dict(template_vars)
 
     alias_map = {
-        "event_host": ("event_hostname", "eventHostName", "hostname", "host_name"),
-        "customer_profession": ("profession", "customerProfession"),
-        "customer_name": ("name", "contactName"),
+        "event_host": (
+            "event_hostname",
+            "eventHostName",
+            "eventHost",
+            "hostname",
+            "hostName",
+            "host_name",
+        ),
+        "customer_profession": (
+            "profession",
+            "customerProfession",
+            "customer_profession",
+            "customerProfessionName",
+        ),
+        "customer_name": ("name", "contactName", "customerName"),
+    }
+
+    def canonical(key: str) -> str:
+        return "".join(ch for ch in key.lower() if ch.isalnum())
+
+    present_by_canonical = {
+        canonical(str(key)): value
+        for key, value in normalized.items()
+        if value not in (None, "")
     }
 
     for target_key, aliases in alias_map.items():
@@ -51,6 +72,8 @@ def _normalize_template_vars(template_vars: dict[str, str]) -> dict[str, str]:
             continue
         for alias in aliases:
             value = normalized.get(alias)
+            if not value:
+                value = present_by_canonical.get(canonical(alias))
             if value:
                 normalized[target_key] = value
                 break

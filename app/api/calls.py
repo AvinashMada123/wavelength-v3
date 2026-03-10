@@ -124,7 +124,7 @@ async def trigger_call(req: TriggerCallRequest, db: AsyncSession = Depends(get_d
         contact_name=req.contact_name,
         contact_phone=req.contact_phone,
         ghl_contact_id=req.ghl_contact_id,
-        extra_vars=req.extra_vars,
+        extra_vars=req.merged_extra_vars(),
         source="api",
         status="queued",
     )

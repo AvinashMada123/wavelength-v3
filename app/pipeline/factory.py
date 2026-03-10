@@ -513,7 +513,7 @@ class TTSTailTrim(FrameProcessor):
 
         if isinstance(frame, TTSAudioRawFrame):
             rms, max_amp, duration_ms = self._frame_metrics(frame)
-            is_low_energy = rms < 120.0 and max_amp < 500
+            is_low_energy = rms < 90.0 and max_amp < 300
             tail_trim_eligible = self._speech_ms >= 800.0
 
             if not is_low_energy or not tail_trim_eligible:
@@ -531,7 +531,7 @@ class TTSTailTrim(FrameProcessor):
 
             self._pending_tail.append(frame)
             self._pending_tail_ms += duration_ms
-            if self._pending_tail_ms >= 320.0:
+            if self._pending_tail_ms >= 900.0:
                 self._dropped_frames += len(self._pending_tail)
                 self._dropped_ms += self._pending_tail_ms
                 logger.info(
