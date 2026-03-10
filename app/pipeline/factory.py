@@ -168,8 +168,22 @@ class EchoGate(FrameProcessor):
         from pipecat.frames.frames import (
             BotStartedSpeakingFrame,
             BotStoppedSpeakingFrame,
+            EndFrame,
             InputAudioRawFrame,
+            StartFrame,
         )
+
+        if isinstance(frame, StartFrame):
+            await super().process_frame(frame, direction)
+            await self.push_frame(frame, direction)
+            return
+
+        if isinstance(frame, EndFrame):
+            if self._echo_tail_task and not self._echo_tail_task.done():
+                self._echo_tail_task.cancel()
+                self._echo_tail_task = None
+            await self.push_frame(frame, direction)
+            return
 
         # Bot started speaking → close gate
         if isinstance(frame, BotStartedSpeakingFrame):
@@ -1386,6 +1400,13 @@ async def build_pipeline(
         call_sid=call_context.call_sid,
     )
 
+    # --- Echo gate (mute inbound audio while bot is speaking) ---
+    echo_gate = EchoGate(
+        call_sid=call_context.call_sid,
+        enabled=settings.ECHO_GATE_ENABLED,
+        echo_tail_ms=settings.ECHO_TAIL_MS,
+    )
+
     # --- Hello guard (suppress "hello?" cascade during processing) ---
     hello_guard = HelloGuard(call_sid=call_context.call_sid)
 
@@ -1397,6 +1418,7 @@ async def build_pipeline(
     pipeline = Pipeline(
         [
             transport.input(),
+            echo_gate,
             stt,
             call_guard,
             tracker_post_stt,
