@@ -447,6 +447,130 @@ class TTSAudioLogger(FrameProcessor):
             self._audio_file = None
 
 
+class TTSTailTrim(FrameProcessor):
+    """Drops pathological low-energy TTS tails before they reach telephony output.
+
+    Sarvam occasionally emits a long near-silent/noisy tail after the spoken
+    content has finished. Buffering a short run of low-energy frames lets us
+    distinguish normal quiet phonemes from a real trailing artifact.
+    """
+
+    def __init__(self, call_sid: str = "", **kwargs):
+        super().__init__(name="TTSTailTrim", **kwargs)
+        self._call_sid = call_sid
+        self._speech_ms = 0.0
+        self._pending_tail: list = []
+        self._pending_tail_ms = 0.0
+        self._dropping_tail = False
+        self._dropped_frames = 0
+        self._dropped_ms = 0.0
+
+    def _reset(self):
+        self._speech_ms = 0.0
+        self._pending_tail.clear()
+        self._pending_tail_ms = 0.0
+        self._dropping_tail = False
+        self._dropped_frames = 0
+        self._dropped_ms = 0.0
+
+    async def _flush_pending_tail(self, direction: FrameDirection):
+        while self._pending_tail:
+            pending = self._pending_tail.pop(0)
+            await self.push_frame(pending, direction)
+        self._pending_tail_ms = 0.0
+
+    @staticmethod
+    def _frame_metrics(frame) -> tuple[float, int, float]:
+        import numpy as np
+
+        audio_np = np.frombuffer(frame.audio, dtype=np.int16)
+        if len(audio_np) == 0:
+            return 0.0, 0, 0.0
+        rms = float(np.sqrt(np.mean(audio_np.astype(np.float64) ** 2)))
+        max_amp = int(np.abs(audio_np).max())
+        channels = max(int(getattr(frame, "num_channels", 1) or 1), 1)
+        duration_ms = len(frame.audio) / (frame.sample_rate * 2 * channels) * 1000
+        return rms, max_amp, duration_ms
+
+    async def process_frame(self, frame, direction):
+        from pipecat.frames.frames import EndFrame, StartFrame, TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame
+
+        if isinstance(frame, StartFrame):
+            await super().process_frame(frame, direction)
+            await self.push_frame(frame, direction)
+            return
+
+        if isinstance(frame, EndFrame):
+            self._reset()
+            await self.push_frame(frame, direction)
+            return
+
+        if isinstance(frame, TTSStartedFrame):
+            self._reset()
+            await self.push_frame(frame, direction)
+            return
+
+        if isinstance(frame, TTSStoppedFrame):
+            if self._pending_tail:
+                self._dropped_frames += len(self._pending_tail)
+                self._dropped_ms += self._pending_tail_ms
+                logger.info(
+                    "tts_tail_trimmed",
+                    call_sid=self._call_sid,
+                    frames=self._dropped_frames,
+                    dropped_ms=round(self._dropped_ms, 1),
+                    speech_ms=round(self._speech_ms, 1),
+                    reason="tts_stopped_with_low_energy_tail",
+                )
+                self._pending_tail.clear()
+                self._pending_tail_ms = 0.0
+            self._dropping_tail = False
+            await self.push_frame(frame, direction)
+            return
+
+        if isinstance(frame, TTSAudioRawFrame):
+            rms, max_amp, duration_ms = self._frame_metrics(frame)
+            is_low_energy = rms < 120.0 and max_amp < 500
+            tail_trim_eligible = self._speech_ms >= 800.0
+
+            if not is_low_energy or not tail_trim_eligible:
+                if self._pending_tail:
+                    await self._flush_pending_tail(direction)
+                self._dropping_tail = False
+                self._speech_ms += duration_ms
+                await self.push_frame(frame, direction)
+                return
+
+            if self._dropping_tail:
+                self._dropped_frames += 1
+                self._dropped_ms += duration_ms
+                return
+
+            self._pending_tail.append(frame)
+            self._pending_tail_ms += duration_ms
+            if self._pending_tail_ms >= 320.0:
+                self._dropped_frames += len(self._pending_tail)
+                self._dropped_ms += self._pending_tail_ms
+                logger.info(
+                    "tts_tail_trimmed",
+                    call_sid=self._call_sid,
+                    frames=self._dropped_frames,
+                    dropped_ms=round(self._dropped_ms, 1),
+                    speech_ms=round(self._speech_ms, 1),
+                    reason="low_energy_tail_detected",
+                    rms=round(rms, 1),
+                    max_amp=max_amp,
+                )
+                self._pending_tail.clear()
+                self._pending_tail_ms = 0.0
+                self._dropping_tail = True
+            return
+
+        if self._pending_tail:
+            await self._flush_pending_tail(direction)
+        await self.push_frame(frame, direction)
+
+
 class LatencyTracker(FrameProcessor):
     """Pass-through processor that logs timestamps and computes latency deltas.
 
@@ -1311,6 +1435,7 @@ async def build_pipeline(
             context_aggregator.user(),
             llm,
             tts,
+            TTSTailTrim(call_sid=call_context.call_sid),
             TTSAudioLogger(call_sid=call_context.call_sid, save_audio=False),
             tracker_post_tts,
             transport.output(),
