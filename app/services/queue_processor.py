@@ -36,6 +36,28 @@ _shutdown = False
 _loader: BotConfigLoader | None = None
 
 
+def _normalize_template_vars(template_vars: dict[str, str]) -> dict[str, str]:
+    """Normalize common external variable aliases into prompt placeholder names."""
+    normalized = dict(template_vars)
+
+    alias_map = {
+        "event_host": ("event_hostname", "eventHostName", "hostname", "host_name"),
+        "customer_profession": ("profession", "customerProfession"),
+        "customer_name": ("name", "contactName"),
+    }
+
+    for target_key, aliases in alias_map.items():
+        if normalized.get(target_key):
+            continue
+        for alias in aliases:
+            value = normalized.get(alias)
+            if value:
+                normalized[target_key] = value
+                break
+
+    return normalized
+
+
 def start(bot_config_loader: BotConfigLoader) -> asyncio.Task:
     """Start the queue processor background task."""
     global _task, _shutdown, _loader
@@ -174,6 +196,7 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
                 event_time=bot_config.event_time or "",
             )
             template_vars.update(queued_call.extra_vars or {})
+            template_vars = _normalize_template_vars(template_vars)
 
             filled_prompt = fill_prompt_template(
                 bot_config.system_prompt_template, **template_vars
