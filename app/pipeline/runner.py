@@ -104,7 +104,7 @@ async def _synthesize_greeting(
         # Collect all audio frames from the async generator
         audio_chunks: list[bytes] = []
         start = time.monotonic()
-        async for frame in tts.run_tts(greeting_text):
+        async for frame in tts.run_tts(greeting_text, context_id=call_context.call_sid):
             if hasattr(frame, "audio") and frame.audio:
                 audio_chunks.append(frame.audio)
 

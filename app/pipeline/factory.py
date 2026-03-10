@@ -13,10 +13,8 @@ import pipecat.transports.base_output as _base_output
 import structlog
 from deepgram import LiveOptions
 
-# With EchoGate active, we can reduce this from 2.0s. BotStoppedSpeakingFrame
-# fires this many seconds after last audio frame. EchoGate adds its own
-# echo_tail_ms (300ms) on top. Total mute: 0.7 + 0.3 = 1.0s after last audio.
-_base_output.BOT_VAD_STOP_SECS = 0.7
+# Keep a wider bot-stop window to survive telephony/TTS inter-sentence gaps.
+_base_output.BOT_VAD_STOP_SECS = 2.0
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -1293,11 +1291,13 @@ async def build_pipeline(
         call_sid=call_context.call_sid,
     )
 
-    # --- Echo gate (mute incoming audio during bot speech to suppress echo) ---
+    # --- Echo gate ---
+    # Disabled in production for now. Re-enabling it caused pre-StartFrame
+    # processing errors and completely silent calls on the Sarvam pipeline.
     echo_gate = EchoGate(
         echo_tail_ms=300.0,
         call_sid=call_context.call_sid,
-        enabled=True,
+        enabled=False,
     )
 
     # --- Hello guard (suppress "hello?" cascade during processing) ---
@@ -1332,7 +1332,7 @@ async def build_pipeline(
         pipeline,
         params=PipelineParams(
             allow_interruptions=True,
-            interruption_strategies=[MinWordsInterruptionStrategy(min_words=2)],
+            interruption_strategies=[MinWordsInterruptionStrategy(min_words=3)],
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
