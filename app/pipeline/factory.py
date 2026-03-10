@@ -1319,6 +1319,7 @@ async def build_pipeline(
         tts = GeminiTTS(
             model="gemini-2.5-flash-tts",
             voice_id=voice_id,
+            sample_rate=24000,
             text_aggregator=PhraseTextAggregator(
                 min_phrase_chars=10,
                 subsequent_phrase_chars=25,

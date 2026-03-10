@@ -218,7 +218,11 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
                 event_date=bot_config.event_date or "",
                 event_time=bot_config.event_time or "",
             )
-            template_vars.update(queued_call.extra_vars or {})
+            # Normalize extra_vars independently so webhook values always win
+            # over context_variables defaults (extra_vars may use camelCase aliases
+            # like "eventHost" which need to map to "event_host")
+            normalized_extras = _normalize_template_vars(queued_call.extra_vars or {})
+            template_vars.update(normalized_extras)
             template_vars = _normalize_template_vars(template_vars)
 
             filled_prompt = fill_prompt_template(
