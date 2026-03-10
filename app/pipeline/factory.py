@@ -13,8 +13,10 @@ import pipecat.transports.base_output as _base_output
 import structlog
 from deepgram import LiveOptions
 
-# Increase from 0.35s default to survive inter-sentence TTS gaps.
-_base_output.BOT_VAD_STOP_SECS = 2.0
+# With EchoGate active, we can reduce this from 2.0s. BotStoppedSpeakingFrame
+# fires this many seconds after last audio frame. EchoGate adds its own
+# echo_tail_ms (300ms) on top. Total mute: 0.7 + 0.3 = 1.0s after last audio.
+_base_output.BOT_VAD_STOP_SECS = 0.7
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -163,20 +165,22 @@ class GreetingGuard(FrameProcessor):
 
 
 class EchoGate(FrameProcessor):
-    """Greeting-only audio gate for Plivo echo suppression.
+    """Audio gate that mutes incoming audio during bot speech to suppress echo.
 
-    Plivo echoes bot audio back through the WebSocket. During the initial
-    greeting, this echo is strongest (no user audio to mix with). The gate
-    mutes incoming audio for the first GREETING_GATE_SECS after pipeline
-    start, then permanently opens.
+    Plivo echoes bot audio back through the WebSocket. Without gating, this
+    echo reaches STT, gets transcribed, and can trigger false interruptions.
 
-    After the greeting window, audio flows freely — Sarvam's cloud VAD and
-    MinWordsInterruptionStrategy handle any residual echo.
+    Gate closes on BotStartedSpeakingFrame and opens after
+    BotStoppedSpeakingFrame + echo_tail_ms. If a new BotStartedSpeakingFrame
+    arrives during the echo tail timer, the gate stays closed (bridges
+    inter-sentence TTS gaps).
+
+    Safety valve: force-opens after 30s to prevent stuck-closed state.
     """
 
     def __init__(
         self,
-        greeting_gate_secs: float = 5.0,
+        echo_tail_ms: float = 300.0,
         call_sid: str = "",
         enabled: bool = True,
         **kwargs,
@@ -184,44 +188,80 @@ class EchoGate(FrameProcessor):
         super().__init__(name="EchoGate", **kwargs)
         self._call_sid = call_sid
         self._enabled = enabled
-        self._greeting_gate_secs = greeting_gate_secs
-        self._start_time: float | None = None
-        self._gate_opened = False
+        self._echo_tail_s = echo_tail_ms / 1000.0
+        self._gate_closed = False
+        self._gate_closed_at: float | None = None
+        self._echo_tail_task: asyncio.Task | None = None
         self._frames_silenced = 0
+        self._total_silenced = 0
+        self._safety_limit_s = 30.0
 
     async def process_frame(self, frame, direction: FrameDirection):
-        from pipecat.frames.frames import InputAudioRawFrame, StartFrame
+        from pipecat.frames.frames import (
+            BotStartedSpeakingFrame,
+            BotStoppedSpeakingFrame,
+            InputAudioRawFrame,
+        )
 
-        if isinstance(frame, StartFrame):
-            await super().process_frame(frame, direction)
-            self._start_time = time.monotonic()
+        # Bot started speaking → close gate
+        if isinstance(frame, BotStartedSpeakingFrame):
+            if self._enabled:
+                if self._echo_tail_task and not self._echo_tail_task.done():
+                    self._echo_tail_task.cancel()
+                    self._echo_tail_task = None
+                if not self._gate_closed:
+                    self._gate_closed = True
+                    self._gate_closed_at = time.monotonic()
+                    self._frames_silenced = 0
             await self.push_frame(frame, direction)
             return
 
-        # Gate incoming audio only during greeting window
-        if isinstance(frame, InputAudioRawFrame) and self._enabled and not self._gate_opened:
-            now = time.monotonic()
-            if self._start_time is not None and (now - self._start_time) < self._greeting_gate_secs:
-                self._frames_silenced += 1
-                silent = InputAudioRawFrame(
-                    audio=b"\x00" * len(frame.audio),
-                    sample_rate=frame.sample_rate,
-                    num_channels=frame.num_channels,
-                )
-                await self.push_frame(silent, direction)
+        # Bot stopped speaking → schedule gate opening after echo tail
+        if isinstance(frame, BotStoppedSpeakingFrame):
+            if self._enabled and self._gate_closed:
+                if self._echo_tail_task and not self._echo_tail_task.done():
+                    self._echo_tail_task.cancel()
+                self._echo_tail_task = asyncio.create_task(self._open_after_tail())
+            await self.push_frame(frame, direction)
+            return
+
+        # Gate incoming audio while closed
+        if isinstance(frame, InputAudioRawFrame) and self._enabled and self._gate_closed:
+            # Safety valve: force open after 30s
+            if self._gate_closed_at and (time.monotonic() - self._gate_closed_at) > self._safety_limit_s:
+                self._open_gate("safety_valve")
+                await self.push_frame(frame, direction)
                 return
-            else:
-                # Greeting window expired — permanently open
-                if not self._gate_opened:
-                    self._gate_opened = True
-                    logger.info(
-                        "echo_gate_permanently_opened",
-                        call_sid=self._call_sid,
-                        silenced_frames=self._frames_silenced,
-                        gate_secs=self._greeting_gate_secs,
-                    )
+
+            self._frames_silenced += 1
+            self._total_silenced += 1
+            silent = InputAudioRawFrame(
+                audio=b"\x00" * len(frame.audio),
+                sample_rate=frame.sample_rate,
+                num_channels=frame.num_channels,
+            )
+            await self.push_frame(silent, direction)
+            return
 
         await self.push_frame(frame, direction)
+
+    async def _open_after_tail(self):
+        """Wait for echo tail delay, then open gate."""
+        try:
+            await asyncio.sleep(self._echo_tail_s)
+            self._open_gate("echo_tail_expired")
+        except asyncio.CancelledError:
+            pass  # New BotStartedSpeaking cancelled this — gate stays closed
+
+    def _open_gate(self, reason: str):
+        self._gate_closed = False
+        logger.info(
+            "echo_gate_opened",
+            call_sid=self._call_sid,
+            reason=reason,
+            silenced_frames=self._frames_silenced,
+            total_silenced=self._total_silenced,
+        )
 
 
 class HelloGuard(FrameProcessor):
@@ -1252,11 +1292,11 @@ async def build_pipeline(
         call_sid=call_context.call_sid,
     )
 
-    # --- Echo gate (mute echo during ALL bot speech, not just greeting) ---
+    # --- Echo gate (mute incoming audio during bot speech to suppress echo) ---
     echo_gate = EchoGate(
-        greeting_gate_secs=0.0,
+        echo_tail_ms=300.0,
         call_sid=call_context.call_sid,
-        enabled=False,
+        enabled=True,
     )
 
     # --- Hello guard (suppress "hello?" cascade during processing) ---
@@ -1291,7 +1331,7 @@ async def build_pipeline(
         pipeline,
         params=PipelineParams(
             allow_interruptions=True,
-            interruption_strategies=[MinWordsInterruptionStrategy(min_words=3)],
+            interruption_strategies=[MinWordsInterruptionStrategy(min_words=2)],
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
