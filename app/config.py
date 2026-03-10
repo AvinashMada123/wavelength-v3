@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     ECHO_GATE_ENABLED: bool = True
     # Echo tail delay (ms) after BotStoppedSpeakingFrame before gate opens.
     # Set from Phase 0 measurement (p95 RTT + 100ms margin). 500ms is a safe default.
-    ECHO_TAIL_MS: float = 150.0
+    ECHO_TAIL_MS: float = 250.0
     # Phase 3: Pre-synthesize greeting and send directly to Plivo (bypass pipeline)
     GREETING_DIRECT_PLAY: bool = True
     # Phase 4: Adaptive phrase aggregation (lower first-phrase, higher subsequent)
