@@ -1189,8 +1189,9 @@ async def build_pipeline(
             sample_rate=16000,
             params=SarvamTTSService.InputParams(
                 language=stt_language,
-                min_buffer_size=30,
-                max_chunk_length=100,
+                # Bias toward smoother phone-call playback over ultra-low latency.
+                min_buffer_size=60,
+                max_chunk_length=220,
                 temperature=0.4,
             ),
         )
