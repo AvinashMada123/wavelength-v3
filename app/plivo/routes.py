@@ -342,7 +342,18 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         plivo_stream_id = ""
         greeting_audio = None
 
-        if settings.GREETING_DIRECT_PLAY:
+        use_greeting_direct_play = settings.GREETING_DIRECT_PLAY and (
+            getattr(bot_config, "tts_provider", "gemini") != "gemini"
+        )
+
+        if settings.GREETING_DIRECT_PLAY and not use_greeting_direct_play:
+            logger.info(
+                "greeting_direct_play_skipped",
+                call_sid=call_sid,
+                tts_provider=getattr(bot_config, "tts_provider", "gemini"),
+            )
+
+        if use_greeting_direct_play:
             import asyncio
             import json as _json
 
