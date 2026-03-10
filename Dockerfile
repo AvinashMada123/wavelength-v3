@@ -12,9 +12,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Copy credentials into image (gitignored, lives on server only)
-COPY credentials/ /credentials/
-
 # Cloud Run uses PORT env var
 ENV PORT=8080
 EXPOSE 8080
