@@ -9,12 +9,8 @@ from __future__ import annotations
 import asyncio
 import time
 
-import pipecat.transports.base_output as _base_output
 import structlog
 from deepgram import LiveOptions
-
-# Keep a wider bot-stop window to survive telephony/TTS inter-sentence gaps.
-_base_output.BOT_VAD_STOP_SECS = 1.0
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -1395,13 +1391,6 @@ async def build_pipeline(
         goal_cfg = json.loads(goal_cfg)
     call_guard = CallGuard(call_sid=call_context.call_sid, goal_config=goal_cfg)
 
-    # --- Echo gate (mute inbound audio while bot is speaking) ---
-    echo_gate = EchoGate(
-        call_sid=call_context.call_sid,
-        enabled=settings.ECHO_GATE_ENABLED,
-        echo_tail_ms=settings.ECHO_TAIL_MS,
-    )
-
     # --- Latency trackers ---
     tracker_post_stt = LatencyTracker(position="post_stt", call_sid=call_context.call_sid)
     tracker_post_tts = LatencyTracker(position="post_tts", call_sid=call_context.call_sid)
@@ -1415,7 +1404,6 @@ async def build_pipeline(
     pipeline = Pipeline(
         [
             transport.input(),
-            echo_gate,
             stt,
             call_guard,
             tracker_post_stt,
