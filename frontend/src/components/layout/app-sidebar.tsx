@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Bot, Phone, ClipboardList, Radio, ListOrdered, BarChart3 } from "lucide-react";
+import { LayoutDashboard, Bot, Phone, ClipboardList, Radio, ListOrdered, BarChart3, Users, ContactRound, Megaphone, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarMenu,
@@ -14,6 +15,7 @@ import {
   SidebarMenuItem,
   SidebarHeader,
 } from "@/components/ui/sidebar";
+import { useAuth } from "@/contexts/auth-context";
 
 const navItems = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -22,7 +24,34 @@ const navItems = [
   { title: "Call Queue", href: "/queue", icon: ListOrdered },
   { title: "Call Logs", href: "/call-logs", icon: ClipboardList },
   { title: "Analytics", href: "/analytics", icon: BarChart3 },
+  { title: "Leads", href: "/leads", icon: ContactRound },
+  { title: "Campaigns", href: "/campaigns", icon: Megaphone },
+  { title: "Team", href: "/team", icon: Users },
 ];
+
+function UserMenu() {
+  const { user, logout } = useAuth();
+  if (!user) return null;
+
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-500/20 text-sm font-medium text-violet-400">
+        {user.display_name.charAt(0).toUpperCase()}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="truncate text-sm font-medium">{user.display_name}</p>
+        <p className="truncate text-xs text-muted-foreground">{user.org_name}</p>
+      </div>
+      <button
+        onClick={logout}
+        className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        title="Sign out"
+      >
+        <LogOut className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
 
 export function AppSidebar() {
   const pathname = usePathname();
@@ -68,6 +97,9 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter className="border-t p-3">
+        <UserMenu />
+      </SidebarFooter>
     </Sidebar>
   );
 }

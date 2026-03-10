@@ -16,11 +16,58 @@ import type {
   CapturedDataFieldSummary,
 } from "@/types/api";
 
+async function tryRefreshToken(): Promise<boolean> {
+  const refreshToken = localStorage.getItem("refresh_token");
+  if (!refreshToken) return false;
+  try {
+    const res = await fetch("/api/auth/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    localStorage.setItem("access_token", data.access_token);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    ...options,
-  });
+  const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options?.headers as Record<string, string>),
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(url, { ...options, headers });
+
+  if (res.status === 401) {
+    // Token expired — try refresh
+    const refreshed = await tryRefreshToken();
+    if (refreshed) {
+      headers["Authorization"] = `Bearer ${localStorage.getItem("access_token")}`;
+      const retryRes = await fetch(url, { ...options, headers });
+      if (!retryRes.ok) {
+        const body = await retryRes.text();
+        throw new Error(`${retryRes.status}: ${body}`);
+      }
+      return retryRes.json();
+    }
+    // Refresh failed — redirect to login
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
+      localStorage.removeItem("auth_user");
+      window.location.href = "/login";
+    }
+    throw new Error("Authentication expired");
+  }
+
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`${res.status}: ${body}`);
@@ -233,4 +280,28 @@ export function fetchAnalyticsCapturedData(
   if (params?.end_date) sp.set("end_date", params.end_date);
   const qs = sp.toString();
   return apiFetch(`/api/analytics/${botId}/captured-data${qs ? `?${qs}` : ""}`);
+}
+
+// --- Auth & Team ---
+
+export interface Invite {
+  id: string;
+  email: string;
+  org_id: string;
+  org_name: string;
+  role: string;
+  status: string;
+  created_at: string;
+  expires_at: string;
+}
+
+export function fetchInvites(): Promise<Invite[]> {
+  return apiFetch("/api/auth/invites");
+}
+
+export function createInvite(email: string, role: string = "client_user"): Promise<Invite> {
+  return apiFetch("/api/auth/invite", {
+    method: "POST",
+    body: JSON.stringify({ email, role }),
+  });
 }
