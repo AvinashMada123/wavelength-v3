@@ -92,8 +92,8 @@ async def _synthesize_greeting(
                 sample_rate=16000,
                 params=SarvamTTSService.InputParams(
                     language=stt_language,
-                    min_buffer_size=60,
-                    max_chunk_length=220,
+                    min_buffer_size=30,
+                    max_chunk_length=100,
                     temperature=0.4,
                 ),
             )
