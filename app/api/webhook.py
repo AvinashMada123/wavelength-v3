@@ -93,7 +93,14 @@ async def webhook_trigger_call(request: Request):
                 filter(None, [body.get("first_name"), body.get("last_name")])
             )
 
-        logger.info("webhook_ghl_payload", phone=phone_number, bot_config=bot_config_id, ghl_contact=ghl_contact_id)
+        logger.info(
+            "webhook_ghl_payload",
+            phone=phone_number,
+            bot_config=bot_config_id,
+            ghl_contact=ghl_contact_id,
+            custom_overrides=custom_overrides,
+            cd_keys=list(cd.keys()),
+        )
     else:
         # Standard format
         phone_number = body.get("phoneNumber")

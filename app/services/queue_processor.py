@@ -206,9 +206,9 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
                 await db.commit()
                 return
 
-            # Fill prompt template
+            # Fill prompt template — copy context_variables to avoid mutating cached bot_config
             ctx_vars = bot_config.context_variables or {}
-            template_vars = ctx_vars if isinstance(ctx_vars, dict) else {}
+            template_vars = dict(ctx_vars) if isinstance(ctx_vars, dict) else {}
             template_vars.update(
                 contact_name=queued_call.contact_name,
                 agent_name=bot_config.agent_name,
@@ -221,9 +221,19 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
             # Normalize extra_vars independently so webhook values always win
             # over context_variables defaults (extra_vars may use camelCase aliases
             # like "eventHost" which need to map to "event_host")
-            normalized_extras = _normalize_template_vars(queued_call.extra_vars or {})
+            raw_extras = queued_call.extra_vars or {}
+            normalized_extras = _normalize_template_vars(raw_extras)
             template_vars.update(normalized_extras)
             template_vars = _normalize_template_vars(template_vars)
+
+            logger.info(
+                "queue_fill_prompt_debug",
+                queue_id=str(queue_id),
+                raw_extra_vars=raw_extras,
+                normalized_extras={k: v for k, v in normalized_extras.items() if k != template_vars.get(k, v)},
+                event_host=template_vars.get("event_host"),
+                customer_profession=template_vars.get("customer_profession"),
+            )
 
             filled_prompt = fill_prompt_template(
                 bot_config.system_prompt_template, **template_vars
