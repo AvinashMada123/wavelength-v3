@@ -19,6 +19,6 @@ COPY credentials/ /credentials/
 ENV PORT=8080
 EXPOSE 8080
 
-# Single worker — all concurrency is async within one event loop.
-# Cloud Run scales instances horizontally.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
+# 4 workers across 8 CPUs — distributes concurrent calls across separate event loops.
+# Each WebSocket connection stays on the worker that accepted it.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "4"]

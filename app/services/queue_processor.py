@@ -110,11 +110,13 @@ async def _process_batch(loader: BotConfigLoader):
                 continue
 
             # Fetch next batch of queued calls for this bot
+            # FOR UPDATE SKIP LOCKED prevents multiple workers from picking up the same call
             result = await db.execute(
                 select(QueuedCall)
                 .where(QueuedCall.bot_id == bot_id, QueuedCall.status == "queued")
                 .order_by(QueuedCall.priority.desc(), QueuedCall.created_at.asc())
                 .limit(slots_available)
+                .with_for_update(skip_locked=True)
             )
             calls = result.scalars().all()
 

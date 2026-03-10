@@ -89,7 +89,7 @@ async def _synthesize_greeting(
                 api_key=settings.SARVAM_API_KEY,
                 model="bulbul:v3",
                 voice_id=call_context.tts_voice,
-                sample_rate=24000,
+                sample_rate=16000,
                 params=SarvamTTSService.InputParams(
                     language=stt_language,
                     min_buffer_size=30,
