@@ -1291,15 +1291,6 @@ async def build_pipeline(
         call_sid=call_context.call_sid,
     )
 
-    # --- Echo gate ---
-    # Disabled in production for now. Re-enabling it caused pre-StartFrame
-    # processing errors and completely silent calls on the Sarvam pipeline.
-    echo_gate = EchoGate(
-        echo_tail_ms=300.0,
-        call_sid=call_context.call_sid,
-        enabled=False,
-    )
-
     # --- Hello guard (suppress "hello?" cascade during processing) ---
     hello_guard = HelloGuard(call_sid=call_context.call_sid)
 
@@ -1311,7 +1302,6 @@ async def build_pipeline(
     pipeline = Pipeline(
         [
             transport.input(),
-            echo_gate,
             stt,
             call_guard,
             tracker_post_stt,
