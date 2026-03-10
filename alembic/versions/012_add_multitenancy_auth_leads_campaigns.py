@@ -151,7 +151,7 @@ def upgrade() -> None:
             '{DEFAULT_ADMIN_ID}',
             'admin@freedomwithai.com',
             'Admin',
-            '$2b$12$LJ3m4ys3Lk0TnYsWz8Qyf.sPBOmYqKJwGz0J4bVxQx4c4jUGXyHe',
+            '$2b$12$DBPGYYh48PPmvmWrLUG8Ce6cHS9qxQ4uYqge6SXbov.wTdtHCyq3y',
             'super_admin',
             '{DEFAULT_ORG_ID}',
             'active'
