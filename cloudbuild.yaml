@@ -28,10 +28,10 @@ steps:
       - --platform=managed
       - --allow-unauthenticated
       - --port=8080
-      - --cpu=1
-      - --memory=1Gi
+      - --cpu=2
+      - --memory=2Gi
       - --min-instances=1
-      - --max-instances=3
+      - --max-instances=5
       - --concurrency=20
       - --timeout=3600
       - --session-affinity
