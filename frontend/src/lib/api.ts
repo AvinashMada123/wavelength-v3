@@ -306,3 +306,142 @@ export function createInvite(email: string, role: string = "client_user"): Promi
     body: JSON.stringify({ email, role }),
   });
 }
+
+// --- Leads ---
+
+export interface Lead {
+  id: string;
+  org_id: string;
+  phone_number: string;
+  contact_name: string;
+  email: string | null;
+  company: string | null;
+  location: string | null;
+  tags: any[];
+  custom_fields: Record<string, any>;
+  status: string;
+  qualification_level: string | null;
+  qualification_confidence: number | null;
+  call_count: number;
+  last_call_date: string | null;
+  source: string;
+  ghl_contact_id: string | null;
+  bot_notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PaginatedLeads {
+  items: Lead[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export function fetchLeads(params?: {
+  status?: string;
+  search?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<PaginatedLeads> {
+  const sp = new URLSearchParams();
+  if (params?.status) sp.set("status", params.status);
+  if (params?.search) sp.set("search", params.search);
+  if (params?.page) sp.set("page", String(params.page));
+  if (params?.page_size) sp.set("page_size", String(params.page_size));
+  const qs = sp.toString();
+  return apiFetch(`/api/leads${qs ? `?${qs}` : ""}`);
+}
+
+export function createLead(data: {
+  phone_number: string;
+  contact_name: string;
+  email?: string;
+  company?: string;
+  location?: string;
+  source?: string;
+}): Promise<Lead> {
+  return apiFetch("/api/leads", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateLead(id: string, data: Record<string, any>): Promise<Lead> {
+  return apiFetch(`/api/leads/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteLead(id: string): Promise<void> {
+  return apiFetch(`/api/leads/${id}`, { method: "DELETE" });
+}
+
+// --- Campaigns ---
+
+export interface Campaign {
+  id: string;
+  org_id: string;
+  bot_config_id: string;
+  name: string;
+  status: string;
+  total_leads: number;
+  completed_leads: number;
+  failed_leads: number;
+  concurrency_limit: number;
+  created_by: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  lead_status_breakdown?: Record<string, number>;
+}
+
+export interface PaginatedCampaigns {
+  items: Campaign[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export function fetchCampaigns(params?: {
+  status?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<PaginatedCampaigns> {
+  const sp = new URLSearchParams();
+  if (params?.status) sp.set("status", params.status);
+  if (params?.page) sp.set("page", String(params.page));
+  if (params?.page_size) sp.set("page_size", String(params.page_size));
+  const qs = sp.toString();
+  return apiFetch(`/api/campaigns${qs ? `?${qs}` : ""}`);
+}
+
+export function createCampaign(data: {
+  name: string;
+  bot_config_id: string;
+  lead_ids: string[];
+  concurrency_limit?: number;
+}): Promise<Campaign> {
+  return apiFetch("/api/campaigns", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export function getCampaign(id: string): Promise<Campaign> {
+  return apiFetch(`/api/campaigns/${id}`);
+}
+
+export function startCampaign(id: string): Promise<Campaign> {
+  return apiFetch(`/api/campaigns/${id}/start`, { method: "POST" });
+}
+
+export function pauseCampaign(id: string): Promise<Campaign> {
+  return apiFetch(`/api/campaigns/${id}/pause`, { method: "POST" });
+}
+
+export function cancelCampaign(id: string): Promise<Campaign> {
+  return apiFetch(`/api/campaigns/${id}/cancel`, { method: "POST" });
+}
