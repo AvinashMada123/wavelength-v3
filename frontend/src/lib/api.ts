@@ -477,7 +477,7 @@ export interface AdminStats {
   total_bots: number;
   total_calls: number;
   calls_today: number;
-  calls_by_status: Record<string, number>;
+  calls_by_status: Array<{ status: string; count: number }>;
 }
 
 export interface AdminUser {

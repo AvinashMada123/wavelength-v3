@@ -177,20 +177,20 @@ function OverviewTab({
         ))}
       </div>
 
-      {stats && stats.calls_by_status && Object.keys(stats.calls_by_status).length > 0 && (
+      {stats && Array.isArray(stats.calls_by_status) && stats.calls_by_status.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Calls by Status</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-3">
-              {Object.entries(stats.calls_by_status).map(([status, count]) => (
+              {stats.calls_by_status.map((item: { status: string; count: number }) => (
                 <div
-                  key={status}
+                  key={item.status}
                   className="flex items-center gap-2 rounded-lg border px-4 py-2"
                 >
-                  <StatusBadge status={status} />
-                  <span className="text-lg font-semibold">{count}</span>
+                  <StatusBadge status={item.status} />
+                  <span className="text-lg font-semibold">{item.count}</span>
                 </div>
               ))}
             </div>
