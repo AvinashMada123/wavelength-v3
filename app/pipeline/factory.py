@@ -1026,23 +1026,9 @@ async def build_pipeline(
                 self._call_sid_tag = ""  # Set after pipeline starts
 
             async def _update_settings(self, delta):
-                """No-op language changes — we use language_code='unknown' so Sarvam auto-detects."""
-                # Strip language from delta so base class doesn't try to reconnect
+                """No-op language changes — STT stays pinned to hi-IN which handles Hindi+English."""
                 delta.pop("language", None)
                 return await super()._update_settings(delta)
-
-            async def push_frame(self, frame, direction=None):
-                """Prepend detected language code to transcripts so LLM knows the spoken language."""
-                from pipecat.frames.frames import TranscriptionFrame
-                if isinstance(frame, TranscriptionFrame) and frame.text:
-                    lang = frame.language
-                    if lang:
-                        lang_str = lang.value if hasattr(lang, 'value') else str(lang)
-                        frame.text = f"[{lang_str}] {frame.text}"
-                if direction is not None:
-                    await super().push_frame(frame, direction)
-                else:
-                    await super().push_frame(frame)
 
             async def process_frame(self, frame, direction: FrameDirection):
                 from pipecat.frames.frames import (
@@ -1195,8 +1181,8 @@ async def build_pipeline(
             sample_rate=16000,
             input_audio_codec="wav",
             params=SarvamSTTService.InputParams(
-                language=None,  # language_code="unknown" — auto-detect
-                mode="codemix",
+                language=PipecatLanguage.HI_IN,
+                mode="transcribe",
                 vad_signals=True,
                 high_vad_sensitivity=True,
             ),
@@ -1207,8 +1193,8 @@ async def build_pipeline(
             "stt_provider_selected",
             provider="sarvam",
             model="saaras:v3",
-            mode="codemix",
-            language="unknown",
+            mode="transcribe",
+            language="hi-IN",
         )
     else:
         # Use multi-language detection for Indian languages — users frequently
