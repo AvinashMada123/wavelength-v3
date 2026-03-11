@@ -22,6 +22,7 @@ export interface BotConfig {
   tts_style_prompt: string | null;
   llm_provider: "google" | "groq";
   llm_model: string;
+  llm_thinking_enabled: boolean;
   language: string;
   system_prompt_template: string;
   context_variables: Record<string, string>;
@@ -55,6 +56,7 @@ export interface CreateBotConfigRequest {
   tts_style_prompt?: string | null;
   llm_provider?: "google" | "groq";
   llm_model?: string;
+  llm_thinking_enabled?: boolean;
   language?: string;
   system_prompt_template: string;
   context_variables?: Record<string, string>;
@@ -89,6 +91,7 @@ export interface UpdateBotConfigRequest {
   tts_style_prompt?: string | null;
   llm_provider?: "google" | "groq" | null;
   llm_model?: string | null;
+  llm_thinking_enabled?: boolean | null;
   language?: string | null;
   system_prompt_template?: string | null;
   context_variables?: Record<string, string> | null;
