@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 from datetime import datetime
 
 import structlog
@@ -28,15 +29,15 @@ router = APIRouter(prefix="/api/billing", tags=["billing"])
 
 
 class BalanceResponse(BaseModel):
-    balance: int
+    balance: float
     org_id: uuid.UUID
 
 
 class TransactionResponse(BaseModel):
     id: uuid.UUID
     org_id: uuid.UUID
-    amount: int
-    balance_after: int
+    amount: float
+    balance_after: float
     type: str
     description: str
     reference_id: str | None
@@ -53,25 +54,25 @@ class TransactionListResponse(BaseModel):
 
 class AddCreditsRequest(BaseModel):
     org_id: uuid.UUID
-    amount: int = Field(gt=0, description="Number of credits to add (must be positive)")
+    amount: Decimal = Field(gt=0, description="Number of credits to add (must be positive)")
     description: str | None = None
 
 
 class AdjustCreditsRequest(BaseModel):
     org_id: uuid.UUID
-    amount: int = Field(description="Credits to adjust (positive or negative)")
+    amount: Decimal = Field(description="Credits to adjust (positive or negative)")
     description: str | None = None
 
 
 class CreditBalanceResponse(BaseModel):
     org_id: uuid.UUID
-    balance: int
+    balance: float
 
 
 class OrgBalanceResponse(BaseModel):
     org_id: uuid.UUID
     org_name: str
-    credit_balance: int
+    credit_balance: float
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +97,7 @@ async def get_balance(
             detail="Organization not found",
         )
 
-    return BalanceResponse(balance=balance, org_id=user.org_id)
+    return BalanceResponse(balance=float(balance), org_id=user.org_id)
 
 
 @router.get("/transactions", response_model=TransactionListResponse)
@@ -135,8 +136,8 @@ async def list_transactions(
             TransactionResponse(
                 id=tx.id,
                 org_id=tx.org_id,
-                amount=tx.amount,
-                balance_after=tx.balance_after,
+                amount=float(tx.amount),
+                balance_after=float(tx.balance_after),
                 type=tx.type,
                 description=tx.description,
                 reference_id=tx.reference_id,
@@ -201,7 +202,7 @@ async def add_credits(
         by=str(user.id),
     )
 
-    return CreditBalanceResponse(org_id=req.org_id, balance=new_balance)
+    return CreditBalanceResponse(org_id=req.org_id, balance=float(new_balance))
 
 
 @router.post("/admin/adjust-credits", response_model=CreditBalanceResponse)
@@ -255,7 +256,7 @@ async def adjust_credits(
         by=str(user.id),
     )
 
-    return CreditBalanceResponse(org_id=req.org_id, balance=new_balance)
+    return CreditBalanceResponse(org_id=req.org_id, balance=float(new_balance))
 
 
 @router.get("/admin/org-balances", response_model=list[OrgBalanceResponse])
@@ -274,71 +275,7 @@ async def get_org_balances(
         OrgBalanceResponse(
             org_id=row.id,
             org_name=row.name,
-            credit_balance=row.credit_balance,
+            credit_balance=float(row.credit_balance),
         )
         for row in rows
     ]
-
-
-# ---------------------------------------------------------------------------
-# Internal helper — called by queue processor when a call completes
-# ---------------------------------------------------------------------------
-
-
-async def deduct_call_credits(
-    db: AsyncSession,
-    org_id: uuid.UUID,
-    call_log_id: str,
-    description: str,
-    amount: int = 1,
-) -> bool:
-    """Deduct credits for a completed call.
-
-    Returns True if credits were successfully deducted, False if insufficient balance.
-    This function commits the transaction — caller should NOT wrap it in their own commit.
-    """
-    # Fetch current balance with a row-level lock to prevent race conditions
-    result = await db.execute(
-        select(Organization)
-        .where(Organization.id == org_id)
-        .with_for_update()
-    )
-    org = result.scalar_one_or_none()
-
-    if org is None:
-        logger.error("deduct_credits_org_not_found", org_id=str(org_id))
-        return False
-
-    if org.credit_balance < amount:
-        logger.warning(
-            "insufficient_credits",
-            org_id=str(org_id),
-            balance=org.credit_balance,
-            required=amount,
-        )
-        return False
-
-    new_balance = org.credit_balance - amount
-    org.credit_balance = new_balance
-
-    tx = CreditTransaction(
-        org_id=org_id,
-        amount=-amount,
-        balance_after=new_balance,
-        type="usage",
-        description=description,
-        reference_id=call_log_id,
-    )
-    db.add(tx)
-
-    await db.commit()
-
-    logger.info(
-        "credits_deducted",
-        org_id=str(org_id),
-        amount=amount,
-        new_balance=new_balance,
-        call_log_id=call_log_id,
-    )
-
-    return True

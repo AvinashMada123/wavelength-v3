@@ -32,6 +32,7 @@ from app.pipeline.runner import (
     _resolve_greeting_text,
     _synthesize_greeting,
 )
+from app.services.billing import bill_completed_call
 from app.services.call_analyzer import CallAnalyzer
 from app.plivo.xml_responses import build_hangup_xml, build_stream_xml
 
@@ -608,14 +609,22 @@ async def plivo_event(call_sid: str, request: Request):
         ended_at=datetime.now(timezone.utc),
     )
 
-    # Update metadata with actual duration from Plivo
     async with get_db_session() as db:
         call_log = await _get_call_log(db, call_sid)
+        if call_log and duration_val:
+            updated_meta = dict(call_log.metadata_ or {})
+            updated_meta.setdefault("call_metrics", {})["total_duration_s"] = duration_val
+            call_log.metadata_ = updated_meta
+            await db.commit()
+            await db.refresh(call_log)
 
-    if call_log and call_log.metadata_ and duration_val:
-        updated_meta = dict(call_log.metadata_)
-        updated_meta.setdefault("call_metrics", {})["total_duration_s"] = duration_val
-        await _update_call_status(call_sid, metadata=updated_meta)
+        if call_log:
+            await bill_completed_call(
+                db,
+                call_log,
+                provider_status=mapped_status,
+                reported_duration_seconds=duration_val,
+            )
 
     # Backup GHL outcome posting — if pipeline didn't post (e.g. crash)
     if call_log and call_log.context_data and not call_log.outcome:

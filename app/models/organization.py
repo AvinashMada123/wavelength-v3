@@ -1,7 +1,8 @@
 import uuid
+from decimal import Decimal
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, Text, text
+from sqlalchemy import DateTime, Numeric, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,7 +21,7 @@ class Organization(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
     settings: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     usage: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
-    credit_balance: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    credit_balance: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, server_default="0")
     # Telephony credentials (org-level)
     plivo_auth_id: Mapped[str | None] = mapped_column(Text)
     plivo_auth_token: Mapped[str | None] = mapped_column(Text)
