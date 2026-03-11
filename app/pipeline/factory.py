@@ -1025,6 +1025,25 @@ async def build_pipeline(
                 self._last_audio_log_time = 0.0
                 self._call_sid_tag = ""  # Set after pipeline starts
 
+            async def _update_settings(self, delta):
+                """Override to reconnect WebSocket when language changes mid-call.
+
+                Pipecat's SarvamSTTService._update_settings updates self._settings
+                but does NOT reconnect — language_code is only sent at connect time.
+                """
+                changed = await super()._update_settings(delta)
+
+                if "language" in changed and self._socket_client:
+                    logger.info(
+                        "sarvam_stt_language_reconnect",
+                        call_sid=self._call_sid_tag,
+                        new_language=str(self._settings.language),
+                    )
+                    await self._disconnect()
+                    await self._connect()
+
+                return changed
+
             async def process_frame(self, frame, direction: FrameDirection):
                 from pipecat.frames.frames import (
                     InputAudioRawFrame,
