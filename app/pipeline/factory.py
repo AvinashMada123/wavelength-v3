@@ -896,6 +896,7 @@ async def build_pipeline(
     provider: str = "plivo",
     stream_sid: str = "",
     plivo_stream_id: str = "",
+    greeting_text: str = "",
 ) -> tuple[PipelineTask, FastAPIWebsocketTransport, OpenAILLMContext, CallGuard]:
     """
     Construct an isolated Pipecat pipeline for a single call.
@@ -1344,14 +1345,15 @@ async def build_pipeline(
     system_prompt = call_context.filled_prompt.strip()
     if _CONVERSATION_RULES.strip():
         system_prompt = f"{system_prompt}\n\n{_CONVERSATION_RULES.strip()}"
-    # NOTE: Greeting is NOT seeded here — TTSSpeakFrame goes through TTS →
-    # context_aggregator.assistant() which adds it automatically. Adding it
-    # here too causes a duplicate greeting in LLM context (wastes tokens).
-    context = OpenAILLMContext(
-        messages=[
-            {"role": "system", "content": system_prompt},
-        ],
-    )
+    # Seed greeting into context so the LLM knows it was already spoken and
+    # doesn't generate a second greeting on its first turn.
+    # When greeting_text is provided AND greeting was sent directly (bypassing
+    # pipeline TTS), we pre-seed it here. When TTSSpeakFrame is used instead,
+    # context_aggregator.assistant() captures the TTS output automatically.
+    messages = [{"role": "system", "content": system_prompt}]
+    if greeting_text:
+        messages.append({"role": "assistant", "content": greeting_text})
+    context = OpenAILLMContext(messages=messages)
 
     # Set tools as provider-agnostic ToolsSchema — adapters auto-convert per LLM provider
     if not _groq_no_tools:

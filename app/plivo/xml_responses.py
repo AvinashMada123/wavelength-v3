@@ -21,6 +21,7 @@ def build_stream_xml(
         record.set("recordSession", "true")
         record.set("redirect", "false")
         record.set("fileFormat", "mp3")
+        record.set("maxLength", "600")  # 10 minutes — Plivo defaults to 60s
         record.set("callbackUrl", recording_callback_url)
         record.set("callbackMethod", "POST")
 

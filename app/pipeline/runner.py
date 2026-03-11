@@ -213,6 +213,7 @@ async def run_pipeline(
         bot_config, ctx, websocket,
         provider=provider, stream_sid=stream_sid,
         plivo_stream_id=plivo_stream_id,
+        greeting_text=greeting_text,
     )
 
     max_duration = getattr(bot_config, "max_call_duration", 480) or 480
