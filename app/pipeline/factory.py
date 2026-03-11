@@ -1031,6 +1031,19 @@ async def build_pipeline(
                 delta.pop("language", None)
                 return await super()._update_settings(delta)
 
+            async def push_frame(self, frame, direction=None):
+                """Prepend detected language code to transcripts so LLM knows the spoken language."""
+                from pipecat.frames.frames import TranscriptionFrame
+                if isinstance(frame, TranscriptionFrame) and frame.text:
+                    lang = frame.language
+                    if lang:
+                        lang_str = lang.value if hasattr(lang, 'value') else str(lang)
+                        frame.text = f"[{lang_str}] {frame.text}"
+                if direction is not None:
+                    await super().push_frame(frame, direction)
+                else:
+                    await super().push_frame(frame)
+
             async def process_frame(self, frame, direction: FrameDirection):
                 from pipecat.frames.frames import (
                     InputAudioRawFrame,
@@ -1142,9 +1155,6 @@ async def build_pipeline(
                         if self._end_speech_timeout_task:
                             self._end_speech_timeout_task.cancel()
                             self._end_speech_timeout_task = None
-                        # Prepend detected language so LLM knows what language the user spoke
-                        if transcript and lang_code:
-                            message.data.transcript = f"[{lang_code}] {transcript}"
                         # Process transcript first (creates TranscriptionFrame)
                         await super()._handle_message(message)
                         # NOW send the buffered stop frame so aggregator has the transcript

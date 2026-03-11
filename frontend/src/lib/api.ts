@@ -517,6 +517,10 @@ export function createAdminUser(data: { email: string; display_name: string; pas
   return apiFetch("/api/admin/users", { method: "POST", body: JSON.stringify(data) });
 }
 
+export function updateAdminUser(userId: string, data: { email?: string; password?: string; display_name?: string; role?: string }): Promise<AdminUser> {
+  return apiFetch(`/api/admin/users/${userId}`, { method: "PUT", body: JSON.stringify(data) });
+}
+
 export function impersonateUser(userId: string): Promise<{ access_token: string; refresh_token: string }> {
   return apiFetch(`/api/admin/impersonate/${userId}`, { method: "POST" });
 }

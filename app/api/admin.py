@@ -124,6 +124,13 @@ class UserCreateRequest(BaseModel):
     org_id: uuid.UUID
 
 
+class UserUpdateRequest(BaseModel):
+    email: EmailStr | None = None
+    password: str | None = Field(None, min_length=8)
+    display_name: str | None = None
+    role: str | None = None
+
+
 class ImpersonateResponse(BaseModel):
     access_token: str
     refresh_token: str
@@ -476,6 +483,75 @@ async def create_user(
         org_name=org.name,
         created_at=new_user.created_at,
         last_login_at=new_user.last_login_at,
+    )
+
+
+@router.put("/users/{user_id}", response_model=AdminUserResponse)
+async def update_user(
+    user_id: uuid.UUID,
+    req: UserUpdateRequest,
+    user: User = Depends(require_role("super_admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update a user's email, password, display name, or role (super admin only)."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    target_user = result.scalar_one_or_none()
+
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    if req.email is not None and req.email != target_user.email:
+        existing = await db.execute(select(User).where(User.email == req.email))
+        if existing.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A user with this email already exists",
+            )
+        target_user.email = req.email
+
+    if req.password is not None:
+        target_user.password_hash = hash_password(req.password)
+
+    if req.display_name is not None:
+        target_user.display_name = req.display_name
+
+    if req.role is not None:
+        valid_roles = {"client_user", "client_admin", "super_admin"}
+        if req.role not in valid_roles:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid role. Must be one of: {', '.join(sorted(valid_roles))}",
+            )
+        target_user.role = req.role
+
+    await db.commit()
+    await db.refresh(target_user)
+
+    org_result = await db.execute(
+        select(Organization.name).where(Organization.id == target_user.org_id)
+    )
+    org_name = org_result.scalar_one_or_none() or ""
+
+    logger.info(
+        "admin_user_updated",
+        user_id=str(user_id),
+        fields=[f for f in ("email", "password", "display_name", "role") if getattr(req, f if f != "password" else "password") is not None],
+        by=str(user.id),
+    )
+
+    return AdminUserResponse(
+        id=target_user.id,
+        email=target_user.email,
+        display_name=target_user.display_name,
+        role=target_user.role,
+        status=target_user.status,
+        org_id=target_user.org_id,
+        org_name=org_name,
+        created_at=target_user.created_at,
+        last_login_at=target_user.last_login_at,
     )
 
 

@@ -14,6 +14,7 @@ import {
   Loader2,
   UserCog,
   Wallet,
+  Pencil,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -24,6 +25,7 @@ import {
   fetchAdminUsers,
   createAdminOrg,
   createAdminUser,
+  updateAdminUser,
   impersonateUser,
   fetchOrgBalances,
   addCredits,
@@ -442,8 +444,10 @@ function UsersTab({
 }) {
   const router = useRouter();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [filterOrgId, setFilterOrgId] = useState<string>("all");
   const [creating, setCreating] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const [impersonating, setImpersonating] = useState<string | null>(null);
 
   // Create user form
@@ -452,6 +456,13 @@ function UsersTab({
   const [newPassword, setNewPassword] = useState("");
   const [newRole, setNewRole] = useState("client_user");
   const [newOrgId, setNewOrgId] = useState("");
+
+  // Edit user form
+  const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
+  const [editEmail, setEditEmail] = useState("");
+  const [editDisplayName, setEditDisplayName] = useState("");
+  const [editPassword, setEditPassword] = useState("");
+  const [editRole, setEditRole] = useState("");
 
   const filteredUsers =
     filterOrgId === "all"
@@ -517,6 +528,42 @@ function UsersTab({
         err instanceof Error ? err.message : "Failed to impersonate user";
       toast.error(message);
       setImpersonating(null);
+    }
+  }
+
+  function openEditDialog(u: AdminUser) {
+    setEditingUser(u);
+    setEditEmail(u.email);
+    setEditDisplayName(u.display_name);
+    setEditPassword("");
+    setEditRole(u.role);
+    setEditDialogOpen(true);
+  }
+
+  async function handleUpdateUser(e: FormEvent) {
+    e.preventDefault();
+    if (!editingUser) return;
+    const data: { email?: string; password?: string; display_name?: string; role?: string } = {};
+    if (editEmail !== editingUser.email) data.email = editEmail;
+    if (editDisplayName !== editingUser.display_name) data.display_name = editDisplayName;
+    if (editPassword) data.password = editPassword;
+    if (editRole !== editingUser.role) data.role = editRole;
+    if (Object.keys(data).length === 0) {
+      toast.info("No changes to save");
+      return;
+    }
+    setUpdating(true);
+    try {
+      await updateAdminUser(editingUser.id, data);
+      toast.success(`User "${editDisplayName}" updated`);
+      setEditDialogOpen(false);
+      setEditingUser(null);
+      onUserCreated();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to update user";
+      toast.error(message);
+    } finally {
+      setUpdating(false);
     }
   }
 
@@ -685,7 +732,16 @@ function UsersTab({
                         ? new Date(user.last_login_at).toLocaleDateString()
                         : "Never"}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right space-x-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openEditDialog(user)}
+                        className="text-xs"
+                      >
+                        <Pencil className="h-3 w-3" />
+                        Edit
+                      </Button>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -710,6 +766,77 @@ function UsersTab({
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit User</DialogTitle>
+            <DialogDescription>
+              Update {editingUser?.display_name}&apos;s account details
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleUpdateUser} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="editEmail">Email</Label>
+              <Input
+                id="editEmail"
+                type="email"
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+                disabled={updating}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="editDisplayName">Display Name</Label>
+              <Input
+                id="editDisplayName"
+                value={editDisplayName}
+                onChange={(e) => setEditDisplayName(e.target.value)}
+                disabled={updating}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="editPassword">
+                New Password{" "}
+                <span className="text-muted-foreground">(leave blank to keep current)</span>
+              </Label>
+              <Input
+                id="editPassword"
+                type="password"
+                placeholder="Enter new password"
+                value={editPassword}
+                onChange={(e) => setEditPassword(e.target.value)}
+                disabled={updating}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Role</Label>
+              <Select value={editRole} onValueChange={setEditRole}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="client_user">Client User</SelectItem>
+                  <SelectItem value="client_admin">Client Admin</SelectItem>
+                  <SelectItem value="super_admin">Super Admin</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button type="submit" disabled={updating} className="bg-gradient-to-r from-violet-500 to-indigo-600 text-white hover:from-violet-600 hover:to-indigo-700">
+                {updating ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  "Save Changes"
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
