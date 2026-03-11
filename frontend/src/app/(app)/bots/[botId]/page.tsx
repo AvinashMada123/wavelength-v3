@@ -48,6 +48,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
+import { useAuth } from "@/contexts/auth-context";
 import { fetchBot, createBot, updateBot } from "@/lib/api";
 import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS, LLM_PROVIDER_OPTIONS, LLM_MODEL_OPTIONS } from "@/lib/constants";
 import type { BotConfig, GHLWorkflow, GoalConfig, SuccessCriterion, RedFlagConfig, DataCaptureField } from "@/types/api";
@@ -206,6 +207,8 @@ function Section({
 export default function BotEditorPage() {
   const router = useRouter();
   const params = useParams();
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === "super_admin";
   const botId = params.botId as string;
   const isNew = botId === "new";
 
@@ -734,51 +737,58 @@ export default function BotEditorPage() {
                       <CardContent className="pt-6 space-y-8">
                         <Section
                           title="Voice & Language"
-                          description="Choose the STT/TTS providers, voice personality, and language for your agent."
+                          description={isSuperAdmin
+                            ? "Choose the STT/TTS providers, voice personality, and language for your agent."
+                            : "Choose the voice personality and language for your agent."
+                          }
                         >
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                            <div className="space-y-2">
-                              <Label>STT Provider</Label>
-                              <Select
-                                value={form.stt_provider}
-                                onValueChange={(v) =>
-                                  setField("stt_provider", v as "deepgram" | "sarvam")
-                                }
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select STT provider..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {STT_PROVIDER_OPTIONS.map((p) => (
-                                    <SelectItem key={p.value} value={p.value}>
-                                      {p.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-2">
-                              <Label>TTS Provider</Label>
-                              <Select
-                                value={form.tts_provider}
-                                onValueChange={(v) => {
-                                  setField("tts_provider", v as "gemini" | "sarvam");
-                                  // Reset voice to provider default
-                                  setField("tts_voice", v === "sarvam" ? "priya" : "Kore");
-                                }}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select provider..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {TTS_PROVIDER_OPTIONS.map((p) => (
-                                    <SelectItem key={p.value} value={p.value}>
-                                      {p.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
+                            {isSuperAdmin && (
+                              <>
+                                <div className="space-y-2">
+                                  <Label>STT Provider</Label>
+                                  <Select
+                                    value={form.stt_provider}
+                                    onValueChange={(v) =>
+                                      setField("stt_provider", v as "deepgram" | "sarvam")
+                                    }
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Select STT provider..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {STT_PROVIDER_OPTIONS.map((p) => (
+                                        <SelectItem key={p.value} value={p.value}>
+                                          {p.label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>TTS Provider</Label>
+                                  <Select
+                                    value={form.tts_provider}
+                                    onValueChange={(v) => {
+                                      setField("tts_provider", v as "gemini" | "sarvam");
+                                      // Reset voice to provider default
+                                      setField("tts_voice", v === "sarvam" ? "priya" : "Kore");
+                                    }}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Select provider..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {TTS_PROVIDER_OPTIONS.map((p) => (
+                                        <SelectItem key={p.value} value={p.value}>
+                                          {p.label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </>
+                            )}
                             <div className="space-y-2">
                               <Label>Voice</Label>
                               <Select
@@ -830,57 +840,61 @@ export default function BotEditorPage() {
                           </div>
                         </Section>
 
-                        <Separator />
+                        {isSuperAdmin && (
+                          <>
+                            <Separator />
 
-                        <Section
-                          title="LLM"
-                          description="Choose the LLM provider and model for conversation intelligence."
-                        >
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                              <Label>LLM Provider</Label>
-                              <Select
-                                value={form.llm_provider}
-                                onValueChange={(v) => {
-                                  const provider = v as "google" | "groq";
-                                  setField("llm_provider", provider);
-                                  // Reset model to provider default
-                                  const defaultModel = LLM_MODEL_OPTIONS[provider]?.[0]?.value ?? "";
-                                  setField("llm_model", defaultModel);
-                                }}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select LLM provider..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {LLM_PROVIDER_OPTIONS.map((p) => (
-                                    <SelectItem key={p.value} value={p.value}>
-                                      {p.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Model</Label>
-                              <Select
-                                value={form.llm_model}
-                                onValueChange={(v) => setField("llm_model", v)}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select model..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {(LLM_MODEL_OPTIONS[form.llm_provider] || []).map((m) => (
-                                    <SelectItem key={m.value} value={m.value}>
-                                      {m.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                        </Section>
+                            <Section
+                              title="LLM"
+                              description="Choose the LLM provider and model for conversation intelligence."
+                            >
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                  <Label>LLM Provider</Label>
+                                  <Select
+                                    value={form.llm_provider}
+                                    onValueChange={(v) => {
+                                      const provider = v as "google" | "groq";
+                                      setField("llm_provider", provider);
+                                      // Reset model to provider default
+                                      const defaultModel = LLM_MODEL_OPTIONS[provider]?.[0]?.value ?? "";
+                                      setField("llm_model", defaultModel);
+                                    }}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Select LLM provider..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {LLM_PROVIDER_OPTIONS.map((p) => (
+                                        <SelectItem key={p.value} value={p.value}>
+                                          {p.label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>Model</Label>
+                                  <Select
+                                    value={form.llm_model}
+                                    onValueChange={(v) => setField("llm_model", v)}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Select model..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {(LLM_MODEL_OPTIONS[form.llm_provider] || []).map((m) => (
+                                        <SelectItem key={m.value} value={m.value}>
+                                          {m.label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+                            </Section>
+                          </>
+                        )}
 
                         <Separator />
 
