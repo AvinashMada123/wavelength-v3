@@ -21,6 +21,7 @@ import app.models.organization  # noqa: F401
 import app.models.user  # noqa: F401
 import app.models.lead  # noqa: F401
 import app.models.campaign  # noqa: F401
+import app.models.billing  # noqa: F401
 
 config = context.config
 

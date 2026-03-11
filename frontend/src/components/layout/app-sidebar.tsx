@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Bot, Phone, ClipboardList, Radio, ListOrdered, BarChart3, Users, ContactRound, Megaphone, LogOut } from "lucide-react";
+import { LayoutDashboard, Bot, Phone, ClipboardList, Radio, ListOrdered, BarChart3, Users, ContactRound, Megaphone, CreditCard, LogOut, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Sidebar,
@@ -27,6 +27,7 @@ const navItems = [
   { title: "Leads", href: "/leads", icon: ContactRound },
   { title: "Campaigns", href: "/campaigns", icon: Megaphone },
   { title: "Team", href: "/team", icon: Users },
+  { title: "Billing", href: "/billing", icon: CreditCard },
 ];
 
 function UserMenu() {
@@ -55,6 +56,11 @@ function UserMenu() {
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const { user } = useAuth();
+
+  const allNavItems = user?.role === "super_admin"
+    ? [...navItems, { title: "Admin", href: "/admin", icon: Shield }]
+    : navItems;
 
   return (
     <Sidebar>
@@ -75,7 +81,7 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent className="mt-2">
             <SidebarMenu>
-              {navItems.map((item) => {
+              {allNavItems.map((item) => {
                 const isActive = pathname.startsWith(item.href);
                 return (
                   <SidebarMenuItem key={item.href}>

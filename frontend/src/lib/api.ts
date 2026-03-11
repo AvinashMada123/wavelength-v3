@@ -445,3 +445,113 @@ export function pauseCampaign(id: string): Promise<Campaign> {
 export function cancelCampaign(id: string): Promise<Campaign> {
   return apiFetch(`/api/campaigns/${id}/cancel`, { method: "POST" });
 }
+
+// --- Admin ---
+
+export interface OrgSummary {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+  status: string;
+  user_count: number;
+  bot_count: number;
+  call_count: number;
+  created_at: string;
+}
+
+export interface AdminStats {
+  total_orgs: number;
+  total_users: number;
+  total_bots: number;
+  total_calls: number;
+  calls_today: number;
+  calls_by_status: Record<string, number>;
+}
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  display_name: string;
+  role: string;
+  org_id: string;
+  org_name: string;
+  status: string;
+  created_at: string;
+  last_login_at: string | null;
+}
+
+export function fetchAdminStats(): Promise<AdminStats> {
+  return apiFetch("/api/admin/stats");
+}
+
+export function fetchAdminOrgs(): Promise<OrgSummary[]> {
+  return apiFetch("/api/admin/organizations");
+}
+
+export function fetchAdminOrgDetail(orgId: string): Promise<any> {
+  return apiFetch(`/api/admin/organizations/${orgId}`);
+}
+
+export function fetchAdminUsers(orgId?: string): Promise<AdminUser[]> {
+  const qs = orgId ? `?org_id=${orgId}` : "";
+  return apiFetch(`/api/admin/users${qs}`);
+}
+
+export function createAdminOrg(data: { name: string; plan?: string }): Promise<any> {
+  return apiFetch("/api/admin/organizations", { method: "POST", body: JSON.stringify(data) });
+}
+
+export function createAdminUser(data: { email: string; display_name: string; password: string; role: string; org_id: string }): Promise<any> {
+  return apiFetch("/api/admin/users", { method: "POST", body: JSON.stringify(data) });
+}
+
+export function impersonateUser(userId: string): Promise<{ access_token: string; refresh_token: string }> {
+  return apiFetch(`/api/admin/impersonate/${userId}`, { method: "POST" });
+}
+
+// --- Billing ---
+
+export interface CreditTransaction {
+  id: string;
+  org_id: string;
+  amount: number;
+  balance_after: number;
+  type: string; // "topup", "usage", "adjustment", "refund"
+  description: string;
+  reference_id: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface PaginatedTransactions {
+  items: CreditTransaction[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export function fetchCreditBalance(): Promise<{ balance: number; org_id: string }> {
+  return apiFetch("/api/billing/balance");
+}
+
+export function fetchCreditTransactions(params?: { page?: number; page_size?: number; type?: string }): Promise<PaginatedTransactions> {
+  const sp = new URLSearchParams();
+  if (params?.page) sp.set("page", String(params.page));
+  if (params?.page_size) sp.set("page_size", String(params.page_size));
+  if (params?.type) sp.set("type", params.type);
+  const qs = sp.toString();
+  return apiFetch(`/api/billing/transactions${qs ? `?${qs}` : ""}`);
+}
+
+// Admin billing
+export function addCredits(orgId: string, amount: number, description?: string): Promise<{ balance: number }> {
+  return apiFetch("/api/billing/admin/add-credits", {
+    method: "POST",
+    body: JSON.stringify({ org_id: orgId, amount, description }),
+  });
+}
+
+export function fetchOrgBalances(): Promise<Array<{ org_id: string; org_name: string; credit_balance: number }>> {
+  return apiFetch("/api/billing/admin/org-balances");
+}
