@@ -54,6 +54,7 @@ async def create_bot(
         plivo_auth_id=req.plivo_auth_id,
         plivo_auth_token=req.plivo_auth_token,
         plivo_caller_id=req.plivo_caller_id,
+        phone_number_id=req.phone_number_id,
         goal_config=req.goal_config.model_dump() if req.goal_config else None,
     )
     db.add(bot)
@@ -164,12 +165,7 @@ async def clone_bot(
         ghl_workflows=original.ghl_workflows,
         max_call_duration=original.max_call_duration,
         telephony_provider=original.telephony_provider,
-        plivo_auth_id=original.plivo_auth_id,
-        plivo_auth_token=original.plivo_auth_token,
-        plivo_caller_id=original.plivo_caller_id,
-        twilio_account_sid=original.twilio_account_sid,
-        twilio_auth_token=original.twilio_auth_token,
-        twilio_phone_number=original.twilio_phone_number,
+        phone_number_id=original.phone_number_id,
         goal_config=original.goal_config,
     )
     db.add(clone)

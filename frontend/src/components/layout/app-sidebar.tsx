@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Bot, Phone, ClipboardList, Radio, ListOrdered, BarChart3, Users, ContactRound, Megaphone, CreditCard, LogOut, Shield } from "lucide-react";
+import { LayoutDashboard, Bot, Phone, ClipboardList, Radio, ListOrdered, BarChart3, Users, ContactRound, Megaphone, CreditCard, LogOut, Shield, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Sidebar,
@@ -16,6 +16,7 @@ import {
   SidebarHeader,
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/contexts/auth-context";
+import { OrgSwitcher } from "@/components/layout/org-switcher";
 
 const navItems = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -27,6 +28,7 @@ const navItems = [
   { title: "Leads", href: "/leads", icon: ContactRound },
   { title: "Campaigns", href: "/campaigns", icon: Megaphone },
   { title: "Team", href: "/team", icon: Users },
+  { title: "Settings", href: "/settings", icon: Settings },
   { title: "Billing", href: "/billing", icon: CreditCard },
 ];
 
@@ -64,7 +66,7 @@ export function AppSidebar() {
 
   return (
     <Sidebar>
-      <SidebarHeader className="border-b px-4 py-3">
+      <SidebarHeader className="border-b px-4 py-3 space-y-3">
         <div className="flex items-center gap-3">
           <div className="relative flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 shadow-lg shadow-violet-500/25">
             <Radio className="h-5 w-5 text-white" />
@@ -76,6 +78,7 @@ export function AppSidebar() {
             </p>
           </div>
         </div>
+        <OrgSwitcher />
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>

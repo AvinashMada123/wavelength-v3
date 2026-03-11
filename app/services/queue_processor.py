@@ -16,11 +16,15 @@ from uuid import uuid4
 import structlog
 from sqlalchemy import func, select
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.bot_config.loader import BotConfigLoader, fill_prompt_template
 from app.config import settings
 from app.database import get_db_session
 from app.models.call_log import CallLog
 from app.models.call_queue import QueuedCall
+from app.models.organization import Organization
+from app.models.phone_number import PhoneNumber
 from app.plivo.client import make_outbound_call as plivo_make_call
 from app.services import circuit_breaker
 from app.twilio.client import make_outbound_call as twilio_make_call
@@ -34,6 +38,77 @@ STAGGER_DELAY_SECS = float(os.environ.get("QUEUE_STAGGER_DELAY_SECS", "2.0"))
 _task: asyncio.Task | None = None
 _shutdown = False
 _loader: BotConfigLoader | None = None
+
+
+async def _resolve_telephony(
+    db: AsyncSession, bot_config
+) -> tuple[str, str, dict[str, str]]:
+    """Resolve telephony provider, phone number, and auth credentials.
+
+    Prefers org-level credentials + phone_numbers table.
+    Falls back to bot-level credentials for backward compatibility.
+
+    Returns: (provider, from_number, auth_creds_dict)
+    """
+    org_id = bot_config.org_id
+
+    # Check if bot has a specific phone_number_id assigned
+    phone_number_id = getattr(bot_config, "phone_number_id", None)
+
+    if phone_number_id:
+        pn_result = await db.execute(
+            select(PhoneNumber).where(PhoneNumber.id == phone_number_id)
+        )
+        phone = pn_result.scalar_one_or_none()
+        if phone:
+            provider = phone.provider
+            from_number = phone.phone_number
+        else:
+            # Phone number was deleted — fall back to default
+            phone_number_id = None
+
+    if not phone_number_id:
+        # Use the default phone number for the bot's telephony provider
+        provider = getattr(bot_config, "telephony_provider", "plivo") or "plivo"
+        pn_result = await db.execute(
+            select(PhoneNumber).where(
+                PhoneNumber.org_id == org_id,
+                PhoneNumber.provider == provider,
+                PhoneNumber.is_default == True,
+            )
+        )
+        phone = pn_result.scalar_one_or_none()
+        if phone:
+            from_number = phone.phone_number
+        else:
+            # Final fallback to bot-level caller ID
+            if provider == "twilio":
+                from_number = getattr(bot_config, "twilio_phone_number", "") or ""
+            else:
+                from_number = getattr(bot_config, "plivo_caller_id", "") or ""
+
+    # Resolve auth credentials — org-level first, bot-level fallback
+    org_result = await db.execute(
+        select(Organization).where(Organization.id == org_id)
+    )
+    org = org_result.scalar_one_or_none()
+
+    if provider == "twilio":
+        auth_creds = {
+            "account_sid": (org.twilio_account_sid if org and org.twilio_account_sid else None)
+                or getattr(bot_config, "twilio_account_sid", "") or "",
+            "auth_token": (org.twilio_auth_token if org and org.twilio_auth_token else None)
+                or getattr(bot_config, "twilio_auth_token", "") or "",
+        }
+    else:
+        auth_creds = {
+            "auth_id": (org.plivo_auth_id if org and org.plivo_auth_id else None)
+                or getattr(bot_config, "plivo_auth_id", "") or "",
+            "auth_token": (org.plivo_auth_token if org and org.plivo_auth_token else None)
+                or getattr(bot_config, "plivo_auth_token", "") or "",
+        }
+
+    return provider, from_number, auth_creds
 
 
 def _normalize_template_vars(template_vars: dict[str, str]) -> dict[str, str]:
@@ -265,24 +340,26 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
             db.add(call_log)
             await db.flush()
 
-            # Initiate outbound call
-            provider = getattr(bot_config, "telephony_provider", "plivo") or "plivo"
+            # Resolve telephony credentials (org-level first, bot-level fallback)
+            provider, from_number, auth_creds = await _resolve_telephony(
+                db, bot_config
+            )
             base_url = settings.PUBLIC_BASE_URL
 
             if provider == "twilio":
                 provider_uuid = await twilio_make_call(
-                    account_sid=bot_config.twilio_account_sid,
-                    auth_token=bot_config.twilio_auth_token,
-                    from_number=bot_config.twilio_phone_number,
+                    account_sid=auth_creds["account_sid"],
+                    auth_token=auth_creds["auth_token"],
+                    from_number=from_number,
                     to_number=queued_call.contact_phone,
                     answer_url=f"{base_url}/twilio/answer/{call_sid}",
                     status_callback_url=f"{base_url}/twilio/event/{call_sid}",
                 )
             else:
                 provider_uuid = await plivo_make_call(
-                    auth_id=bot_config.plivo_auth_id,
-                    auth_token=bot_config.plivo_auth_token,
-                    from_number=bot_config.plivo_caller_id,
+                    auth_id=auth_creds["auth_id"],
+                    auth_token=auth_creds["auth_token"],
+                    from_number=from_number,
                     to_number=queued_call.contact_phone,
                     answer_url=f"{base_url}/plivo/answer/{call_sid}",
                     hangup_url=f"{base_url}/plivo/event/{call_sid}",

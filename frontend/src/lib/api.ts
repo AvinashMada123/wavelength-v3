@@ -566,3 +566,67 @@ export function addCredits(orgId: string, amount: number, description?: string):
 export function fetchOrgBalances(): Promise<Array<{ org_id: string; org_name: string; credit_balance: number }>> {
   return apiFetch("/api/billing/admin/org-balances");
 }
+
+// --- Org Switching ---
+
+export interface OrgMembership {
+  org_id: string;
+  org_name: string;
+  org_slug: string;
+  role: string;
+  is_active: boolean;
+}
+
+export function fetchUserOrgs(): Promise<OrgMembership[]> {
+  return apiFetch("/api/auth/orgs");
+}
+
+export function switchOrg(orgId: string): Promise<{ access_token: string; refresh_token: string; user: { id: string; email: string; display_name: string; role: string; org_id: string; org_name: string } }> {
+  return apiFetch("/api/auth/switch-org", {
+    method: "POST",
+    body: JSON.stringify({ org_id: orgId }),
+  });
+}
+
+// --- Telephony Config ---
+
+export interface TelephonyConfig {
+  plivo_auth_id: string | null;
+  plivo_auth_token_set: boolean;
+  twilio_account_sid: string | null;
+  twilio_auth_token_set: boolean;
+  ghl_api_key_set: boolean;
+  ghl_location_id: string | null;
+}
+
+export interface PhoneNumberEntry {
+  id: string;
+  provider: string;
+  phone_number: string;
+  label: string | null;
+  is_default: boolean;
+}
+
+export function fetchTelephonyConfig(): Promise<TelephonyConfig> {
+  return apiFetch("/api/telephony/config");
+}
+
+export function updateTelephonyConfig(data: Record<string, string>): Promise<TelephonyConfig> {
+  return apiFetch("/api/telephony/config", { method: "PATCH", body: JSON.stringify(data) });
+}
+
+export function fetchPhoneNumbers(): Promise<PhoneNumberEntry[]> {
+  return apiFetch("/api/telephony/phone-numbers");
+}
+
+export function createPhoneNumber(data: { provider: string; phone_number: string; label?: string; is_default?: boolean }): Promise<PhoneNumberEntry> {
+  return apiFetch("/api/telephony/phone-numbers", { method: "POST", body: JSON.stringify(data) });
+}
+
+export function updatePhoneNumber(id: string, data: { label?: string; is_default?: boolean }): Promise<PhoneNumberEntry> {
+  return apiFetch(`/api/telephony/phone-numbers/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+}
+
+export function deletePhoneNumber(id: string): Promise<void> {
+  return apiFetch(`/api/telephony/phone-numbers/${id}`, { method: "DELETE" });
+}

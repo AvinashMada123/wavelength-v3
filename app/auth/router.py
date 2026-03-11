@@ -23,6 +23,7 @@ from app.auth.security import (
 from app.database import get_db
 from app.models.organization import Organization
 from app.models.user import Invite, User
+from app.models.user_org import UserOrg
 
 logger = structlog.get_logger(__name__)
 
@@ -91,6 +92,18 @@ class InviteResponse(BaseModel):
     status: str
     created_at: datetime
     expires_at: datetime
+
+
+class OrgMembershipResponse(BaseModel):
+    org_id: uuid.UUID
+    org_name: str
+    org_slug: str
+    role: str
+    is_active: bool
+
+
+class SwitchOrgRequest(BaseModel):
+    org_id: uuid.UUID
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +176,11 @@ async def signup(req: SignupRequest, db: AsyncSession = Depends(get_db)):
 
     # Set org.created_by
     org.created_by = user.id
+
+    # Create user_orgs membership
+    membership = UserOrg(user_id=user.id, org_id=org.id, role="client_admin")
+    db.add(membership)
+
     await db.commit()
     await db.refresh(user)
     await db.refresh(org)
@@ -276,13 +294,21 @@ async def create_invite(
             detail=f"Invalid role. Must be one of: {', '.join(sorted(valid_roles))}",
         )
 
-    # Check if user already exists with this email
-    existing_user = await db.execute(select(User).where(User.email == req.email))
-    if existing_user.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A user with this email already exists",
+    # Check if user already exists and is already a member of this org
+    existing_user_result = await db.execute(select(User).where(User.email == req.email))
+    existing_user = existing_user_result.scalar_one_or_none()
+    if existing_user:
+        existing_membership = await db.execute(
+            select(UserOrg).where(
+                UserOrg.user_id == existing_user.id,
+                UserOrg.org_id == user.org_id,
+            )
         )
+        if existing_membership.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This user is already a member of your organization",
+            )
 
     # Check for existing pending invite in this org
     existing_invite = await db.execute(
@@ -356,23 +382,45 @@ async def accept_invite(req: AcceptInviteRequest, db: AsyncSession = Depends(get
         )
 
     # Check if user already exists
-    existing = await db.execute(select(User).where(User.email == invite.email))
-    if existing.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A user with this email already exists",
-        )
+    existing_result = await db.execute(select(User).where(User.email == invite.email))
+    existing_user = existing_result.scalar_one_or_none()
 
-    # Create user
-    user = User(
-        email=invite.email,
-        display_name=req.display_name,
-        password_hash=hash_password(req.password),
-        role=invite.role,
-        org_id=invite.org_id,
-        invited_by=invite.invited_by,
-    )
-    db.add(user)
+    if existing_user:
+        # User exists — add them to the new org via user_orgs
+        existing_membership = await db.execute(
+            select(UserOrg).where(
+                UserOrg.user_id == existing_user.id,
+                UserOrg.org_id == invite.org_id,
+            )
+        )
+        if not existing_membership.scalar_one_or_none():
+            membership = UserOrg(
+                user_id=existing_user.id,
+                org_id=invite.org_id,
+                role=invite.role,
+            )
+            db.add(membership)
+
+        # Switch their active org to the new one
+        existing_user.org_id = invite.org_id
+        existing_user.role = invite.role
+        user = existing_user
+    else:
+        # Create new user
+        user = User(
+            email=invite.email,
+            display_name=req.display_name,
+            password_hash=hash_password(req.password),
+            role=invite.role,
+            org_id=invite.org_id,
+            invited_by=invite.invited_by,
+        )
+        db.add(user)
+        await db.flush()
+
+        # Create user_orgs membership
+        membership = UserOrg(user_id=user.id, org_id=invite.org_id, role=invite.role)
+        db.add(membership)
 
     # Mark invite as accepted
     invite.status = "accepted"
@@ -421,3 +469,125 @@ async def list_invites(
         )
         for inv in invites
     ]
+
+
+# ---------------------------------------------------------------------------
+# Org switching endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/orgs", response_model=list[OrgMembershipResponse])
+async def list_user_orgs(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all organizations the current user belongs to."""
+    # Check if user is super_admin (from any membership)
+    is_super = await db.execute(
+        select(UserOrg).where(UserOrg.user_id == user.id, UserOrg.role == "super_admin")
+    )
+    is_super_admin = is_super.scalar_one_or_none() is not None or user.role == "super_admin"
+
+    if is_super_admin:
+        # Super admins can see ALL organizations
+        result = await db.execute(select(Organization).order_by(Organization.name))
+        orgs = result.scalars().all()
+
+        # Get existing memberships for role info
+        memberships_result = await db.execute(
+            select(UserOrg).where(UserOrg.user_id == user.id)
+        )
+        memberships = {m.org_id: m.role for m in memberships_result.scalars().all()}
+
+        return [
+            OrgMembershipResponse(
+                org_id=org.id,
+                org_name=org.name,
+                org_slug=org.slug,
+                role=memberships.get(org.id, "super_admin"),
+                is_active=org.id == user.org_id,
+            )
+            for org in orgs
+        ]
+    else:
+        # Regular users see only their memberships
+        result = await db.execute(
+            select(UserOrg, Organization)
+            .join(Organization, UserOrg.org_id == Organization.id)
+            .where(UserOrg.user_id == user.id)
+            .order_by(Organization.name)
+        )
+        rows = result.all()
+
+        return [
+            OrgMembershipResponse(
+                org_id=org.id,
+                org_name=org.name,
+                org_slug=org.slug,
+                role=membership.role,
+                is_active=org.id == user.org_id,
+            )
+            for membership, org in rows
+        ]
+
+
+@router.post("/switch-org", response_model=AuthResponse)
+async def switch_org(
+    req: SwitchOrgRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Switch the user's active organization."""
+    # Verify target org exists
+    org_result = await db.execute(select(Organization).where(Organization.id == req.org_id))
+    target_org = org_result.scalar_one_or_none()
+    if not target_org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    # Check if super_admin (can switch to any org)
+    is_super_result = await db.execute(
+        select(UserOrg).where(UserOrg.user_id == user.id, UserOrg.role == "super_admin")
+    )
+    is_super_admin = is_super_result.scalar_one_or_none() is not None or user.role == "super_admin"
+
+    if is_super_admin:
+        # Super admin can switch to any org — ensure membership exists
+        membership_result = await db.execute(
+            select(UserOrg).where(UserOrg.user_id == user.id, UserOrg.org_id == req.org_id)
+        )
+        membership = membership_result.scalar_one_or_none()
+        if not membership:
+            # Auto-create membership for super_admin
+            membership = UserOrg(user_id=user.id, org_id=req.org_id, role="super_admin")
+            db.add(membership)
+
+        # Update active org — keep super_admin role
+        user.org_id = req.org_id
+        user.role = "super_admin"
+    else:
+        # Regular user — must have membership
+        membership_result = await db.execute(
+            select(UserOrg).where(UserOrg.user_id == user.id, UserOrg.org_id == req.org_id)
+        )
+        membership = membership_result.scalar_one_or_none()
+        if not membership:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not a member of this organization",
+            )
+
+        # Update active org and role
+        user.org_id = req.org_id
+        user.role = membership.role
+
+    await db.commit()
+    await db.refresh(user)
+
+    # Issue new tokens
+    token_data = {"sub": str(user.id)}
+    access_token = create_access_token(token_data)
+    refresh_token = create_refresh_token(token_data)
+
+    logger.info("org_switched", user_id=str(user.id), org_id=str(req.org_id))
+
+    return _build_auth_response(user, target_org.name, access_token, refresh_token)

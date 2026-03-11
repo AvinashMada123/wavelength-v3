@@ -37,12 +37,15 @@ class BotConfig(Base):
     ghl_workflows: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     max_call_duration: Mapped[int] = mapped_column(Integer, nullable=False, server_default="480")
     telephony_provider: Mapped[str] = mapped_column(Text, nullable=False, server_default="plivo")
-    plivo_auth_id: Mapped[str] = mapped_column(Text, nullable=False)
-    plivo_auth_token: Mapped[str] = mapped_column(Text, nullable=False)
-    plivo_caller_id: Mapped[str] = mapped_column(Text, nullable=False)
+    plivo_auth_id: Mapped[str | None] = mapped_column(Text)
+    plivo_auth_token: Mapped[str | None] = mapped_column(Text)
+    plivo_caller_id: Mapped[str | None] = mapped_column(Text)
     twilio_account_sid: Mapped[str | None] = mapped_column(Text)
     twilio_auth_token: Mapped[str | None] = mapped_column(Text)
     twilio_phone_number: Mapped[str | None] = mapped_column(Text)
+    phone_number_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("phone_numbers.id"), nullable=True
+    )
     greeting_template: Mapped[str | None] = mapped_column(Text)
     llm_provider: Mapped[str] = mapped_column(Text, nullable=False, server_default="google")
     llm_model: Mapped[str] = mapped_column(Text, nullable=False, server_default="gemini-2.5-flash")

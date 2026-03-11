@@ -19,6 +19,7 @@ interface AuthContextType {
   signup: (email: string, password: string, displayName: string, orgName: string) => Promise<void>;
   logout: () => void;
   acceptInvite: (inviteId: string, password: string, displayName: string) => Promise<void>;
+  switchOrg: (orgId: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -178,6 +179,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  const switchOrg = useCallback(async (orgId: string) => {
+    const res = await fetch("/api/auth/switch-org", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+      },
+      body: JSON.stringify({ org_id: orgId }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      let message = "Failed to switch organization";
+      try {
+        const parsed = JSON.parse(body);
+        if (typeof parsed.detail === "string") message = parsed.detail;
+      } catch {
+        message = body || message;
+      }
+      throw new Error(message);
+    }
+
+    const data = await res.json();
+    storeAuth(data.access_token, data.refresh_token, data.user);
+    // Full page reload to reset all org-scoped data
+    window.location.href = "/dashboard";
+  }, []);
+
   const acceptInvite = useCallback(
     async (inviteId: string, password: string, displayName: string) => {
       const res = await fetch("/api/auth/accept-invite", {
@@ -217,6 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signup,
         logout,
         acceptInvite,
+        switchOrg,
       }}
     >
       {children}

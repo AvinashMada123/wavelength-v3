@@ -151,12 +151,13 @@ class CreateBotConfigRequest(BaseModel):
     ghl_workflows: list[dict] = Field(default_factory=list)
     max_call_duration: int = 480
     telephony_provider: str = "plivo"
-    plivo_auth_id: str = ""
-    plivo_auth_token: str = ""
-    plivo_caller_id: str = ""
+    plivo_auth_id: str | None = None
+    plivo_auth_token: str | None = None
+    plivo_caller_id: str | None = None
     twilio_account_sid: str | None = None
     twilio_auth_token: str | None = None
     twilio_phone_number: str | None = None
+    phone_number_id: uuid.UUID | None = None
     goal_config: GoalConfig | None = None
 
 
@@ -191,6 +192,7 @@ class UpdateBotConfigRequest(BaseModel):
     twilio_account_sid: str | None = None
     twilio_auth_token: str | None = None
     twilio_phone_number: str | None = None
+    phone_number_id: uuid.UUID | None = None
     goal_config: GoalConfig | dict | None = None
     is_active: bool | None = None
 
@@ -229,8 +231,9 @@ class BotConfigResponse(BaseModel):
     ghl_workflows: list[dict]
     max_call_duration: int
     telephony_provider: str
-    plivo_caller_id: str
-    twilio_phone_number: str | None
+    plivo_caller_id: str | None = None
+    twilio_phone_number: str | None = None
+    phone_number_id: uuid.UUID | None = None
     goal_config: dict | None = None
     is_active: bool
     created_at: datetime

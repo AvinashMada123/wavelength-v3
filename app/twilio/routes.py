@@ -110,6 +110,11 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
         await websocket.close()
         return
 
+    # Enrich with org-level credentials (GHL, telephony fallbacks)
+    from app.services.org_credentials import enrich_with_org_creds
+    async with get_db_session() as enrichdb:
+        await enrich_with_org_creds(enrichdb, bot_config)
+
     ctx = CallContext.from_db(call_log, bot_config=bot_config)
 
     # Enforce concurrent session limit
