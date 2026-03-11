@@ -127,7 +127,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (!res.ok) {
       const body = await res.text();
-      throw new Error(body || "Login failed");
+      let message = "Login failed";
+      try {
+        const parsed = JSON.parse(body);
+        if (typeof parsed.detail === "string") message = parsed.detail;
+        else if (typeof parsed.message === "string") message = parsed.message;
+        else message = body;
+      } catch {
+        message = body || "Login failed";
+      }
+      throw new Error(message);
     }
 
     const data = await res.json();
@@ -145,7 +154,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (!res.ok) {
         const body = await res.text();
-        throw new Error(body || "Signup failed");
+        let message = "Signup failed";
+        try {
+          const parsed = JSON.parse(body);
+          if (typeof parsed.detail === "string") message = parsed.detail;
+          else if (typeof parsed.message === "string") message = parsed.message;
+          else message = body;
+        } catch {
+          message = body || "Signup failed";
+        }
+        throw new Error(message);
       }
 
       const data = await res.json();
@@ -170,7 +188,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (!res.ok) {
         const body = await res.text();
-        throw new Error(body || "Accept invite failed");
+        let message = "Accept invite failed";
+        try {
+          const parsed = JSON.parse(body);
+          if (typeof parsed.detail === "string") message = parsed.detail;
+          else if (typeof parsed.message === "string") message = parsed.message;
+          else message = body;
+        } catch {
+          message = body || "Accept invite failed";
+        }
+        throw new Error(message);
       }
 
       const data = await res.json();

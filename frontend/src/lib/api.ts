@@ -34,6 +34,17 @@ async function tryRefreshToken(): Promise<boolean> {
   }
 }
 
+function extractErrorMessage(body: string, status: number): string {
+  try {
+    const parsed = JSON.parse(body);
+    if (typeof parsed.detail === "string") return parsed.detail;
+    if (typeof parsed.message === "string") return parsed.message;
+  } catch {
+    // not JSON
+  }
+  return body || `Request failed (${status})`;
+}
+
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
   const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
   const headers: Record<string, string> = {
@@ -54,7 +65,7 @@ async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
       const retryRes = await fetch(url, { ...options, headers });
       if (!retryRes.ok) {
         const body = await retryRes.text();
-        throw new Error(`${retryRes.status}: ${body}`);
+        throw new Error(extractErrorMessage(body, retryRes.status));
       }
       return retryRes.json();
     }
@@ -70,7 +81,7 @@ async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`${res.status}: ${body}`);
+    throw new Error(extractErrorMessage(body, res.status));
   }
   return res.json();
 }

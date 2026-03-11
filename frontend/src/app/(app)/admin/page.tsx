@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, type FormEvent } from "react";
+import { useEffect, useState, useCallback, Fragment, type FormEvent } from "react";
 import { motion } from "framer-motion";
 import {
   Building2,
@@ -350,9 +350,8 @@ function OrganizationsTab({
               </TableHeader>
               <TableBody>
                 {orgs.map((org) => (
-                  <>
+                  <Fragment key={org.id}>
                     <TableRow
-                      key={org.id}
                       className="cursor-pointer"
                       onClick={() => toggleOrgExpand(org.id)}
                     >
@@ -374,7 +373,7 @@ function OrganizationsTab({
                       </TableCell>
                     </TableRow>
                     {expandedOrg === org.id && (
-                      <TableRow key={`${org.id}-detail`}>
+                      <TableRow>
                         <TableCell colSpan={8} className="bg-muted/30 p-4">
                           {loadingUsers ? (
                             <div className="space-y-2">
@@ -417,7 +416,7 @@ function OrganizationsTab({
                         </TableCell>
                       </TableRow>
                     )}
-                  </>
+                  </Fragment>
                 ))}
               </TableBody>
             </Table>
