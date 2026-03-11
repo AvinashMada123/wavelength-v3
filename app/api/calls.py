@@ -151,10 +151,33 @@ async def trigger_call(
 @router.get("/{call_sid}/recording")
 async def get_recording(
     call_sid: str,
+    token: str | None = None,
     db: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(get_current_org),
 ):
-    """Redirect to Plivo-hosted recording URL."""
+    """Redirect to Plivo-hosted recording URL.
+
+    Accepts ?token= query param for auth since <audio> elements can't send headers.
+    """
+    from app.auth.security import decode_token as _decode
+    from app.models.user import User
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing token query parameter")
+
+    try:
+        payload = _decode(token)
+        if payload.get("type") != "access" or not payload.get("sub"):
+            raise HTTPException(status_code=401, detail="Invalid token")
+        result = await db.execute(select(User).where(User.id == uuid.UUID(payload["sub"])))
+        user = result.scalar_one_or_none()
+        if not user or user.status != "active":
+            raise HTTPException(status_code=401, detail="Invalid token")
+        org_id = user.org_id
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
     result = await db.execute(select(CallLog).where(CallLog.call_sid == call_sid, CallLog.org_id == org_id))
     call_log = result.scalar_one_or_none()
     if not call_log:

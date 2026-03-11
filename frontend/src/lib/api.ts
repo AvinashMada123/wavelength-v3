@@ -137,7 +137,8 @@ export async function checkHealth(): Promise<{ status: string }> {
 }
 
 export function getRecordingUrl(callSid: string): string {
-  return `/api/calls/${callSid}/recording`;
+  const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+  return `/api/calls/${callSid}/recording${token ? `?token=${token}` : ""}`;
 }
 
 // --- Queue & Circuit Breaker ---
