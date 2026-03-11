@@ -1026,23 +1026,10 @@ async def build_pipeline(
                 self._call_sid_tag = ""  # Set after pipeline starts
 
             async def _update_settings(self, delta):
-                """Override to reconnect WebSocket when language changes mid-call.
-
-                Pipecat's SarvamSTTService._update_settings updates self._settings
-                but does NOT reconnect — language_code is only sent at connect time.
-                """
-                changed = await super()._update_settings(delta)
-
-                if "language" in changed and self._socket_client:
-                    logger.info(
-                        "sarvam_stt_language_reconnect",
-                        call_sid=self._call_sid_tag,
-                        new_language=str(self._settings.language),
-                    )
-                    await self._disconnect()
-                    await self._connect()
-
-                return changed
+                """No-op language changes — we use language_code='unknown' so Sarvam auto-detects."""
+                # Strip language from delta so base class doesn't try to reconnect
+                delta.pop("language", None)
+                return await super()._update_settings(delta)
 
             async def process_frame(self, frame, direction: FrameDirection):
                 from pipecat.frames.frames import (
@@ -1187,33 +1174,16 @@ async def build_pipeline(
                 except asyncio.CancelledError:
                     pass
 
-        # Map BCP-47 → Pipecat Language enum for Sarvam (all 12 pipecat-supported languages)
-        _SARVAM_LANG_MAP = {
-            "en-IN": PipecatLanguage.EN_IN,
-            "hi-IN": PipecatLanguage.HI_IN,
-            "bn-IN": PipecatLanguage.BN_IN,
-            "gu-IN": PipecatLanguage.GU_IN,
-            "kn-IN": PipecatLanguage.KN_IN,
-            "ml-IN": PipecatLanguage.ML_IN,
-            "mr-IN": PipecatLanguage.MR_IN,
-            "ta-IN": PipecatLanguage.TA_IN,
-            "te-IN": PipecatLanguage.TE_IN,
-            "pa-IN": PipecatLanguage.PA_IN,
-            "or-IN": PipecatLanguage.OR_IN,  # Odia (pipecat maps to od-IN for Sarvam)
-            "as-IN": PipecatLanguage.AS_IN,  # Assamese
-        }
-        sarvam_lang = _SARVAM_LANG_MAP.get(stt_language)
-        # If language not in map, sarvam_lang=None → Sarvam auto-detects
         stt = _SafeSarvamSTT(
             api_key=settings.SARVAM_API_KEY,
             model="saaras:v3",
             sample_rate=16000,
             input_audio_codec="wav",
             params=SarvamSTTService.InputParams(
-                language=sarvam_lang,
-                mode="transcribe",
+                language=None,  # language_code="unknown" — auto-detect
+                mode="translit",
                 vad_signals=True,
-                high_vad_sensitivity=False,
+                high_vad_sensitivity=True,
             ),
             keepalive_timeout=30.0,
         )
@@ -1222,8 +1192,8 @@ async def build_pipeline(
             "stt_provider_selected",
             provider="sarvam",
             model="saaras:v3",
-            language=stt_language,
-            pinned=sarvam_lang is not None,
+            mode="translit",
+            language="unknown",
         )
     else:
         # Use multi-language detection for Indian languages — users frequently
