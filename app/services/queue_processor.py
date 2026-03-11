@@ -75,9 +75,9 @@ async def _resolve_telephony(
                 PhoneNumber.org_id == org_id,
                 PhoneNumber.provider == provider,
                 PhoneNumber.is_default == True,
-            )
+            ).limit(1)
         )
-        phone = pn_result.scalar_one_or_none()
+        phone = pn_result.scalars().first()
         if phone:
             from_number = phone.phone_number
         else:
