@@ -1425,7 +1425,8 @@ async def build_pipeline(
         ),
     )
 
-    # Set task ref so end_call handler can queue EndFrame
+    # Set task ref so end_call handler and silence watchdog can queue EndFrame
     _task_ref[0] = task
+    silence_watchdog.set_task(task)
 
     return task, transport, context, call_guard

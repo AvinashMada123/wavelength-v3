@@ -56,6 +56,11 @@ class SilenceWatchdog(FrameProcessor):
         self._escalation: int = 0
         self._started: bool = False
         self._watchdog_task: asyncio.Task | None = None
+        self._pipeline_task = None  # Set after PipelineTask creation
+
+    def set_task(self, task) -> None:
+        """Store a reference to the PipelineTask for proper EndFrame delivery."""
+        self._pipeline_task = task
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -129,7 +134,12 @@ class SilenceWatchdog(FrameProcessor):
                     )
                     # Give TTS time to play goodbye before ending
                     await asyncio.sleep(4.0)
-                    await self.push_frame(EndFrame())
+                    # Must use queue_frame on the PipelineTask (not push_frame)
+                    # so EndFrame is properly broadcast to all processors
+                    if self._pipeline_task:
+                        await self._pipeline_task.queue_frame(EndFrame())
+                    else:
+                        await self.push_frame(EndFrame())
                     return
 
         except asyncio.CancelledError:
