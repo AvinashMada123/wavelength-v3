@@ -20,7 +20,6 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.user_idle_processor import UserIdleProcessor
 from app.serializers.plivo_pcm import PlivoPCMFrameSerializer
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
@@ -37,8 +36,8 @@ from app.config import settings
 from app.models.bot_config import BotConfig
 from app.models.schemas import CallContext
 from app.pipeline.call_guard import CallGuard
-from app.pipeline.idle_handler import IdleEscalationHandler
 from app.pipeline.phrase_aggregator import PhraseTextAggregator
+from app.pipeline.silence_watchdog import SilenceWatchdog
 
 _timing_logger = structlog.get_logger("pipeline.timing")
 logger = structlog.get_logger(__name__)
@@ -1374,21 +1373,13 @@ async def build_pipeline(
     # on Deepgram, Hindi/Hinglish is now transcribed properly. If STT still
     # misses something, the idle handler (below) will re-engage after timeout.
 
-    # --- Idle handler ---
-    idle_handler = IdleEscalationHandler(
-        silence_timeout=call_context.silence_timeout_secs,
-    )
-
-    async def on_idle(processor, retry_count):
-        """Called by UserIdleProcessor when user is idle. Returns True to keep monitoring."""
-        return await idle_handler.on_idle(processor, retry_count)
-
-    # Minimum 12s: idle timer counts from last USER speech, not from when bot
-    # finishes speaking. Short timeouts fire while TTS is still playing.
-    idle_timeout = max(float(call_context.silence_timeout_secs), 12.0)
-    user_idle = UserIdleProcessor(
-        callback=on_idle,
-        timeout=idle_timeout,
+    # --- Silence watchdog ---
+    # Replaces deprecated UserIdleProcessor which fails to fire with Sarvam STT.
+    # Uses polling-based timer: 1st timeout → "Hello?", 2nd → goodbye + hangup.
+    silence_timeout = max(float(call_context.silence_timeout_secs), 12.0)
+    silence_watchdog = SilenceWatchdog(
+        timeout=silence_timeout,
+        call_sid=call_context.call_sid,
     )
 
     # --- Call guard (voicemail / hold / DND detection + custom red flags) ---
@@ -1414,7 +1405,7 @@ async def build_pipeline(
             stt,
             call_guard,
             tracker_post_stt,
-            user_idle,
+            silence_watchdog,
             context_aggregator.user(),
             llm,
             *tts_processors,
