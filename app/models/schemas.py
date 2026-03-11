@@ -140,6 +140,7 @@ class CreateBotConfigRequest(BaseModel):
     tts_style_prompt: str | None = None
     llm_provider: Literal["google", "groq"] = "google"
     llm_model: str = "gemini-2.5-flash"
+    llm_thinking_enabled: bool = False
     language: str = "en-IN"
     system_prompt_template: str
     context_variables: dict[str, str] = Field(default_factory=dict)
@@ -175,6 +176,7 @@ class UpdateBotConfigRequest(BaseModel):
     tts_style_prompt: str | None = None
     llm_provider: Literal["google", "groq"] | None = None
     llm_model: str | None = None
+    llm_thinking_enabled: bool | None = None
     language: str | None = None
     system_prompt_template: str | None = None
     context_variables: dict[str, str] | None = None
@@ -220,6 +222,7 @@ class BotConfigResponse(BaseModel):
     tts_style_prompt: str | None
     llm_provider: str
     llm_model: str
+    llm_thinking_enabled: bool
     language: str
     system_prompt_template: str
     context_variables: dict[str, str]

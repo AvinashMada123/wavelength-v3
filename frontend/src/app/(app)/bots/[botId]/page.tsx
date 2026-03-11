@@ -71,6 +71,7 @@ interface BotForm {
   tts_style_prompt: string;
   llm_provider: "google" | "groq";
   llm_model: string;
+  llm_thinking_enabled: boolean;
   language: string;
   system_prompt_template: string;
   context_variables: Record<string, string>;
@@ -104,6 +105,7 @@ const EMPTY_FORM: BotForm = {
   tts_style_prompt: "",
   llm_provider: "google",
   llm_model: "gemini-2.5-flash",
+  llm_thinking_enabled: false,
   language: "en-IN",
   system_prompt_template: "",
   context_variables: {},
@@ -154,6 +156,7 @@ function botToForm(bot: BotConfig): BotForm {
     tts_style_prompt: bot.tts_style_prompt || "",
     llm_provider: bot.llm_provider || "google",
     llm_model: bot.llm_model || "gemini-2.5-flash",
+    llm_thinking_enabled: bot.llm_thinking_enabled ?? false,
     language: bot.language || "en-IN",
     system_prompt_template: bot.system_prompt_template,
     context_variables: bot.context_variables || {},
@@ -895,6 +898,26 @@ export default function BotEditorPage() {
                             </Section>
                           </>
                         )}
+
+                        <Separator />
+
+                        <Section
+                          title="AI Thinking"
+                          description="Control whether the AI reasons deeply before responding. Turning this off reduces cost and latency."
+                        >
+                          <div className="flex items-center justify-between rounded-lg border p-3">
+                            <div className="space-y-0.5">
+                              <Label>Enable Thinking</Label>
+                              <p className="text-xs text-muted-foreground">
+                                Uses more tokens for deeper reasoning. Off is recommended for most voice bots.
+                              </p>
+                            </div>
+                            <Switch
+                              checked={form.llm_thinking_enabled}
+                              onCheckedChange={(v) => setField("llm_thinking_enabled", v)}
+                            />
+                          </div>
+                        </Section>
 
                         <Separator />
 
