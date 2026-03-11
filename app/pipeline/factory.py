@@ -15,7 +15,7 @@ from deepgram import LiveOptions
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.audio.interruptions.min_words_interruption_strategy import MinWordsInterruptionStrategy
-from pipecat.frames.frames import EndFrame, STTUpdateSettingsFrame, TTSUpdateSettingsFrame
+from pipecat.frames.frames import EndFrame, TTSUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
@@ -65,6 +65,13 @@ UNIVERSAL PHONE RULES (always follow):
 - Ask at most 1 question per turn.
 - NEVER repeat a question you already asked, even rephrased.
 - If the user says they already answered, already have the details, is not interested, asks not to be called again, or says they are busy, driving, or unwell, acknowledge briefly and end the call.
+
+LANGUAGE SWITCHING (important):
+- Speech recognition outputs in Devanagari script even when the customer speaks English (e.g. "English" appears as "इंग्लिश", "little more" appears as "लिटिल मोर").
+- When the customer says they prefer English or you can tell from context they are speaking English (Devanagari transliterations of English words), call switch_language with "en-IN" and respond in English.
+- When the customer speaks Hindi or prefers Hindi, call switch_language with "hi-IN" and respond in Hindi.
+- You MUST call switch_language early — as soon as the customer indicates their language preference in the first exchange.
+- After switching, always respond in the chosen language. Say numbers in that language (e.g. "seven" in English, not "saat").
 """
 
 # Map BCP-47 language codes → pipecat Language enum names
@@ -895,13 +902,16 @@ def _build_switch_language_tool():
     return FunctionSchema(
         name="switch_language",
         description=(
-            "Switch the conversation language for both speech recognition and text-to-speech. "
-            "Call this when:\n"
-            "1) The customer explicitly asks to speak in a different language "
-            "(e.g., 'Hindi mein baat karo', 'Can we talk in Tamil?').\n"
-            "2) You detect the customer is consistently speaking in a language different "
-            "from the current one (e.g., they reply in Hindi but the call started in English).\n\n"
-            "After calling this, continue the conversation in the new language."
+            "Switch TTS voice language so the bot speaks in the customer's preferred language. "
+            "IMPORTANT: Speech recognition outputs in Devanagari script even for English speech "
+            "(e.g. 'English' appears as 'इंग्लिश', 'seven' appears as 'सेवन'). "
+            "Call this IMMEDIATELY when:\n"
+            "1) Customer says they prefer a language (e.g. 'इंग्लिश' means they want English → use en-IN).\n"
+            "2) Customer speaks English words transliterated in Devanagari "
+            "(e.g. 'लिटिल मोर ऑर्गेनाइज्ड' = 'little more organized' → use en-IN).\n"
+            "3) Customer speaks native Hindi/regional language → use hi-IN or appropriate code.\n\n"
+            "After switching, respond ONLY in the chosen language. "
+            "Say numbers in that language (seven, not saat, when English)."
         ),
         properties={
             "language": {
@@ -1391,8 +1401,8 @@ async def build_pipeline(
     context = OpenAILLMContext(messages=messages)
 
     # --- Switch-language tool ---
-    # Allows LLM to change TTS+STT language mid-call when user speaks
-    # a different language or explicitly requests one.
+    # Allows LLM to change TTS language mid-call when user speaks
+    # a different language or explicitly requests one. STT stays pinned.
     _LANG_CODE_TO_PIPECAT = {
         "en-IN": "EN_IN", "hi-IN": "HI_IN", "bn-IN": "BN_IN",
         "gu-IN": "GU_IN", "kn-IN": "KN_IN", "ml-IN": "ML_IN",
@@ -1404,19 +1414,16 @@ async def build_pipeline(
         lang_code = params.arguments.get("language", "en-IN")
         logger.info("switch_language_triggered", call_sid=call_context.call_sid, language=lang_code)
 
-        from pipecat.services.settings import TTSSettings, STTSettings
+        from pipecat.services.settings import TTSSettings
         from pipecat.transcriptions.language import Language as PcLanguage
 
         enum_name = _LANG_CODE_TO_PIPECAT.get(lang_code, "EN_IN")
         lang_enum = getattr(PcLanguage, enum_name, PcLanguage.EN_IN)
 
-        # Update TTS language
+        # Update TTS language only — STT stays pinned to its configured language
         if _task_ref[0]:
             await _task_ref[0].queue_frame(
                 TTSUpdateSettingsFrame(delta=TTSSettings(language=lang_enum))
-            )
-            await _task_ref[0].queue_frame(
-                STTUpdateSettingsFrame(delta=STTSettings(language=lang_enum))
             )
 
         lang_names = {
