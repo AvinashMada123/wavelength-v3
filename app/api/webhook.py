@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from app.bot_config.loader import BotConfigLoader
 from app.database import get_db_session
 from app.models.call_queue import QueuedCall
+from app.services.billing import check_org_credits
 from app.models.schemas import QueueEnqueueResponse
 
 logger = structlog.get_logger(__name__)
@@ -121,6 +122,15 @@ async def webhook_trigger_call(request: Request):
         raise HTTPException(status_code=404, detail="Bot config not found.")
 
     contact_name = contact_name or "Customer"
+
+    # --- Check credits before enqueuing ---
+    async with get_db_session() as db:
+        has_credits, balance = await check_org_credits(db, bot_config.org_id)
+    if not has_credits:
+        raise HTTPException(
+            status_code=402,
+            detail=f"Insufficient credits (balance: {float(balance):.2f}). Please recharge.",
+        )
 
     # --- Enqueue call instead of firing immediately ---
     async with get_db_session() as db:

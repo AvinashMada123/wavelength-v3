@@ -27,6 +27,7 @@ from app.models.organization import Organization
 from app.models.phone_number import PhoneNumber
 from app.plivo.client import make_outbound_call as plivo_make_call
 from app.services import circuit_breaker
+from app.services.billing import check_org_credits
 from app.twilio.client import make_outbound_call as twilio_make_call
 
 logger = structlog.get_logger(__name__)
@@ -278,6 +279,22 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
                 queued_call.processed_at = datetime.now(timezone.utc)
                 await db.commit()
                 await circuit_breaker.record_failure(db, bot_id, "Bot config not found")
+                await db.commit()
+                return
+
+            # Check org has enough credits before dialing
+            has_credits, balance = await check_org_credits(db, bot_config.org_id)
+            if not has_credits:
+                logger.warning(
+                    "queue_call_insufficient_credits",
+                    queue_id=str(queue_id),
+                    bot_id=str(bot_id),
+                    org_id=str(bot_config.org_id),
+                    balance=float(balance),
+                )
+                queued_call.status = "failed"
+                queued_call.error_message = "Insufficient credits"
+                queued_call.processed_at = datetime.now(timezone.utc)
                 await db.commit()
                 return
 

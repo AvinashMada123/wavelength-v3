@@ -15,6 +15,22 @@ ZERO_CREDITS = Decimal("0.00")
 PER_MINUTE_RATE = Decimal("1.00")
 SECONDS_PER_MINUTE = Decimal("60")
 CENT_PRECISION = Decimal("0.01")
+# Minimum balance required to start a new call (1 minute worth of credits)
+MIN_BALANCE_TO_CALL = PER_MINUTE_RATE
+
+
+async def check_org_credits(db: AsyncSession, org_id) -> tuple[bool, Decimal]:
+    """Check if an org has enough credits to start a call.
+
+    Returns (has_credits, current_balance).
+    """
+    result = await db.execute(
+        select(Organization.credit_balance).where(Organization.id == org_id)
+    )
+    balance = result.scalar_one_or_none()
+    if balance is None:
+        return False, ZERO_CREDITS
+    return balance >= MIN_BALANCE_TO_CALL, balance
 
 
 def calculate_call_credits(duration_seconds: int | None) -> Decimal:

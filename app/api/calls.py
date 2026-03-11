@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import get_current_user, get_current_org
 from app.bot_config.loader import BotConfigLoader
 from app.database import get_db
+from app.services.billing import check_org_credits
 from app.models.call_log import CallLog
 from app.models.call_analytics import CallAnalytics
 from app.models.call_queue import QueuedCall
@@ -129,7 +130,15 @@ async def trigger_call(
     if not bot_config or bot_config.org_id != org_id:
         raise HTTPException(status_code=404, detail="Bot config not found")
 
-    # 2. Enqueue call
+    # 2. Check credits before enqueuing
+    has_credits, balance = await check_org_credits(db, org_id)
+    if not has_credits:
+        raise HTTPException(
+            status_code=402,
+            detail=f"Insufficient credits. Current balance: {float(balance):.2f}. Please recharge to continue making calls.",
+        )
+
+    # 3. Enqueue call
     queued_call = QueuedCall(
         org_id=org_id,
         bot_id=bot_config.id,
