@@ -15,7 +15,7 @@ from deepgram import LiveOptions
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.audio.interruptions.min_words_interruption_strategy import MinWordsInterruptionStrategy
-from pipecat.frames.frames import EndFrame
+from pipecat.frames.frames import EndFrame, STTUpdateSettingsFrame, TTSUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
@@ -888,6 +888,35 @@ def _build_end_call_tool():
     )
 
 
+def _build_switch_language_tool():
+    """Build the switch_language LLM tool for mid-call language switching."""
+    from pipecat.adapters.schemas.function_schema import FunctionSchema
+
+    return FunctionSchema(
+        name="switch_language",
+        description=(
+            "Switch the conversation language for both speech recognition and text-to-speech. "
+            "Call this when:\n"
+            "1) The customer explicitly asks to speak in a different language "
+            "(e.g., 'Hindi mein baat karo', 'Can we talk in Tamil?').\n"
+            "2) You detect the customer is consistently speaking in a language different "
+            "from the current one (e.g., they reply in Hindi but the call started in English).\n\n"
+            "After calling this, continue the conversation in the new language."
+        ),
+        properties={
+            "language": {
+                "type": "string",
+                "enum": [
+                    "en-IN", "hi-IN", "bn-IN", "gu-IN", "kn-IN",
+                    "ml-IN", "mr-IN", "ta-IN", "te-IN", "pa-IN", "or-IN",
+                ],
+                "description": "BCP-47 language code to switch to",
+            }
+        },
+        required=["language"],
+    )
+
+
 async def build_pipeline(
     bot_config: BotConfig,
     call_context: CallContext,
@@ -1354,11 +1383,52 @@ async def build_pipeline(
         messages.append({"role": "assistant", "content": greeting_text})
     context = OpenAILLMContext(messages=messages)
 
+    # --- Switch-language tool ---
+    # Allows LLM to change TTS+STT language mid-call when user speaks
+    # a different language or explicitly requests one.
+    _LANG_CODE_TO_PIPECAT = {
+        "en-IN": "EN_IN", "hi-IN": "HI_IN", "bn-IN": "BN_IN",
+        "gu-IN": "GU_IN", "kn-IN": "KN_IN", "ml-IN": "ML_IN",
+        "mr-IN": "MR_IN", "ta-IN": "TA_IN", "te-IN": "TE_IN",
+        "pa-IN": "PA_IN", "or-IN": "OR_IN",
+    }
+
+    async def handle_switch_language(params):
+        lang_code = params.arguments.get("language", "en-IN")
+        logger.info("switch_language_triggered", call_sid=call_context.call_sid, language=lang_code)
+
+        from pipecat.services.settings import TTSSettings, STTSettings
+        from pipecat.transcriptions.language import Language as PcLanguage
+
+        enum_name = _LANG_CODE_TO_PIPECAT.get(lang_code, "EN_IN")
+        lang_enum = getattr(PcLanguage, enum_name, PcLanguage.EN_IN)
+
+        # Update TTS language
+        if _task_ref[0]:
+            await _task_ref[0].queue_frame(
+                TTSUpdateSettingsFrame(delta=TTSSettings(language=lang_enum))
+            )
+            await _task_ref[0].queue_frame(
+                STTUpdateSettingsFrame(delta=STTSettings(language=lang_enum))
+            )
+
+        lang_names = {
+            "en-IN": "English", "hi-IN": "Hindi", "bn-IN": "Bengali",
+            "gu-IN": "Gujarati", "kn-IN": "Kannada", "ml-IN": "Malayalam",
+            "mr-IN": "Marathi", "ta-IN": "Tamil", "te-IN": "Telugu",
+            "pa-IN": "Punjabi", "or-IN": "Odia",
+        }
+        name = lang_names.get(lang_code, lang_code)
+        await params.result_callback(f"Language switched to {name}. Continue the conversation in {name}.")
+
+    if not _groq_no_tools:
+        llm.register_function("switch_language", handle_switch_language)
+
     # Set tools as provider-agnostic ToolsSchema — adapters auto-convert per LLM provider
     if not _groq_no_tools:
         from pipecat.adapters.schemas.tools_schema import ToolsSchema
 
-        standard_tools = [_build_end_call_tool()]
+        standard_tools = [_build_end_call_tool(), _build_switch_language_tool()]
         if workflow_tool_schema:
             standard_tools.append(workflow_tool_schema)
         context.set_tools(ToolsSchema(standard_tools=standard_tools))
