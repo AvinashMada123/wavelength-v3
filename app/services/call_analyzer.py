@@ -40,12 +40,14 @@ class CallAnalyzer:
         system_prompt: str,
         realtime_red_flags: list[dict] | None = None,
         call_sid: str | None = None,
+        thinking_enabled: bool = False,
     ) -> CallAnalysis:
         """
         Analyze a call transcript against the bot's goal configuration.
 
         When goal_config is None, falls back to generic summary + interest.
         """
+        self._thinking_enabled = thinking_enabled
         if not transcript:
             return CallAnalysis()
 
@@ -290,6 +292,10 @@ class CallAnalyzer:
         from google import genai
         from app.config import settings
 
+        thinking_config = None
+        if not getattr(self, "_thinking_enabled", True):
+            thinking_config = genai.types.ThinkingConfig(thinking_budget=0)
+
         for attempt in range(max_retries):
             try:
                 client = genai.Client(
@@ -303,6 +309,7 @@ class CallAnalyzer:
                     config=genai.types.GenerateContentConfig(
                         max_output_tokens=1024,
                         temperature=temperature,
+                        thinking_config=thinking_config,
                     ),
                 )
                 return response

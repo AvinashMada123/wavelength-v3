@@ -49,6 +49,7 @@ class BotConfig(Base):
     greeting_template: Mapped[str | None] = mapped_column(Text)
     llm_provider: Mapped[str] = mapped_column(Text, nullable=False, server_default="google")
     llm_model: Mapped[str] = mapped_column(Text, nullable=False, server_default="gemini-2.5-flash")
+    llm_thinking_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     goal_config: Mapped[dict | None] = mapped_column(JSONB)
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False

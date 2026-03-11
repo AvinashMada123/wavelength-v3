@@ -1271,6 +1271,13 @@ async def build_pipeline(
         )
         logger.info("llm_provider_selected", provider="groq", model=groq_model)
     else:
+        # Thinking toggle: when enabled, use dynamic budget (-1) so the model
+        # decides how much to think.  When disabled, don't pass a thinking
+        # config — Pipecat's default sets thinking_budget=0 for 2.5 Flash.
+        from pipecat.services.google.llm import GoogleThinkingConfig
+
+        thinking_enabled = getattr(bot_config, "llm_thinking_enabled", False)
+        thinking_cfg = GoogleThinkingConfig(thinking_budget=-1) if thinking_enabled else None
         llm = GoogleVertexLLMService(
             credentials_path=settings.GOOGLE_APPLICATION_CREDENTIALS,
             project_id=settings.GOOGLE_CLOUD_PROJECT,
@@ -1279,10 +1286,12 @@ async def build_pipeline(
             params=GoogleLLMService.InputParams(
                 temperature=0.7,
                 max_tokens=256,
+                thinking=thinking_cfg,
             ),
         )
         logger.info("llm_provider_selected", provider="google",
-                     model=getattr(bot_config, "llm_model", "gemini-2.5-flash"))
+                     model=getattr(bot_config, "llm_model", "gemini-2.5-flash"),
+                     thinking_enabled=thinking_enabled)
 
     # --- End-call tool ---
     # Task ref is set after PipelineTask creation (handler needs it to queue EndFrame)

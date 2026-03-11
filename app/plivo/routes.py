@@ -496,6 +496,7 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
                 system_prompt=ctx.filled_prompt,
                 realtime_red_flags=pipeline_result.get("realtime_red_flags", []),
                 call_sid=call_sid,
+                thinking_enabled=getattr(bot_config, "llm_thinking_enabled", False),
             )
             summary = analysis.summary
             interest_level = analysis.interest_level
