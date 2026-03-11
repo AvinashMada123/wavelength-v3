@@ -1132,14 +1132,19 @@ async def build_pipeline(
                                            signal=signal)
                     elif message.type == "data":
                         transcript = getattr(message.data, 'transcript', None)
+                        lang_code = getattr(message.data, 'language_code', None)
                         logger.info("sarvam_stt_transcript_received",
                                     call_sid=self._call_sid_tag,
                                     transcript=transcript,
+                                    language_code=lang_code,
                                     end_speech_pending=self._end_speech_pending)
                         # Cancel timeout — transcript arrived
                         if self._end_speech_timeout_task:
                             self._end_speech_timeout_task.cancel()
                             self._end_speech_timeout_task = None
+                        # Prepend detected language so LLM knows what language the user spoke
+                        if transcript and lang_code:
+                            message.data.transcript = f"[{lang_code}] {transcript}"
                         # Process transcript first (creates TranscriptionFrame)
                         await super()._handle_message(message)
                         # NOW send the buffered stop frame so aggregator has the transcript
@@ -1181,7 +1186,7 @@ async def build_pipeline(
             input_audio_codec="wav",
             params=SarvamSTTService.InputParams(
                 language=None,  # language_code="unknown" — auto-detect
-                mode="translit",
+                mode="codemix",
                 vad_signals=True,
                 high_vad_sensitivity=True,
             ),
@@ -1192,7 +1197,7 @@ async def build_pipeline(
             "stt_provider_selected",
             provider="sarvam",
             model="saaras:v3",
-            mode="translit",
+            mode="codemix",
             language="unknown",
         )
     else:
