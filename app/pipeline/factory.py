@@ -1175,13 +1175,30 @@ async def build_pipeline(
                 except asyncio.CancelledError:
                     pass
 
+        _SARVAM_LANG_MAP = {
+            "hi-IN": PipecatLanguage.HI_IN,
+            "bn-IN": PipecatLanguage.BN_IN,
+            "gu-IN": PipecatLanguage.GU_IN,
+            "kn-IN": PipecatLanguage.KN_IN,
+            "ml-IN": PipecatLanguage.ML_IN,
+            "mr-IN": PipecatLanguage.MR_IN,
+            "ta-IN": PipecatLanguage.TA_IN,
+            "te-IN": PipecatLanguage.TE_IN,
+            "pa-IN": PipecatLanguage.PA_IN,
+            "or-IN": PipecatLanguage.OR_IN,
+            "as-IN": PipecatLanguage.AS_IN,
+            "ur-IN": PipecatLanguage.UR_IN,
+            "en-IN": PipecatLanguage.EN_IN,
+        }
+        sarvam_lang = _SARVAM_LANG_MAP.get(stt_language, PipecatLanguage.EN_IN)
+
         stt = _SafeSarvamSTT(
             api_key=settings.SARVAM_API_KEY,
             model="saaras:v3",
             sample_rate=16000,
             input_audio_codec="wav",
             params=SarvamSTTService.InputParams(
-                language=PipecatLanguage.HI_IN,
+                language=sarvam_lang,
                 mode="transcribe",
                 vad_signals=True,
                 high_vad_sensitivity=True,
@@ -1194,7 +1211,7 @@ async def build_pipeline(
             provider="sarvam",
             model="saaras:v3",
             mode="transcribe",
-            language="hi-IN",
+            language=stt_language,
         )
     else:
         # Use multi-language detection for Indian languages — users frequently
