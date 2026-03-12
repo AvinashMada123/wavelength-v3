@@ -1225,23 +1225,22 @@ async def build_pipeline(
             language=stt_language,
         )
     else:
-        # Use multi-language detection for Indian languages — users frequently
-        # code-switch between Hindi/Hinglish/English and en-IN misses Hindi entirely,
-        # causing bot to go silent (no transcript → no LLM response).
-        _MULTILANG_PREFIXES = ("en-IN", "hi", "mr", "ta", "te", "bn", "gu", "kn", "ml", "pa", "or", "as", "ur")
-        deepgram_language = "multi" if stt_language.startswith(_MULTILANG_PREFIXES) else stt_language
+        # nova-3 with multi-language support — handles code-switching between
+        # Hindi/Hinglish/English and other Indian languages natively.
+        deepgram_language = "multi" if stt_language in ("unknown", "en-IN", "hi-IN") else stt_language
         stt = DeepgramSTTService(
             api_key=settings.DEEPGRAM_API_KEY,
             live_options=LiveOptions(
-                model="nova-2-general",
+                model="nova-3",
                 language=deepgram_language,
                 interim_results=True,
                 utterance_end_ms="1000",
+                endpointing=10,
                 punctuate=True,
                 smart_format=True,
             ),
         )
-        logger.info("stt_provider_selected", provider="deepgram", model="nova-2-general", language=deepgram_language)
+        logger.info("stt_provider_selected", provider="deepgram", model="nova-3", language=deepgram_language)
 
     # --- LLM ---
     llm_provider = getattr(bot_config, "llm_provider", "google")

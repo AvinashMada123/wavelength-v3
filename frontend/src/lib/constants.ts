@@ -106,6 +106,12 @@ export const STT_PROVIDER_OPTIONS = [
   { value: "sarvam", label: "Sarvam AI" },
 ] as const;
 
+// Client-facing labels (no vendor names)
+export const STT_PROVIDER_OPTIONS_CLIENT = [
+  { value: "sarvam", label: "Model 1" },
+  { value: "deepgram", label: "Model 2" },
+] as const;
+
 export const TTS_PROVIDER_OPTIONS = [
   { value: "gemini", label: "Gemini" },
   { value: "sarvam", label: "Sarvam AI" },

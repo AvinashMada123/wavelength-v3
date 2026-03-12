@@ -50,7 +50,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 import { useAuth } from "@/contexts/auth-context";
 import { fetchBot, createBot, updateBot } from "@/lib/api";
-import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS, LLM_PROVIDER_OPTIONS, LLM_MODEL_OPTIONS } from "@/lib/constants";
+import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS_CLIENT, LLM_PROVIDER_OPTIONS, LLM_MODEL_OPTIONS } from "@/lib/constants";
 import type { BotConfig, GHLWorkflow, GoalConfig, SuccessCriterion, RedFlagConfig, DataCaptureField } from "@/types/api";
 
 // ---------------------------------------------------------------------------
@@ -740,57 +740,52 @@ export default function BotEditorPage() {
                       <CardContent className="pt-6 space-y-8">
                         <Section
                           title="Voice & Language"
-                          description={isSuperAdmin
-                            ? "Choose the STT/TTS providers, voice personality, and language for your agent."
-                            : "Choose the voice personality and language for your agent."
-                          }
+                          description="Choose the voice personality, speech recognition model, and language for your agent."
                         >
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                            <div className="space-y-2">
+                              <Label>{isSuperAdmin ? "STT Provider" : "Speech Recognition"}</Label>
+                              <Select
+                                value={form.stt_provider}
+                                onValueChange={(v) =>
+                                  setField("stt_provider", v as "deepgram" | "sarvam")
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select model..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {(isSuperAdmin ? STT_PROVIDER_OPTIONS : STT_PROVIDER_OPTIONS_CLIENT).map((p) => (
+                                    <SelectItem key={p.value} value={p.value}>
+                                      {p.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
                             {isSuperAdmin && (
-                              <>
-                                <div className="space-y-2">
-                                  <Label>STT Provider</Label>
-                                  <Select
-                                    value={form.stt_provider}
-                                    onValueChange={(v) =>
-                                      setField("stt_provider", v as "deepgram" | "sarvam")
-                                    }
-                                  >
-                                    <SelectTrigger>
-                                      <SelectValue placeholder="Select STT provider..." />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {STT_PROVIDER_OPTIONS.map((p) => (
-                                        <SelectItem key={p.value} value={p.value}>
-                                          {p.label}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                                <div className="space-y-2">
-                                  <Label>TTS Provider</Label>
-                                  <Select
-                                    value={form.tts_provider}
-                                    onValueChange={(v) => {
-                                      setField("tts_provider", v as "gemini" | "sarvam");
-                                      // Reset voice to provider default
-                                      setField("tts_voice", v === "sarvam" ? "priya" : "Kore");
-                                    }}
-                                  >
-                                    <SelectTrigger>
-                                      <SelectValue placeholder="Select provider..." />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {TTS_PROVIDER_OPTIONS.map((p) => (
-                                        <SelectItem key={p.value} value={p.value}>
-                                          {p.label}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              </>
+                              <div className="space-y-2">
+                                <Label>TTS Provider</Label>
+                                <Select
+                                  value={form.tts_provider}
+                                  onValueChange={(v) => {
+                                    setField("tts_provider", v as "gemini" | "sarvam");
+                                    // Reset voice to provider default
+                                    setField("tts_voice", v === "sarvam" ? "priya" : "Kore");
+                                  }}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Select provider..." />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {TTS_PROVIDER_OPTIONS.map((p) => (
+                                      <SelectItem key={p.value} value={p.value}>
+                                        {p.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
                             )}
                             <div className="space-y-2">
                               <Label>Voice</Label>
