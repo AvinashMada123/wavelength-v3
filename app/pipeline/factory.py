@@ -998,21 +998,16 @@ async def build_pipeline(
 
     if stt_provider == "sarvam":
         # Sarvam has server-side VAD (vad_signals=True, high_vad_sensitivity=True).
-        # We ALSO add a local SileroVAD with low min_volume so short utterances
-        # like "ha"/"haan" trigger a flush() → forces Sarvam to return whatever
-        # partial transcript it has, even if its server-side VAD missed the speech.
+        # No local SileroVAD — it force-flushes Sarvam on short utterances causing
+        # hallucinated transcripts (e.g. "Okay, bye." from a 400ms "haan").
         transport_params = FastAPIWebsocketParams(
             audio_out_enabled=True,
             audio_out_sample_rate=16000,
             audio_out_10ms_chunks=10,
             add_wav_header=False,
             serializer=serializer,
-            vad_enabled=True,
+            vad_enabled=False,
             vad_audio_passthrough=True,
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(
-                stop_secs=0.3,
-                min_volume=0.5,
-            )),
         )
     else:
         # Deepgram: use local Silero VAD + SmartTurn for turn detection.
@@ -1495,8 +1490,7 @@ async def build_pipeline(
     if not _groq_no_tools:
         from pipecat.adapters.schemas.tools_schema import ToolsSchema
 
-        _allowed_langs = getattr(bot_config, "allowed_languages", None) or []
-        standard_tools = [_build_end_call_tool(), _build_switch_language_tool(_allowed_langs)]
+        standard_tools = [_build_end_call_tool()]
         if workflow_tool_schema:
             standard_tools.append(workflow_tool_schema)
         context.set_tools(ToolsSchema(standard_tools=standard_tools))
