@@ -1200,8 +1200,8 @@ async def build_pipeline(
             "ur-IN": PipecatLanguage.UR_IN,
             "en-IN": PipecatLanguage.EN_IN,
         }
-        # "unknown" → language=None so Sarvam falls back to "unknown" (auto-detect)
-        sarvam_lang = None if stt_language == "unknown" else _SARVAM_LANG_MAP.get(stt_language, PipecatLanguage.EN_IN)
+        # "unknown"/"multi" → language=None so Sarvam falls back to "unknown" (auto-detect)
+        sarvam_lang = None if stt_language in ("unknown", "multi") else _SARVAM_LANG_MAP.get(stt_language, PipecatLanguage.EN_IN)
 
         stt = _SafeSarvamSTT(
             api_key=settings.SARVAM_API_KEY,
@@ -1338,7 +1338,7 @@ async def build_pipeline(
         # processor stays paused → no more tokens flow → deadlock.
         # SENTENCE mode (default) sends full sentences which always exceed
         # min_buffer_size, avoiding the deadlock.
-        tts_lang = "en-IN" if stt_language == "unknown" else stt_language
+        tts_lang = "en-IN" if stt_language in ("unknown", "multi") else stt_language
         tts = SarvamTTSService(
             api_key=settings.SARVAM_API_KEY,
             model="bulbul:v3",
@@ -1390,7 +1390,7 @@ async def build_pipeline(
 
         tts = GoogleCloudGRPCTTSService(
             voice_name=call_context.tts_voice,
-            language_code="en-IN" if stt_language == "unknown" else stt_language,
+            language_code="en-IN" if stt_language in ("unknown", "multi") else stt_language,
             sample_rate=16000,
             audio_encoding="PCM",
         )

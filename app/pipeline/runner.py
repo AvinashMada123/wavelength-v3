@@ -85,7 +85,7 @@ async def _synthesize_greeting(
         elif tts_provider == "sarvam":
             from pipecat.services.sarvam.tts import SarvamTTSService
 
-            tts_lang = "en-IN" if stt_language == "unknown" else stt_language
+            tts_lang = "en-IN" if stt_language in ("unknown", "multi") else stt_language
             tts = SarvamTTSService(
                 api_key=settings.SARVAM_API_KEY,
                 model="bulbul:v3",
