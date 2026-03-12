@@ -998,16 +998,21 @@ async def build_pipeline(
 
     if stt_provider == "sarvam":
         # Sarvam has server-side VAD (vad_signals=True, high_vad_sensitivity=True).
-        # No local SileroVAD — it force-flushes Sarvam on short utterances causing
-        # hallucinated transcripts (e.g. "Okay, bye." from a 400ms "haan").
+        # Local SileroVAD is needed so the pipeline knows when the user speaks,
+        # but we do NOT flush Sarvam on vad_stopped (see _SafeSarvamSTT) to avoid
+        # hallucinated transcripts from short utterance fragments.
         transport_params = FastAPIWebsocketParams(
             audio_out_enabled=True,
             audio_out_sample_rate=16000,
             audio_out_10ms_chunks=10,
             add_wav_header=False,
             serializer=serializer,
-            vad_enabled=False,
+            vad_enabled=True,
             vad_audio_passthrough=True,
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(
+                stop_secs=0.3,
+                min_volume=0.5,
+            )),
         )
     else:
         # Deepgram: use local Silero VAD + SmartTurn for turn detection.
@@ -1117,18 +1122,9 @@ async def build_pipeline(
                     self._end_speech_timeout_task = asyncio.create_task(
                         self._end_speech_timeout()
                     )
-                    # Flush Sarvam to finalize transcript
-                    if self._socket_client:
-                        try:
-                            await self._socket_client.flush()
-                        except Exception as e:
-                            logger.warning(
-                                "sarvam_stt_flush_error",
-                                call_sid=self._call_sid_tag,
-                                error=str(e),
-                            )
-                    # Don't call super — prevents frame from reaching aggregator
-                    # before transcript. Also skip base class's redundant flush().
+                    # Do NOT flush Sarvam here — flushing on short utterances causes
+                    # hallucinated transcripts. Let Sarvam's server-side VAD handle
+                    # transcript timing. Skip super() to avoid base class flush().
                     return
 
                 # Let VADUserStartedSpeakingFrame through and start metrics
