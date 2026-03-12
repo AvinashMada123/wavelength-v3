@@ -1064,6 +1064,7 @@ async def build_pipeline(
                 self._audio_frames_sent = 0
                 self._last_audio_log_time = 0.0
                 self._call_sid_tag = ""  # Set after pipeline starts
+                self._vad_speech_start: float | None = None  # Track speech start for min duration
 
             async def _update_settings(self, delta):
                 """Apply language changes by disconnecting and reconnecting to Sarvam."""
@@ -1111,24 +1112,38 @@ async def build_pipeline(
                 # flush returns the transcript — same race condition as Sarvam's
                 # END_SPEECH. Fix: intercept, buffer, flush, emit after transcript.
                 if isinstance(frame, VADUserStoppedSpeakingFrame):
+                    speech_dur = (time.monotonic() - self._vad_speech_start) if self._vad_speech_start else 0.0
                     logger.info(
                         "sarvam_stt_vad_stopped",
                         call_sid=self._call_sid_tag,
                         end_speech_pending=self._end_speech_pending,
+                        speech_duration_ms=int(speech_dur * 1000),
                     )
+                    self._vad_speech_start = None
                     self._end_speech_pending = True
                     if self._end_speech_timeout_task:
                         self._end_speech_timeout_task.cancel()
                     self._end_speech_timeout_task = asyncio.create_task(
                         self._end_speech_timeout()
                     )
-                    # Do NOT flush Sarvam here — flushing on short utterances causes
-                    # hallucinated transcripts. Let Sarvam's server-side VAD handle
-                    # transcript timing. Skip super() to avoid base class flush().
+                    # Only flush if speech was long enough (>600ms) to avoid
+                    # hallucinated transcripts from very short utterance fragments.
+                    if speech_dur >= 0.6 and self._socket_client:
+                        try:
+                            await self._socket_client.flush()
+                        except Exception as e:
+                            logger.warning(
+                                "sarvam_stt_flush_error",
+                                call_sid=self._call_sid_tag,
+                                error=str(e),
+                            )
+                    # Skip super() to avoid base class flush() and prevent frame
+                    # from reaching aggregator before transcript arrives.
                     return
 
                 # Let VADUserStartedSpeakingFrame through and start metrics
                 if isinstance(frame, VADUserStartedSpeakingFrame):
+                    self._vad_speech_start = time.monotonic()
                     await self._start_metrics()
 
                 await super().process_frame(frame, direction)
