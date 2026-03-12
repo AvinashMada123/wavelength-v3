@@ -142,6 +142,7 @@ class CreateBotConfigRequest(BaseModel):
     llm_model: str = "gemini-2.5-flash"
     llm_thinking_enabled: bool = False
     language: str = "en-IN"
+    allowed_languages: list[str] = Field(default_factory=list)
     system_prompt_template: str
     context_variables: dict[str, str] = Field(default_factory=dict)
     silence_timeout_secs: int = 5
@@ -178,6 +179,7 @@ class UpdateBotConfigRequest(BaseModel):
     llm_model: str | None = None
     llm_thinking_enabled: bool | None = None
     language: str | None = None
+    allowed_languages: list[str] | None = None
     system_prompt_template: str | None = None
     context_variables: dict[str, str] | None = None
     silence_timeout_secs: int | None = None
@@ -224,6 +226,7 @@ class BotConfigResponse(BaseModel):
     llm_model: str
     llm_thinking_enabled: bool
     language: str
+    allowed_languages: list[str]
     system_prompt_template: str
     context_variables: dict[str, str]
     silence_timeout_secs: int

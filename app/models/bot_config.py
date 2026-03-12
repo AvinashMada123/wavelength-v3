@@ -27,6 +27,7 @@ class BotConfig(Base):
     tts_voice: Mapped[str] = mapped_column(Text, nullable=False, server_default="Kore")
     tts_style_prompt: Mapped[str | None] = mapped_column(Text)
     language: Mapped[str] = mapped_column(Text, nullable=False, server_default="en-IN")
+    allowed_languages: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     system_prompt_template: Mapped[str] = mapped_column(Text, nullable=False)
     context_variables: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     silence_timeout_secs: Mapped[int] = mapped_column(Integer, nullable=False, server_default="5")

@@ -24,6 +24,7 @@ export interface BotConfig {
   llm_model: string;
   llm_thinking_enabled: boolean;
   language: string;
+  allowed_languages: string[];
   system_prompt_template: string;
   context_variables: Record<string, string>;
   silence_timeout_secs: number;
@@ -58,6 +59,7 @@ export interface CreateBotConfigRequest {
   llm_model?: string;
   llm_thinking_enabled?: boolean;
   language?: string;
+  allowed_languages?: string[];
   system_prompt_template: string;
   context_variables?: Record<string, string>;
   silence_timeout_secs?: number;
@@ -93,6 +95,7 @@ export interface UpdateBotConfigRequest {
   llm_model?: string | null;
   llm_thinking_enabled?: boolean | null;
   language?: string | null;
+  allowed_languages?: string[] | null;
   system_prompt_template?: string | null;
   context_variables?: Record<string, string> | null;
   silence_timeout_secs?: number | null;

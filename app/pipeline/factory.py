@@ -895,14 +895,41 @@ def _build_end_call_tool():
     )
 
 
-def _build_switch_language_tool():
-    """Build the switch_language LLM tool for mid-call language switching."""
+def _build_switch_language_tool(allowed_languages: list[str] | None = None):
+    """Build the switch_language LLM tool for mid-call language switching.
+
+    If *allowed_languages* is a non-empty list, constrain the enum to only
+    those language codes so the LLM cannot switch to unsupported languages.
+    """
     from pipecat.adapters.schemas.function_schema import FunctionSchema
+
+    _ALL_LANG_CODES = [
+        "en-IN", "hi-IN", "bn-IN", "gu-IN", "kn-IN",
+        "ml-IN", "mr-IN", "ta-IN", "te-IN", "pa-IN", "or-IN",
+    ]
+
+    lang_enum = (
+        [lc for lc in allowed_languages if lc in _ALL_LANG_CODES]
+        if allowed_languages
+        else _ALL_LANG_CODES
+    )
+    # Fallback: if filtering produced nothing, use all
+    if not lang_enum:
+        lang_enum = _ALL_LANG_CODES
+
+    lang_names_map = {
+        "en-IN": "English", "hi-IN": "Hindi", "bn-IN": "Bengali",
+        "gu-IN": "Gujarati", "kn-IN": "Kannada", "ml-IN": "Malayalam",
+        "mr-IN": "Marathi", "ta-IN": "Tamil", "te-IN": "Telugu",
+        "pa-IN": "Punjabi", "or-IN": "Odia",
+    }
+    allowed_str = ", ".join(lang_names_map.get(lc, lc) for lc in lang_enum)
 
     return FunctionSchema(
         name="switch_language",
         description=(
             "Switch TTS voice language so the bot speaks in the customer's preferred language. "
+            f"Allowed languages: {allowed_str}. "
             "IMPORTANT: Speech recognition outputs in Devanagari script even for English speech "
             "(e.g. 'English' appears as 'इंग्लिश', 'seven' appears as 'सेवन'). "
             "Call this IMMEDIATELY when:\n"
@@ -916,10 +943,7 @@ def _build_switch_language_tool():
         properties={
             "language": {
                 "type": "string",
-                "enum": [
-                    "en-IN", "hi-IN", "bn-IN", "gu-IN", "kn-IN",
-                    "ml-IN", "mr-IN", "ta-IN", "te-IN", "pa-IN", "or-IN",
-                ],
+                "enum": lang_enum,
                 "description": "BCP-47 language code to switch to",
             }
         },
@@ -1451,7 +1475,8 @@ async def build_pipeline(
     if not _groq_no_tools:
         from pipecat.adapters.schemas.tools_schema import ToolsSchema
 
-        standard_tools = [_build_end_call_tool(), _build_switch_language_tool()]
+        _allowed_langs = getattr(bot_config, "allowed_languages", None) or []
+        standard_tools = [_build_end_call_tool(), _build_switch_language_tool(_allowed_langs)]
         if workflow_tool_schema:
             standard_tools.append(workflow_tool_schema)
         context.set_tools(ToolsSchema(standard_tools=standard_tools))

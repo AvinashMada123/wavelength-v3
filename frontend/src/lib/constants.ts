@@ -186,6 +186,21 @@ export const DEEPGRAM_LANGUAGE_OPTIONS = [
 // Default fallback
 export const LANGUAGE_OPTIONS = SARVAM_LANGUAGE_OPTIONS;
 
+// Languages available for the switch_language tool (TTS switching during calls)
+export const SWITCH_LANGUAGE_OPTIONS = [
+  { value: "en-IN", label: "English" },
+  { value: "hi-IN", label: "Hindi" },
+  { value: "bn-IN", label: "Bengali" },
+  { value: "gu-IN", label: "Gujarati" },
+  { value: "kn-IN", label: "Kannada" },
+  { value: "ml-IN", label: "Malayalam" },
+  { value: "mr-IN", label: "Marathi" },
+  { value: "ta-IN", label: "Tamil" },
+  { value: "te-IN", label: "Telugu" },
+  { value: "pa-IN", label: "Punjabi" },
+  { value: "or-IN", label: "Odia" },
+];
+
 // Pre-defined template variables (always available, filled at call time)
 export const BUILTIN_VARIABLES = [
   "contact_name",
