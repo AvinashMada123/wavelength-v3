@@ -1020,7 +1020,7 @@ async def build_pipeline(
             vad_audio_passthrough=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(
                 stop_secs=0.2,
-                min_volume=0.8,
+                min_volume=0.5,
             )),
             turn_analyzer=LocalSmartTurnAnalyzerV3(
                 params=SmartTurnParams(stop_secs=0.3),
@@ -1258,7 +1258,7 @@ async def build_pipeline(
                 language=deepgram_language,
                 interim_results=True,
                 utterance_end_ms="1000",
-                endpointing=10,
+                endpointing=100,
                 punctuate=True,
                 smart_format=True,
             ),
