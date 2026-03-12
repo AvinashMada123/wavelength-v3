@@ -17,6 +17,7 @@ from app.models.call_log import CallLog
 from app.models.call_analytics import CallAnalytics
 from app.models.call_queue import QueuedCall
 from app.models.schemas import CallAnalyticsResponse, CallLogListResponse, CallLogResponse, QueueEnqueueResponse, TriggerCallRequest
+from app.utils import normalize_phone_india
 from sqlalchemy import select
 
 logger = structlog.get_logger(__name__)
@@ -138,12 +139,13 @@ async def trigger_call(
             detail=f"Insufficient credits. Current balance: {float(balance):.2f}. Please recharge to continue making calls.",
         )
 
-    # 3. Enqueue call
+    # 3. Normalize phone & enqueue call
+    normalized_phone = normalize_phone_india(req.contact_phone)
     queued_call = QueuedCall(
         org_id=org_id,
         bot_id=bot_config.id,
         contact_name=req.contact_name,
-        contact_phone=req.contact_phone,
+        contact_phone=normalized_phone,
         ghl_contact_id=req.ghl_contact_id,
         extra_vars=req.merged_extra_vars(),
         source="api",

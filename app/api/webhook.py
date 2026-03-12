@@ -10,6 +10,7 @@ from app.database import get_db_session
 from app.models.call_queue import QueuedCall
 from app.services.billing import check_org_credits
 from app.models.schemas import QueueEnqueueResponse
+from app.utils import normalize_phone_india
 
 logger = structlog.get_logger(__name__)
 
@@ -115,6 +116,9 @@ async def webhook_trigger_call(request: Request):
         raise HTTPException(status_code=400, detail="phoneNumber is required.")
     if not bot_config_id:
         raise HTTPException(status_code=400, detail="botConfigId is required.")
+
+    # Normalize phone number (handles leading 0, missing +91, etc.)
+    phone_number = normalize_phone_india(phone_number)
 
     # --- Verify bot config exists ---
     bot_config = await bot_config_loader.get(bot_config_id)
