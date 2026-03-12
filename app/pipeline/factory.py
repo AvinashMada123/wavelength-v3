@@ -1225,9 +1225,8 @@ async def build_pipeline(
             language=stt_language,
         )
     else:
-        # nova-3 with multi-language support — handles code-switching between
-        # Hindi/Hinglish/English and other Indian languages natively.
-        deepgram_language = "multi" if stt_language in ("unknown", "en-IN", "hi-IN") else stt_language
+        # nova-3: "unknown" → "multi" (auto-detect), otherwise respect user's choice
+        deepgram_language = "multi" if stt_language == "unknown" else stt_language
         stt = DeepgramSTTService(
             api_key=settings.DEEPGRAM_API_KEY,
             live_options=LiveOptions(
