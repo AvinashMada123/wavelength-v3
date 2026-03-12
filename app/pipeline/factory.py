@@ -1340,6 +1340,7 @@ async def build_pipeline(
         # processor stays paused → no more tokens flow → deadlock.
         # SENTENCE mode (default) sends full sentences which always exceed
         # min_buffer_size, avoiding the deadlock.
+        tts_lang = "en-IN" if stt_language == "unknown" else stt_language
         tts = SarvamTTSService(
             api_key=settings.SARVAM_API_KEY,
             model="bulbul:v3",
@@ -1351,7 +1352,7 @@ async def build_pipeline(
                 adaptive=settings.ADAPTIVE_PHRASE_CHARS,
             ),
             params=SarvamTTSService.InputParams(
-                language=stt_language,
+                language=tts_lang,
                 min_buffer_size=30,
                 max_chunk_length=100,
                 temperature=0.7,
@@ -1391,7 +1392,7 @@ async def build_pipeline(
 
         tts = GoogleCloudGRPCTTSService(
             voice_name=call_context.tts_voice,
-            language_code=stt_language,
+            language_code="en-IN" if stt_language == "unknown" else stt_language,
             sample_rate=16000,
             audio_encoding="PCM",
         )
