@@ -128,6 +128,7 @@ export const LLM_MODEL_OPTIONS: Record<string, { value: string; label: string }[
 };
 
 export const LANGUAGE_OPTIONS = [
+  { value: "unknown", label: "Multi (Auto-detect)" },
   { value: "en-IN", label: "English (India)" },
   { value: "en-US", label: "English (US)" },
   { value: "en-GB", label: "English (UK)" },

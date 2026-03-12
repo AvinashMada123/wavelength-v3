@@ -1200,7 +1200,8 @@ async def build_pipeline(
             "ur-IN": PipecatLanguage.UR_IN,
             "en-IN": PipecatLanguage.EN_IN,
         }
-        sarvam_lang = _SARVAM_LANG_MAP.get(stt_language, PipecatLanguage.EN_IN)
+        # "unknown" → language=None so Sarvam falls back to "unknown" (auto-detect)
+        sarvam_lang = None if stt_language == "unknown" else _SARVAM_LANG_MAP.get(stt_language, PipecatLanguage.EN_IN)
 
         stt = _SafeSarvamSTT(
             api_key=settings.SARVAM_API_KEY,
