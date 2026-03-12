@@ -997,8 +997,10 @@ async def build_pipeline(
     stt_provider = getattr(bot_config, "stt_provider", "deepgram") or "deepgram"
 
     if stt_provider == "sarvam":
-        # Sarvam server-side VAD handles START/END_SPEECH — no local VAD needed.
-        # vad_enabled + passthrough ensures audio frames reach the STT service.
+        # Sarvam has server-side VAD (vad_signals=True, high_vad_sensitivity=True).
+        # We ALSO add a local SileroVAD with low min_volume so short utterances
+        # like "ha"/"haan" trigger a flush() → forces Sarvam to return whatever
+        # partial transcript it has, even if its server-side VAD missed the speech.
         transport_params = FastAPIWebsocketParams(
             audio_out_enabled=True,
             audio_out_sample_rate=16000,
@@ -1007,6 +1009,10 @@ async def build_pipeline(
             serializer=serializer,
             vad_enabled=True,
             vad_audio_passthrough=True,
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(
+                stop_secs=0.3,
+                min_volume=0.5,
+            )),
         )
     else:
         # Deepgram: use local Silero VAD + SmartTurn for turn detection.
