@@ -1064,7 +1064,6 @@ async def build_pipeline(
                 self._audio_frames_sent = 0
                 self._last_audio_log_time = 0.0
                 self._call_sid_tag = ""  # Set after pipeline starts
-                self._vad_speech_start: float | None = None  # Track speech start for min duration
 
             async def _update_settings(self, delta):
                 """Apply language changes by disconnecting and reconnecting to Sarvam."""
@@ -1112,23 +1111,19 @@ async def build_pipeline(
                 # flush returns the transcript — same race condition as Sarvam's
                 # END_SPEECH. Fix: intercept, buffer, flush, emit after transcript.
                 if isinstance(frame, VADUserStoppedSpeakingFrame):
-                    speech_dur = (time.monotonic() - self._vad_speech_start) if self._vad_speech_start else 0.0
                     logger.info(
                         "sarvam_stt_vad_stopped",
                         call_sid=self._call_sid_tag,
                         end_speech_pending=self._end_speech_pending,
-                        speech_duration_ms=int(speech_dur * 1000),
                     )
-                    self._vad_speech_start = None
                     self._end_speech_pending = True
                     if self._end_speech_timeout_task:
                         self._end_speech_timeout_task.cancel()
                     self._end_speech_timeout_task = asyncio.create_task(
                         self._end_speech_timeout()
                     )
-                    # Only flush if speech was long enough (>600ms) to avoid
-                    # hallucinated transcripts from very short utterance fragments.
-                    if speech_dur >= 0.6 and self._socket_client:
+                    # Flush Sarvam to finalize transcript
+                    if self._socket_client:
                         try:
                             await self._socket_client.flush()
                         except Exception as e:
@@ -1137,13 +1132,12 @@ async def build_pipeline(
                                 call_sid=self._call_sid_tag,
                                 error=str(e),
                             )
-                    # Skip super() to avoid base class flush() and prevent frame
-                    # from reaching aggregator before transcript arrives.
+                    # Don't call super — prevents frame from reaching aggregator
+                    # before transcript. Also skip base class's redundant flush().
                     return
 
                 # Let VADUserStartedSpeakingFrame through and start metrics
                 if isinstance(frame, VADUserStartedSpeakingFrame):
-                    self._vad_speech_start = time.monotonic()
                     await self._start_metrics()
 
                 await super().process_frame(frame, direction)
@@ -1188,24 +1182,38 @@ async def build_pipeline(
                     elif message.type == "data":
                         transcript = getattr(message.data, 'transcript', None)
                         lang_code = getattr(message.data, 'language_code', None)
+                        # Check audio duration from Sarvam metrics to filter hallucinations
+                        audio_dur = getattr(getattr(message.data, 'metrics', None), 'audio_duration', None)
                         logger.info("sarvam_stt_transcript_received",
                                     call_sid=self._call_sid_tag,
                                     transcript=transcript,
                                     language_code=lang_code,
+                                    audio_duration=audio_dur,
                                     end_speech_pending=self._end_speech_pending)
                         # Cancel timeout — transcript arrived
                         if self._end_speech_timeout_task:
                             self._end_speech_timeout_task.cancel()
                             self._end_speech_timeout_task = None
-                        # Process transcript first (creates TranscriptionFrame)
-                        await super()._handle_message(message)
-                        # NOW send the buffered stop frame so aggregator has the transcript
-                        if self._end_speech_pending:
-                            self._end_speech_pending = False
-                            logger.info("sarvam_stt_broadcast_user_stopped_after_transcript",
-                                        call_sid=self._call_sid_tag,
-                                        transcript=transcript)
-                            await self.broadcast_frame(UserStoppedSpeakingFrame)
+                        # Drop likely-hallucinated transcripts from very short audio (<0.5s)
+                        if audio_dur is not None and audio_dur < 0.5 and transcript:
+                            logger.warning("sarvam_stt_short_audio_dropped",
+                                           call_sid=self._call_sid_tag,
+                                           transcript=transcript,
+                                           audio_duration=audio_dur)
+                            # Still clear pending state but don't emit transcript
+                            if self._end_speech_pending:
+                                self._end_speech_pending = False
+                                await self.broadcast_frame(UserStoppedSpeakingFrame)
+                        else:
+                            # Process transcript first (creates TranscriptionFrame)
+                            await super()._handle_message(message)
+                            # NOW send the buffered stop frame so aggregator has the transcript
+                            if self._end_speech_pending:
+                                self._end_speech_pending = False
+                                logger.info("sarvam_stt_broadcast_user_stopped_after_transcript",
+                                            call_sid=self._call_sid_tag,
+                                            transcript=transcript)
+                                await self.broadcast_frame(UserStoppedSpeakingFrame)
                     else:
                         logger.warning("sarvam_stt_unknown_msg_type",
                                        call_sid=self._call_sid_tag,
