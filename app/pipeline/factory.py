@@ -1066,8 +1066,18 @@ async def build_pipeline(
                 self._call_sid_tag = ""  # Set after pipeline starts
 
             async def _update_settings(self, delta):
-                """No-op language changes — STT stays pinned to hi-IN which handles Hindi+English."""
-                delta.pop("language", None)
+                """Apply language changes by disconnecting and reconnecting to Sarvam."""
+                from pipecat.services.settings import is_given
+                if is_given(getattr(delta, 'language', None)) and delta.language is not None:
+                    self._settings.language = delta.language
+                    logger.info(
+                        "sarvam_stt_language_switch",
+                        call_sid=self._call_sid_tag,
+                        new_language=str(delta.language),
+                    )
+                    await self._disconnect()
+                    await self._connect()
+                    return {"language": delta.language}
                 return await super()._update_settings(delta)
 
             async def process_frame(self, frame, direction: FrameDirection):
@@ -1440,8 +1450,8 @@ async def build_pipeline(
     context = OpenAILLMContext(messages=messages)
 
     # --- Switch-language tool ---
-    # Allows LLM to change TTS language mid-call when user speaks
-    # a different language or explicitly requests one. STT stays pinned.
+    # Allows LLM to change both TTS and STT language mid-call when user
+    # speaks a different language or explicitly requests one.
     _LANG_CODE_TO_PIPECAT = {
         "en-IN": "EN_IN", "hi-IN": "HI_IN", "bn-IN": "BN_IN",
         "gu-IN": "GU_IN", "kn-IN": "KN_IN", "ml-IN": "ML_IN",
@@ -1453,16 +1463,20 @@ async def build_pipeline(
         lang_code = params.arguments.get("language", "en-IN")
         logger.info("switch_language_triggered", call_sid=call_context.call_sid, language=lang_code)
 
-        from pipecat.services.settings import TTSSettings
+        from pipecat.frames.frames import STTUpdateSettingsFrame
+        from pipecat.services.settings import STTSettings, TTSSettings
         from pipecat.transcriptions.language import Language as PcLanguage
 
         enum_name = _LANG_CODE_TO_PIPECAT.get(lang_code, "EN_IN")
         lang_enum = getattr(PcLanguage, enum_name, PcLanguage.EN_IN)
 
-        # Update TTS language only — STT stays pinned to its configured language
+        # Update both TTS and STT language — locks to chosen language
         if _task_ref[0]:
             await _task_ref[0].queue_frame(
                 TTSUpdateSettingsFrame(delta=TTSSettings(language=lang_enum))
+            )
+            await _task_ref[0].queue_frame(
+                STTUpdateSettingsFrame(delta=STTSettings(language=lang_enum))
             )
 
         lang_names = {
