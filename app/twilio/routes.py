@@ -185,10 +185,11 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
         greeting_text = pipeline_result.get("greeting_text") or (
             f"Hi {ctx.contact_name}, this is {bot_config.agent_name} calling from {bot_config.company_name}. How are you doing today?"
         )
-        # Remove LLM's duplicate greeting echo
+        # Remove all copies of the greeting from context (seeded + TTS capture)
+        greeting_norm = greeting_text.strip().lower()
         transcript_entries = [
             e for e in transcript_entries
-            if not (e["role"] == "assistant" and bot_config.agent_name in e["content"][:60] and "calling from" in e["content"][:80])
+            if not (e["role"] == "assistant" and e["content"].strip().lower() == greeting_norm)
         ]
         transcript_entries.insert(0, {"role": "assistant", "content": greeting_text})
 
