@@ -50,7 +50,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 import { useAuth } from "@/contexts/auth-context";
 import { fetchBot, createBot, updateBot } from "@/lib/api";
-import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS_CLIENT, LLM_PROVIDER_OPTIONS, LLM_MODEL_OPTIONS } from "@/lib/constants";
+import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, SARVAM_LANGUAGE_OPTIONS, DEEPGRAM_LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS_CLIENT, LLM_PROVIDER_OPTIONS, LLM_MODEL_OPTIONS } from "@/lib/constants";
 import type { BotConfig, GHLWorkflow, GoalConfig, SuccessCriterion, RedFlagConfig, DataCaptureField } from "@/types/api";
 
 // ---------------------------------------------------------------------------
@@ -747,9 +747,11 @@ export default function BotEditorPage() {
                               <Label>{isSuperAdmin ? "STT Provider" : "Speech Recognition"}</Label>
                               <Select
                                 value={form.stt_provider}
-                                onValueChange={(v) =>
-                                  setField("stt_provider", v as "deepgram" | "sarvam")
-                                }
+                                onValueChange={(v) => {
+                                  setField("stt_provider", v as "deepgram" | "sarvam");
+                                  // Reset language to provider default
+                                  setField("language", v === "deepgram" ? "multi" : "unknown");
+                                }}
                               >
                                 <SelectTrigger>
                                   <SelectValue placeholder="Select model..." />
@@ -827,7 +829,7 @@ export default function BotEditorPage() {
                                   <SelectValue placeholder="Select language..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {LANGUAGE_OPTIONS.map((l) => (
+                                  {(form.stt_provider === "deepgram" ? DEEPGRAM_LANGUAGE_OPTIONS : SARVAM_LANGUAGE_OPTIONS).map((l) => (
                                     <SelectItem key={l.value} value={l.value}>
                                       {l.label}
                                     </SelectItem>

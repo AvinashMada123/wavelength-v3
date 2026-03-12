@@ -39,7 +39,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchBots, deleteBot, cloneBot } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
-import { LANGUAGE_OPTIONS } from "@/lib/constants";
+import { SARVAM_LANGUAGE_OPTIONS, DEEPGRAM_LANGUAGE_OPTIONS } from "@/lib/constants";
 import type { BotConfig } from "@/types/api";
 
 export default function BotsPage() {
@@ -85,7 +85,8 @@ export default function BotsPage() {
   }
 
   const langLabel = (code: string) =>
-    LANGUAGE_OPTIONS.find((l) => l.value === code)?.label || code;
+    SARVAM_LANGUAGE_OPTIONS.find((l) => l.value === code)?.label ||
+    DEEPGRAM_LANGUAGE_OPTIONS.find((l) => l.value === code)?.label || code;
 
   function buildCurlCommand(bot: BotConfig) {
     const baseUrl = typeof window !== "undefined" ? window.location.origin : "http://localhost:3002";

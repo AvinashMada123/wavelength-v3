@@ -133,11 +133,10 @@ export const LLM_MODEL_OPTIONS: Record<string, { value: string; label: string }[
   ],
 };
 
-export const LANGUAGE_OPTIONS = [
+// Sarvam (Model 1) — Indian languages + auto-detect
+export const SARVAM_LANGUAGE_OPTIONS = [
   { value: "unknown", label: "Multi (Auto-detect)" },
   { value: "en-IN", label: "English (India)" },
-  { value: "en-US", label: "English (US)" },
-  { value: "en-GB", label: "English (UK)" },
   { value: "hi-IN", label: "Hindi" },
   { value: "mr-IN", label: "Marathi" },
   { value: "ta-IN", label: "Tamil" },
@@ -151,6 +150,41 @@ export const LANGUAGE_OPTIONS = [
   { value: "as-IN", label: "Assamese" },
   { value: "ur-IN", label: "Urdu" },
 ];
+
+// Deepgram nova-3 (Model 2) — global + Indian languages + multi
+export const DEEPGRAM_LANGUAGE_OPTIONS = [
+  { value: "multi", label: "Multi (Auto-detect)" },
+  { value: "en-IN", label: "English (India)" },
+  { value: "en-US", label: "English (US)" },
+  { value: "en-GB", label: "English (UK)" },
+  { value: "en-AU", label: "English (Australia)" },
+  { value: "hi", label: "Hindi" },
+  { value: "ta", label: "Tamil" },
+  { value: "te", label: "Telugu" },
+  { value: "bn", label: "Bengali" },
+  { value: "kn", label: "Kannada" },
+  { value: "ml", label: "Malayalam" },
+  { value: "mr", label: "Marathi" },
+  { value: "gu", label: "Gujarati" },
+  { value: "pa", label: "Punjabi" },
+  { value: "ur", label: "Urdu" },
+  { value: "es", label: "Spanish" },
+  { value: "fr", label: "French" },
+  { value: "de", label: "German" },
+  { value: "pt", label: "Portuguese" },
+  { value: "ja", label: "Japanese" },
+  { value: "ko", label: "Korean" },
+  { value: "zh", label: "Chinese" },
+  { value: "ru", label: "Russian" },
+  { value: "ar", label: "Arabic" },
+  { value: "id", label: "Indonesian" },
+  { value: "nl", label: "Dutch" },
+  { value: "tr", label: "Turkish" },
+  { value: "it", label: "Italian" },
+];
+
+// Default fallback
+export const LANGUAGE_OPTIONS = SARVAM_LANGUAGE_OPTIONS;
 
 // Pre-defined template variables (always available, filled at call time)
 export const BUILTIN_VARIABLES = [
