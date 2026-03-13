@@ -50,7 +50,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 import { useAuth } from "@/contexts/auth-context";
 import { fetchBot, createBot, updateBot } from "@/lib/api";
-import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, SARVAM_LANGUAGE_OPTIONS, DEEPGRAM_LANGUAGE_OPTIONS, SWITCH_LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS_CLIENT, LLM_PROVIDER_OPTIONS, LLM_MODEL_OPTIONS } from "@/lib/constants";
+import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, SARVAM_LANGUAGE_OPTIONS, DEEPGRAM_LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS_CLIENT, LLM_PROVIDER_OPTIONS, LLM_MODEL_OPTIONS } from "@/lib/constants";
 import type { BotConfig, GHLWorkflow, GoalConfig, SuccessCriterion, RedFlagConfig, DataCaptureField } from "@/types/api";
 
 // ---------------------------------------------------------------------------
@@ -842,41 +842,6 @@ export default function BotEditorPage() {
                             </div>
                           </div>
 
-                          <div className="space-y-2 mt-4">
-                            <Label>Allowed Languages for Switching</Label>
-                            <p className="text-xs text-muted-foreground mb-2">
-                              Select which languages the bot can switch to mid-call. Leave empty to allow all languages.
-                            </p>
-                            <div className="flex flex-wrap gap-2">
-                              {SWITCH_LANGUAGE_OPTIONS.map((lang) => {
-                                const isSelected = form.allowed_languages.includes(lang.value);
-                                return (
-                                  <button
-                                    key={lang.value}
-                                    type="button"
-                                    onClick={() => {
-                                      const next = isSelected
-                                        ? form.allowed_languages.filter((l) => l !== lang.value)
-                                        : [...form.allowed_languages, lang.value];
-                                      setField("allowed_languages", next);
-                                    }}
-                                    className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium border transition-colors ${
-                                      isSelected
-                                        ? "bg-violet-500/20 border-violet-500 text-violet-300"
-                                        : "bg-muted/50 border-border text-muted-foreground hover:border-muted-foreground/50"
-                                    }`}
-                                  >
-                                    {lang.label}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                            {form.allowed_languages.length > 0 && (
-                              <p className="text-xs text-muted-foreground">
-                                Bot will only switch between: {form.allowed_languages.map(lc => SWITCH_LANGUAGE_OPTIONS.find(o => o.value === lc)?.label || lc).join(", ")}
-                              </p>
-                            )}
-                          </div>
                         </Section>
 
                         {isSuperAdmin && (

@@ -66,12 +66,6 @@ UNIVERSAL PHONE RULES (always follow):
 - NEVER repeat a question you already asked, even rephrased.
 - If the user says they already answered, already have the details, is not interested, asks not to be called again, or says they are busy, driving, or unwell, acknowledge briefly and end the call.
 
-LANGUAGE SWITCHING (important):
-- Speech recognition outputs in Devanagari script even when the customer speaks English (e.g. "English" appears as "इंग्लिश", "little more" appears as "लिटिल मोर").
-- When the customer says they prefer English or you can tell from context they are speaking English (Devanagari transliterations of English words), call switch_language with "en-IN" and respond in English.
-- When the customer speaks Hindi or prefers Hindi, call switch_language with "hi-IN" and respond in Hindi.
-- You MUST call switch_language early — as soon as the customer indicates their language preference in the first exchange.
-- After switching, always respond in the chosen language. Say numbers in that language (e.g. "seven" in English, not "saat").
 """
 
 # Map BCP-47 language codes → pipecat Language enum names
@@ -895,62 +889,6 @@ def _build_end_call_tool():
     )
 
 
-def _build_switch_language_tool(allowed_languages: list[str] | None = None):
-    """Build the switch_language LLM tool for mid-call language switching.
-
-    If *allowed_languages* is a non-empty list, constrain the enum to only
-    those language codes so the LLM cannot switch to unsupported languages.
-    """
-    from pipecat.adapters.schemas.function_schema import FunctionSchema
-
-    _ALL_LANG_CODES = [
-        "en-IN", "hi-IN", "bn-IN", "gu-IN", "kn-IN",
-        "ml-IN", "mr-IN", "ta-IN", "te-IN", "pa-IN", "or-IN",
-    ]
-
-    lang_enum = (
-        [lc for lc in allowed_languages if lc in _ALL_LANG_CODES]
-        if allowed_languages
-        else _ALL_LANG_CODES
-    )
-    # Fallback: if filtering produced nothing, use all
-    if not lang_enum:
-        lang_enum = _ALL_LANG_CODES
-
-    lang_names_map = {
-        "en-IN": "English", "hi-IN": "Hindi", "bn-IN": "Bengali",
-        "gu-IN": "Gujarati", "kn-IN": "Kannada", "ml-IN": "Malayalam",
-        "mr-IN": "Marathi", "ta-IN": "Tamil", "te-IN": "Telugu",
-        "pa-IN": "Punjabi", "or-IN": "Odia",
-    }
-    allowed_str = ", ".join(lang_names_map.get(lc, lc) for lc in lang_enum)
-
-    return FunctionSchema(
-        name="switch_language",
-        description=(
-            "Switch TTS voice language so the bot speaks in the customer's preferred language. "
-            f"Allowed languages: {allowed_str}. "
-            "IMPORTANT: Speech recognition outputs in Devanagari script even for English speech "
-            "(e.g. 'English' appears as 'इंग्लिश', 'seven' appears as 'सेवन'). "
-            "Call this IMMEDIATELY when:\n"
-            "1) Customer says they prefer a language (e.g. 'इंग्लिश' means they want English → use en-IN).\n"
-            "2) Customer speaks English words transliterated in Devanagari "
-            "(e.g. 'लिटिल मोर ऑर्गेनाइज्ड' = 'little more organized' → use en-IN).\n"
-            "3) Customer speaks native Hindi/regional language → use hi-IN or appropriate code.\n\n"
-            "After switching, respond ONLY in the chosen language. "
-            "Say numbers in that language (seven, not saat, when English)."
-        ),
-        properties={
-            "language": {
-                "type": "string",
-                "enum": lang_enum,
-                "description": "BCP-47 language code to switch to",
-            }
-        },
-        required=["language"],
-    )
-
-
 async def build_pipeline(
     bot_config: BotConfig,
     call_context: CallContext,
@@ -1463,48 +1401,6 @@ async def build_pipeline(
         messages.append({"role": "assistant", "content": greeting_text})
     context = OpenAILLMContext(messages=messages)
 
-    # --- Switch-language tool ---
-    # Allows LLM to change both TTS and STT language mid-call when user
-    # speaks a different language or explicitly requests one.
-    _LANG_CODE_TO_PIPECAT = {
-        "en-IN": "EN_IN", "hi-IN": "HI_IN", "bn-IN": "BN_IN",
-        "gu-IN": "GU_IN", "kn-IN": "KN_IN", "ml-IN": "ML_IN",
-        "mr-IN": "MR_IN", "ta-IN": "TA_IN", "te-IN": "TE_IN",
-        "pa-IN": "PA_IN", "or-IN": "OR_IN",
-    }
-
-    async def handle_switch_language(params):
-        lang_code = params.arguments.get("language", "en-IN")
-        logger.info("switch_language_triggered", call_sid=call_context.call_sid, language=lang_code)
-
-        from pipecat.frames.frames import STTUpdateSettingsFrame
-        from pipecat.services.settings import STTSettings, TTSSettings
-        from pipecat.transcriptions.language import Language as PcLanguage
-
-        enum_name = _LANG_CODE_TO_PIPECAT.get(lang_code, "EN_IN")
-        lang_enum = getattr(PcLanguage, enum_name, PcLanguage.EN_IN)
-
-        # Update both TTS and STT language — locks to chosen language
-        if _task_ref[0]:
-            await _task_ref[0].queue_frame(
-                TTSUpdateSettingsFrame(delta=TTSSettings(language=lang_enum))
-            )
-            await _task_ref[0].queue_frame(
-                STTUpdateSettingsFrame(delta=STTSettings(language=lang_enum))
-            )
-
-        lang_names = {
-            "en-IN": "English", "hi-IN": "Hindi", "bn-IN": "Bengali",
-            "gu-IN": "Gujarati", "kn-IN": "Kannada", "ml-IN": "Malayalam",
-            "mr-IN": "Marathi", "ta-IN": "Tamil", "te-IN": "Telugu",
-            "pa-IN": "Punjabi", "or-IN": "Odia",
-        }
-        name = lang_names.get(lang_code, lang_code)
-        await params.result_callback(f"Language switched to {name}. Continue the conversation in {name}.")
-
-    if not _groq_no_tools:
-        llm.register_function("switch_language", handle_switch_language)
-
     # Set tools as provider-agnostic ToolsSchema — adapters auto-convert per LLM provider
     if not _groq_no_tools:
         from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -1512,8 +1408,6 @@ async def build_pipeline(
         standard_tools = [_build_end_call_tool()]
         if workflow_tool_schema:
             standard_tools.append(workflow_tool_schema)
-        allowed_langs = getattr(bot_config, "allowed_languages", None) or None
-        standard_tools.append(_build_switch_language_tool(allowed_langs))
         context.set_tools(ToolsSchema(standard_tools=standard_tools))
 
     # --- Context aggregator ---
