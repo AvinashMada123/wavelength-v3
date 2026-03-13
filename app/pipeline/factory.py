@@ -1512,6 +1512,8 @@ async def build_pipeline(
         standard_tools = [_build_end_call_tool()]
         if workflow_tool_schema:
             standard_tools.append(workflow_tool_schema)
+        allowed_langs = getattr(bot_config, "allowed_languages", None) or None
+        standard_tools.append(_build_switch_language_tool(allowed_langs))
         context.set_tools(ToolsSchema(standard_tools=standard_tools))
 
     # --- Context aggregator ---
