@@ -135,8 +135,8 @@ class CreateBotConfigRequest(BaseModel):
     event_time: str | None = None
     greeting_template: str | None = None
     stt_provider: str = "deepgram"
-    tts_provider: str = "gemini"
-    tts_voice: str = "Kore"
+    tts_provider: str = "sarvam"
+    tts_voice: str = "priya"
     tts_style_prompt: str | None = None
     llm_provider: Literal["google", "groq"] = "google"
     llm_model: str = "gemini-2.5-flash"
@@ -403,8 +403,8 @@ class CallContext:
             contact_name=cd.get("contact_name", call_log.contact_name),
             ghl_contact_id=cd.get("ghl_contact_id", call_log.ghl_contact_id),
             ghl_webhook_url=cd.get("ghl_webhook_url"),
-            tts_provider=cd.get("tts_provider", "gemini"),
-            tts_voice=cd.get("tts_voice", "Kore"),
+            tts_provider=cd.get("tts_provider", "sarvam"),
+            tts_voice=cd.get("tts_voice", "priya"),
             tts_style_prompt=cd.get("tts_style_prompt"),
             language=cd.get("language", "en-IN"),
             silence_timeout_secs=cd.get("silence_timeout_secs", 5),
