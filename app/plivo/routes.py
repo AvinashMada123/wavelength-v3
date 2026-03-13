@@ -351,14 +351,14 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         greeting_audio = None
 
         use_greeting_direct_play = settings.GREETING_DIRECT_PLAY and (
-            getattr(bot_config, "tts_provider", "gemini") != "gemini"
+            getattr(bot_config, "tts_provider", "sarvam") != "gemini"
         )
 
         if settings.GREETING_DIRECT_PLAY and not use_greeting_direct_play:
             logger.info(
                 "greeting_direct_play_skipped",
                 call_sid=call_sid,
-                tts_provider=getattr(bot_config, "tts_provider", "gemini"),
+                tts_provider=getattr(bot_config, "tts_provider", "sarvam"),
             )
 
         if use_greeting_direct_play:

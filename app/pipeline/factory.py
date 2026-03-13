@@ -1316,7 +1316,7 @@ async def build_pipeline(
         logger.info("tools_disabled_for_model", model=llm_model, provider=llm_provider)
 
     # --- TTS ---
-    tts_provider = getattr(bot_config, "tts_provider", "gemini")
+    tts_provider = getattr(bot_config, "tts_provider", "sarvam")
     logger.info("tts_provider_debug", tts_provider=tts_provider, voice=call_context.tts_voice,
                 bot_has_attr=hasattr(bot_config, "tts_provider"),
                 bot_raw=getattr(bot_config, "tts_provider", "MISSING"))

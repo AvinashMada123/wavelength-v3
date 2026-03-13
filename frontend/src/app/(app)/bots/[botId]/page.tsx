@@ -153,7 +153,7 @@ function botToForm(bot: BotConfig): BotForm {
     event_time: bot.event_time || "",
     greeting_template: bot.greeting_template || "",
     stt_provider: bot.stt_provider || "deepgram",
-    tts_provider: bot.tts_provider || "sarvam",
+    tts_provider: "sarvam",
     tts_voice: bot.tts_voice,
     tts_style_prompt: bot.tts_style_prompt || "",
     llm_provider: bot.llm_provider || "google",
@@ -804,7 +804,7 @@ export default function BotEditorPage() {
                                   <SelectValue placeholder="Select voice..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {((isSuperAdmin && form.tts_provider !== "sarvam") ? GEMINI_VOICE_GROUPS : SARVAM_VOICE_GROUPS).map((group) => (
+                                  {SARVAM_VOICE_GROUPS.map((group) => (
                                     <SelectGroup key={group.label}>
                                       <SelectLabel>{group.label}</SelectLabel>
                                       {group.voices.map((v) => (

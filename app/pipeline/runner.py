@@ -63,7 +63,7 @@ async def _synthesize_greeting(
 
     Returns raw PCM bytes at 16kHz, or None on failure.
     """
-    tts_provider = getattr(bot_config, "tts_provider", "gemini")
+    tts_provider = getattr(bot_config, "tts_provider", "sarvam")
     stt_language = getattr(call_context, "language", "en-IN") or "en-IN"
 
     try:
