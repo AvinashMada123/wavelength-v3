@@ -559,6 +559,28 @@ export function fetchCreditTransactions(params?: { page?: number; page_size?: nu
   return apiFetch(`/api/billing/transactions${qs ? `?${qs}` : ""}`);
 }
 
+// Payments (Cashfree)
+export function createPaymentOrder(credits: number, phone?: string): Promise<{
+  order_id: string;
+  payment_session_id: string;
+  amount: number;
+  cf_environment: string;
+}> {
+  return apiFetch("/api/payments/create-order", {
+    method: "POST",
+    body: JSON.stringify({ credits, phone: phone || "9999999999" }),
+  });
+}
+
+export function verifyPayment(orderId: string): Promise<{
+  order_id: string;
+  status: string;
+  credits: number;
+  amount: number;
+}> {
+  return apiFetch(`/api/payments/verify/${orderId}`);
+}
+
 // Admin billing
 export function addCredits(orgId: string, amount: number, description?: string): Promise<{ balance: number }> {
   return apiFetch("/api/billing/admin/add-credits", {

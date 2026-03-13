@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Wallet,
@@ -10,6 +11,7 @@ import {
   Wrench,
   CreditCard,
   Receipt,
+  Loader2,
 } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { PageTransition } from "@/components/layout/page-transition";
@@ -17,6 +19,17 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -34,6 +47,8 @@ import {
 import {
   fetchCreditBalance,
   fetchCreditTransactions,
+  createPaymentOrder,
+  verifyPayment,
   type CreditTransaction,
   type PaginatedTransactions,
 } from "@/lib/api";
@@ -55,6 +70,8 @@ const TYPE_ICONS: Record<string, typeof ArrowUpRight> = {
   refund: RefreshCw,
 };
 
+const CREDIT_PRICE = 4.5;
+
 function TransactionTypeBadge({ type }: { type: string }) {
   const Icon = TYPE_ICONS[type] || Receipt;
   return (
@@ -75,9 +92,25 @@ function formatCurrency(amount: number): string {
   }).format(amount);
 }
 
+function loadCashfreeScript(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (document.getElementById("cashfree-sdk")) {
+      resolve();
+      return;
+    }
+    const script = document.createElement("script");
+    script.id = "cashfree-sdk";
+    script.src = "https://sdk.cashfree.com/js/v3/cashfree.js";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Failed to load Cashfree SDK"));
+    document.head.appendChild(script);
+  });
+}
+
 const PAGE_SIZE = 10;
 
 export default function BillingPage() {
+  const searchParams = useSearchParams();
   const [balance, setBalance] = useState<number | null>(null);
   const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
   const [total, setTotal] = useState(0);
@@ -85,6 +118,15 @@ export default function BillingPage() {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [loadingBalance, setLoadingBalance] = useState(true);
   const [loadingTxns, setLoadingTxns] = useState(true);
+
+  // Add Credits dialog state
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [creditCount, setCreditCount] = useState<string>("100");
+  const [phone, setPhone] = useState<string>("");
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [paymentSuccess, setPaymentSuccess] = useState<string | null>(null);
+  const verifiedRef = useRef(false);
 
   const loadBalance = useCallback(async () => {
     setLoadingBalance(true);
@@ -124,6 +166,82 @@ export default function BillingPage() {
     loadTransactions();
   }, [loadTransactions]);
 
+  // Handle redirect-back from Cashfree: verify payment via URL param
+  useEffect(() => {
+    const orderId = searchParams.get("order_id");
+    if (!orderId || verifiedRef.current) return;
+    verifiedRef.current = true;
+
+    (async () => {
+      try {
+        const result = await verifyPayment(orderId);
+        if (result.status === "paid") {
+          setPaymentSuccess(`Payment successful! ${result.credits} credits added.`);
+          loadBalance();
+          loadTransactions();
+        }
+      } catch {
+        // silent — user can check balance manually
+      }
+      // Clean up URL param
+      window.history.replaceState({}, "", "/billing");
+    })();
+  }, [searchParams, loadBalance, loadTransactions]);
+
+  const handleAddCredits = async () => {
+    const credits = parseInt(creditCount, 10);
+    if (isNaN(credits) || credits < 10 || credits > 10000) {
+      setPaymentError("Enter between 10 and 10,000 credits.");
+      return;
+    }
+
+    setPaymentLoading(true);
+    setPaymentError(null);
+    setPaymentSuccess(null);
+
+    try {
+      // 1. Create order on backend
+      const order = await createPaymentOrder(credits, phone || undefined);
+
+      // 2. Load Cashfree SDK
+      await loadCashfreeScript();
+
+      // 3. Open Cashfree checkout modal
+      const cashfree = (window as any).Cashfree({
+        mode: order.cf_environment === "production" ? "production" : "sandbox",
+      });
+
+      setDialogOpen(false);
+
+      const checkoutResult = await cashfree.checkout({
+        paymentSessionId: order.payment_session_id,
+        redirectTarget: "_modal",
+      });
+
+      // 4. After modal closes, verify payment
+      if (checkoutResult.error) {
+        setPaymentError(checkoutResult.error.message || "Payment was not completed.");
+        return;
+      }
+
+      // Verify payment status with backend
+      const verification = await verifyPayment(order.order_id);
+      if (verification.status === "paid") {
+        setPaymentSuccess(`Payment successful! ${verification.credits} credits added.`);
+        loadBalance();
+        loadTransactions();
+      } else {
+        setPaymentError("Payment is being processed. Your credits will be added shortly.");
+      }
+    } catch (err: any) {
+      setPaymentError(err.message || "Something went wrong. Please try again.");
+    } finally {
+      setPaymentLoading(false);
+    }
+  };
+
+  const creditsNum = parseInt(creditCount, 10) || 0;
+  const calculatedAmount = creditsNum * CREDIT_PRICE;
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
   return (
@@ -134,6 +252,27 @@ export default function BillingPage() {
           <p className="text-sm text-muted-foreground">
             Manage your credits and view transaction history
           </p>
+
+          {/* Success / Error banners */}
+          {paymentSuccess && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-400"
+            >
+              {paymentSuccess}
+            </motion.div>
+          )}
+          {paymentError && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400"
+            >
+              {paymentError}
+            </motion.div>
+          )}
+
           {/* Credit Balance Card */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -159,24 +298,94 @@ export default function BillingPage() {
                     </p>
                   </div>
                 </div>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span tabIndex={0}>
-                        <Button
-                          disabled
-                          className="bg-gradient-to-r from-violet-500 to-indigo-600 text-white opacity-60 cursor-not-allowed"
-                        >
-                          <CreditCard className="h-4 w-4" />
-                          Add Credits
-                        </Button>
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Coming soon — Cashfree integration</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+
+                <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button
+                      className="bg-gradient-to-r from-violet-500 to-indigo-600 text-white hover:from-violet-600 hover:to-indigo-700"
+                      onClick={() => {
+                        setPaymentError(null);
+                        setPaymentSuccess(null);
+                      }}
+                    >
+                      <CreditCard className="h-4 w-4" />
+                      Add Credits
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>Add Credits</DialogTitle>
+                      <DialogDescription>
+                        Purchase credits at Rs {CREDIT_PRICE} per credit. Minimum 10, maximum 10,000.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="credits">Number of Credits</Label>
+                        <Input
+                          id="credits"
+                          type="number"
+                          min={10}
+                          max={10000}
+                          value={creditCount}
+                          onChange={(e) => setCreditCount(e.target.value)}
+                          placeholder="100"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="phone">Phone Number</Label>
+                        <Input
+                          id="phone"
+                          type="tel"
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value)}
+                          placeholder="9876543210"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Required by payment gateway
+                        </p>
+                      </div>
+                      {creditsNum >= 10 && (
+                        <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 px-4 py-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-muted-foreground">
+                              {creditsNum.toLocaleString("en-IN")} credits
+                            </span>
+                            <span className="text-lg font-semibold">
+                              Rs {formatCurrency(calculatedAmount)}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <DialogFooter>
+                      <Button
+                        variant="outline"
+                        onClick={() => setDialogOpen(false)}
+                        disabled={paymentLoading}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={handleAddCredits}
+                        disabled={paymentLoading || creditsNum < 10 || creditsNum > 10000}
+                        className="bg-gradient-to-r from-violet-500 to-indigo-600 text-white hover:from-violet-600 hover:to-indigo-700"
+                      >
+                        {paymentLoading ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Processing...
+                          </>
+                        ) : (
+                          <>
+                            <CreditCard className="h-4 w-4" />
+                            Pay Rs {formatCurrency(calculatedAmount)}
+                          </>
+                        )}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </CardContent>
             </Card>
           </motion.div>

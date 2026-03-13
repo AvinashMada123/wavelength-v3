@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     # Groq (OpenAI-compatible LLM)
     GROQ_API_KEY: str = ""
 
+    # Cashfree Payment Gateway
+    CASHFREE_APP_ID: str = ""
+    CASHFREE_SECRET_KEY: str = ""
+    CASHFREE_ENVIRONMENT: str = "PRODUCTION"
+
     # --- Audio quality feature flags (Phase 0-4) ---
     # Phase 1: Plivo server-side noise cancellation on incoming audio
     PLIVO_NOISE_CANCEL: bool = True

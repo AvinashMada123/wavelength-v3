@@ -30,3 +30,32 @@ class CreditTransaction(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
+
+
+class PaymentOrder(Base):
+    __tablename__ = "payment_orders"
+    __table_args__ = (
+        Index("idx_payment_orders_org_created", "org_id", "created_at"),
+        Index("idx_payment_orders_order_id", "order_id", unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    order_id: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    cf_order_id: Mapped[str | None] = mapped_column(Text)
+    amount_inr: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    credits: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="created")
+    payment_method: Mapped[str | None] = mapped_column(Text)
+    cf_payment_id: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
