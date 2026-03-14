@@ -82,11 +82,7 @@ interface BotForm {
   ghl_workflows: GHLWorkflow[];
   max_call_duration: number;
   telephony_provider: "plivo" | "twilio";
-  plivo_auth_id: string;
-  plivo_auth_token: string;
   plivo_caller_id: string;
-  twilio_account_sid: string;
-  twilio_auth_token: string;
   twilio_phone_number: string;
   circuit_breaker_enabled: boolean;
   circuit_breaker_threshold: number;
@@ -117,11 +113,7 @@ const EMPTY_FORM: BotForm = {
   ghl_workflows: [],
   max_call_duration: 480,
   telephony_provider: "plivo",
-  plivo_auth_id: "",
-  plivo_auth_token: "",
   plivo_caller_id: "",
-  twilio_account_sid: "",
-  twilio_auth_token: "",
   twilio_phone_number: "",
   circuit_breaker_enabled: true,
   circuit_breaker_threshold: 3,
@@ -169,11 +161,7 @@ function botToForm(bot: BotConfig): BotForm {
     ghl_workflows: bot.ghl_workflows || [],
     max_call_duration: bot.max_call_duration ?? 480,
     telephony_provider: bot.telephony_provider || "plivo",
-    plivo_auth_id: "",
-    plivo_auth_token: "",
     plivo_caller_id: bot.plivo_caller_id,
-    twilio_account_sid: "",
-    twilio_auth_token: "",
     twilio_phone_number: bot.twilio_phone_number || "",
     circuit_breaker_enabled: bot.circuit_breaker_enabled ?? true,
     circuit_breaker_threshold: bot.circuit_breaker_threshold ?? 3,
@@ -435,26 +423,7 @@ export default function BotEditorPage() {
       return;
     }
 
-    if (isNew) {
-      if (
-        form.telephony_provider === "plivo" &&
-        (!form.plivo_auth_id ||
-          !form.plivo_auth_token ||
-          !form.plivo_caller_id)
-      ) {
-        toast.error("Plivo credentials are required for new bots");
-        return;
-      }
-      if (
-        form.telephony_provider === "twilio" &&
-        (!form.twilio_account_sid ||
-          !form.twilio_auth_token ||
-          !form.twilio_phone_number)
-      ) {
-        toast.error("Twilio credentials are required for new bots");
-        return;
-      }
-    }
+    // Telephony credentials are now at the account level (Settings page)
 
     setSaving(true);
     try {
@@ -1102,7 +1071,7 @@ export default function BotEditorPage() {
                     <CardContent className="pt-6 space-y-8">
                       <Section
                         title="Telephony Provider"
-                        description="Choose the telephony provider and enter your credentials."
+                        description="Select which provider this bot uses for calls."
                       >
                         {/* Provider toggle */}
                         <div className="flex items-center gap-3">
@@ -1129,170 +1098,15 @@ export default function BotEditorPage() {
                           </div>
                         </div>
 
-                        <Separator />
-
-                        {/* Plivo fields */}
-                        {form.telephony_provider === "plivo" ? (
-                          <div className="space-y-4">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              <div className="space-y-2">
-                                <Label htmlFor="plivo_auth_id">
-                                  Auth ID{" "}
-                                  {isNew && (
-                                    <span className="text-destructive">*</span>
-                                  )}
-                                </Label>
-                                <Input
-                                  id="plivo_auth_id"
-                                  value={form.plivo_auth_id}
-                                  onChange={(e) =>
-                                    setField("plivo_auth_id", e.target.value)
-                                  }
-                                  placeholder={
-                                    !isNew ? "(unchanged)" : "Your Plivo Auth ID"
-                                  }
-                                  className="font-mono text-sm"
-                                />
-                                {!isNew && (
-                                  <p className="text-xs text-muted-foreground">
-                                    Leave blank to keep existing value.
-                                  </p>
-                                )}
-                              </div>
-                              <div className="space-y-2">
-                                <Label htmlFor="plivo_auth_token">
-                                  Auth Token{" "}
-                                  {isNew && (
-                                    <span className="text-destructive">*</span>
-                                  )}
-                                </Label>
-                                <Input
-                                  id="plivo_auth_token"
-                                  type="password"
-                                  value={form.plivo_auth_token}
-                                  onChange={(e) =>
-                                    setField(
-                                      "plivo_auth_token",
-                                      e.target.value,
-                                    )
-                                  }
-                                  placeholder={
-                                    !isNew ? "(unchanged)" : "Your Plivo Auth Token"
-                                  }
-                                  className="font-mono text-sm"
-                                />
-                                {!isNew && (
-                                  <p className="text-xs text-muted-foreground">
-                                    Leave blank to keep existing value.
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                            <div className="space-y-2">
-                              <Label htmlFor="plivo_caller_id">
-                                Caller ID{" "}
-                                {isNew && (
-                                  <span className="text-destructive">*</span>
-                                )}
-                              </Label>
-                              <Input
-                                id="plivo_caller_id"
-                                value={form.plivo_caller_id}
-                                onChange={(e) =>
-                                  setField("plivo_caller_id", e.target.value)
-                                }
-                                placeholder="+14155551234"
-                                className="font-mono text-sm max-w-xs"
-                              />
-                              <p className="text-xs text-muted-foreground">
-                                The phone number displayed as the caller.
-                              </p>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="space-y-4">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              <div className="space-y-2">
-                                <Label htmlFor="twilio_account_sid">
-                                  Account SID{" "}
-                                  {isNew && (
-                                    <span className="text-destructive">*</span>
-                                  )}
-                                </Label>
-                                <Input
-                                  id="twilio_account_sid"
-                                  value={form.twilio_account_sid}
-                                  onChange={(e) =>
-                                    setField(
-                                      "twilio_account_sid",
-                                      e.target.value,
-                                    )
-                                  }
-                                  placeholder={
-                                    !isNew ? "(unchanged)" : "Your Twilio Account SID"
-                                  }
-                                  className="font-mono text-sm"
-                                />
-                                {!isNew && (
-                                  <p className="text-xs text-muted-foreground">
-                                    Leave blank to keep existing value.
-                                  </p>
-                                )}
-                              </div>
-                              <div className="space-y-2">
-                                <Label htmlFor="twilio_auth_token">
-                                  Auth Token{" "}
-                                  {isNew && (
-                                    <span className="text-destructive">*</span>
-                                  )}
-                                </Label>
-                                <Input
-                                  id="twilio_auth_token"
-                                  type="password"
-                                  value={form.twilio_auth_token}
-                                  onChange={(e) =>
-                                    setField(
-                                      "twilio_auth_token",
-                                      e.target.value,
-                                    )
-                                  }
-                                  placeholder={
-                                    !isNew ? "(unchanged)" : "Your Twilio Auth Token"
-                                  }
-                                  className="font-mono text-sm"
-                                />
-                                {!isNew && (
-                                  <p className="text-xs text-muted-foreground">
-                                    Leave blank to keep existing value.
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                            <div className="space-y-2">
-                              <Label htmlFor="twilio_phone_number">
-                                Phone Number{" "}
-                                {isNew && (
-                                  <span className="text-destructive">*</span>
-                                )}
-                              </Label>
-                              <Input
-                                id="twilio_phone_number"
-                                value={form.twilio_phone_number}
-                                onChange={(e) =>
-                                  setField(
-                                    "twilio_phone_number",
-                                    e.target.value,
-                                  )
-                                }
-                                placeholder="+14155551234"
-                                className="font-mono text-sm max-w-xs"
-                              />
-                              <p className="text-xs text-muted-foreground">
-                                Your Twilio phone number for outbound calls.
-                              </p>
-                            </div>
-                          </div>
-                        )}
+                        <div className="rounded-lg border border-border/50 bg-muted/30 p-3">
+                          <p className="text-xs text-muted-foreground">
+                            Telephony credentials and phone numbers are configured at the account level in{" "}
+                            <a href="/settings" className="text-violet-400 hover:underline">
+                              Settings
+                            </a>
+                            . The bot will use the default phone number for the selected provider.
+                          </p>
+                        </div>
                       </Section>
                     </CardContent>
                   </Card>
