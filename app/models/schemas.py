@@ -161,6 +161,7 @@ class CreateBotConfigRequest(BaseModel):
     twilio_phone_number: str | None = None
     phone_number_id: uuid.UUID | None = None
     circuit_breaker_enabled: bool = True
+    circuit_breaker_threshold: int = 3
     goal_config: GoalConfig | None = None
 
 
@@ -200,6 +201,7 @@ class UpdateBotConfigRequest(BaseModel):
     phone_number_id: uuid.UUID | None = None
     goal_config: GoalConfig | dict | None = None
     circuit_breaker_enabled: bool | None = None
+    circuit_breaker_threshold: int | None = None
     is_active: bool | None = None
 
 
@@ -244,6 +246,7 @@ class BotConfigResponse(BaseModel):
     phone_number_id: uuid.UUID | None = None
     goal_config: dict | None = None
     circuit_breaker_enabled: bool
+    circuit_breaker_threshold: int
     is_active: bool
     created_at: datetime
     updated_at: datetime

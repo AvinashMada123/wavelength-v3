@@ -56,6 +56,7 @@ class BotConfig(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False
     )
     circuit_breaker_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    circuit_breaker_threshold: Mapped[int] = mapped_column(Integer, nullable=False, server_default="3")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")

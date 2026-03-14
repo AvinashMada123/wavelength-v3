@@ -91,6 +91,7 @@ interface BotForm {
   twilio_auth_token: string;
   twilio_phone_number: string;
   circuit_breaker_enabled: boolean;
+  circuit_breaker_threshold: number;
 }
 
 const EMPTY_FORM: BotForm = {
@@ -127,6 +128,7 @@ const EMPTY_FORM: BotForm = {
   twilio_auth_token: "",
   twilio_phone_number: "",
   circuit_breaker_enabled: true,
+  circuit_breaker_threshold: 3,
 };
 
 const TIMING_OPTIONS = [
@@ -180,6 +182,7 @@ function botToForm(bot: BotConfig): BotForm {
     twilio_auth_token: "",
     twilio_phone_number: bot.twilio_phone_number || "",
     circuit_breaker_enabled: bot.circuit_breaker_enabled ?? true,
+    circuit_breaker_threshold: bot.circuit_breaker_threshold ?? 3,
   };
 }
 
@@ -1924,6 +1927,38 @@ export default function BotEditorPage() {
                             }
                           />
                         </div>
+
+                        {form.circuit_breaker_enabled && (
+                          <div className="flex items-center justify-between rounded-lg border p-4">
+                            <div className="space-y-1">
+                              <p className="text-sm font-medium">
+                                Failure Threshold
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Number of consecutive failures before the circuit
+                                breaker trips and holds queued calls.
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Input
+                                type="number"
+                                value={form.circuit_breaker_threshold}
+                                onChange={(e) =>
+                                  setField(
+                                    "circuit_breaker_threshold",
+                                    Math.max(1, Math.min(50, parseInt(e.target.value) || 1)),
+                                  )
+                                }
+                                min={1}
+                                max={50}
+                                className="w-20 text-center"
+                              />
+                              <span className="text-sm text-muted-foreground">
+                                failures
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </Section>
                     </CardContent>
                   </Card>

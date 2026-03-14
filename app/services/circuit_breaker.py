@@ -85,8 +85,12 @@ async def record_failure(db: AsyncSession, bot_id, reason: str) -> bool:
     cb.last_failure_reason = reason
     cb.updated_at = datetime.now(timezone.utc)
 
+    # Use threshold from BotConfig (authoritative), fall back to CircuitBreakerState
+    result = await db.execute(select(BotConfig.circuit_breaker_threshold).where(BotConfig.id == bot_id))
+    threshold = result.scalar_one_or_none() or cb.failure_threshold
+
     tripped = False
-    if cb.state == "closed" and cb.consecutive_failures >= cb.failure_threshold:
+    if cb.state == "closed" and cb.consecutive_failures >= threshold:
         cb.state = "open"
         cb.opened_at = datetime.now(timezone.utc)
         cb.opened_by = "auto"

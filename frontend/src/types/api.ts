@@ -39,6 +39,7 @@ export interface BotConfig {
   twilio_phone_number: string | null;
   goal_config: GoalConfig | null;
   circuit_breaker_enabled: boolean;
+  circuit_breaker_threshold: number;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -78,6 +79,7 @@ export interface CreateBotConfigRequest {
   twilio_auth_token?: string | null;
   twilio_phone_number?: string | null;
   circuit_breaker_enabled?: boolean;
+  circuit_breaker_threshold?: number;
   goal_config?: GoalConfig | null;
 }
 
@@ -116,6 +118,7 @@ export interface UpdateBotConfigRequest {
   twilio_phone_number?: string | null;
   goal_config?: GoalConfig | null;
   circuit_breaker_enabled?: boolean | null;
+  circuit_breaker_threshold?: number | null;
   is_active?: boolean | null;
 }
 
