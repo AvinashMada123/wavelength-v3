@@ -525,6 +525,20 @@ export function impersonateUser(userId: string): Promise<{ access_token: string;
   return apiFetch(`/api/admin/impersonate/${userId}`, { method: "POST" });
 }
 
+export interface OrgSettings {
+  org_id: string;
+  org_name: string;
+  max_concurrent_calls: number;
+}
+
+export function fetchOrgSettings(orgId: string): Promise<OrgSettings> {
+  return apiFetch(`/api/admin/organizations/${orgId}/settings`);
+}
+
+export function updateOrgSettings(orgId: string, data: { max_concurrent_calls?: number }): Promise<OrgSettings> {
+  return apiFetch(`/api/admin/organizations/${orgId}/settings`, { method: "PATCH", body: JSON.stringify(data) });
+}
+
 // --- Billing ---
 
 export interface CreditTransaction {

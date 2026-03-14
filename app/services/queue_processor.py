@@ -193,6 +193,15 @@ async def _processor_loop(loader: BotConfigLoader):
         await asyncio.sleep(POLL_INTERVAL)
 
 
+async def _get_org_max_concurrent(db: AsyncSession, org_id) -> int:
+    """Read max_concurrent_calls from org settings, default 15."""
+    result = await db.execute(
+        select(Organization.settings).where(Organization.id == org_id)
+    )
+    settings = result.scalar_one_or_none() or {}
+    return int(settings.get("max_concurrent_calls", 15))
+
+
 async def _process_batch(loader: BotConfigLoader):
     """Process one batch of queued calls across all bots.
 
@@ -200,18 +209,45 @@ async def _process_batch(loader: BotConfigLoader):
     inits from competing for TTS connections (causes 5-6s initial silence).
     """
     async with get_db_session() as db:
-        # Get distinct bot_ids that have queued calls
+        # Get distinct bot_ids that have queued calls, along with their org_id
         result = await db.execute(
-            select(QueuedCall.bot_id)
+            select(QueuedCall.bot_id, QueuedCall.org_id)
             .where(QueuedCall.status == "queued")
             .distinct()
         )
-        bot_ids = [row[0] for row in result.all()]
+        bot_rows = result.all()
+        bot_ids = [row[0] for row in bot_rows]
+
+    # Build org_id lookup and track org-level concurrency
+    bot_org_map: dict = {}
+    org_active_counts: dict = {}
+    org_limits: dict = {}
+
+    for bot_id, org_id in bot_rows:
+        bot_org_map[bot_id] = org_id
+
+    # Pre-fetch org limits and active counts
+    for org_id in set(bot_org_map.values()):
+        async with get_db_session() as db:
+            org_limits[org_id] = await _get_org_max_concurrent(db, org_id)
+            result = await db.execute(
+                select(func.count()).select_from(QueuedCall).where(
+                    QueuedCall.org_id == org_id,
+                    QueuedCall.status == "processing",
+                )
+            )
+            org_active_counts[org_id] = result.scalar() or 0
 
     # Collect all calls to process, then stagger initiation across all bots
     calls_to_process: list[tuple] = []  # (queue_id, bot_id)
 
     for bot_id in bot_ids:
+        org_id = bot_org_map.get(bot_id)
+
+        # Check org-level concurrency limit
+        if org_id and org_active_counts.get(org_id, 0) >= org_limits.get(org_id, 15):
+            continue
+
         async with get_db_session() as db:
             # Check circuit breaker
             if await circuit_breaker.is_open(db, bot_id):
@@ -230,6 +266,13 @@ async def _process_batch(loader: BotConfigLoader):
             if slots_available <= 0:
                 continue
 
+            # Also cap by org-level remaining slots
+            if org_id:
+                org_remaining = org_limits.get(org_id, 15) - org_active_counts.get(org_id, 0)
+                slots_available = min(slots_available, org_remaining)
+                if slots_available <= 0:
+                    continue
+
             # Fetch next batch of queued calls for this bot
             # FOR UPDATE SKIP LOCKED prevents multiple workers from picking up the same call
             result = await db.execute(
@@ -244,6 +287,9 @@ async def _process_batch(loader: BotConfigLoader):
             for queued_call in calls:
                 queued_call.status = "processing"
                 calls_to_process.append((queued_call.id, queued_call.bot_id))
+                # Track org-level count
+                if org_id:
+                    org_active_counts[org_id] = org_active_counts.get(org_id, 0) + 1
             await db.commit()
 
     # Stagger call initiation to avoid concurrent pipeline/TTS contention

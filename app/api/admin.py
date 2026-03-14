@@ -627,6 +627,72 @@ async def impersonate_user(
     )
 
 
+class OrgSettingsUpdateRequest(BaseModel):
+    max_concurrent_calls: int | None = Field(None, ge=1, le=100)
+
+
+class OrgSettingsResponse(BaseModel):
+    org_id: uuid.UUID
+    org_name: str
+    max_concurrent_calls: int
+
+
+@router.get("/organizations/{org_id}/settings", response_model=OrgSettingsResponse)
+async def get_org_settings(
+    org_id: uuid.UUID,
+    user: User = Depends(require_role("super_admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get org-level platform settings."""
+    result = await db.execute(select(Organization).where(Organization.id == org_id))
+    org = result.scalar_one_or_none()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    settings = org.settings or {}
+    return OrgSettingsResponse(
+        org_id=org.id,
+        org_name=org.name,
+        max_concurrent_calls=int(settings.get("max_concurrent_calls", 15)),
+    )
+
+
+@router.patch("/organizations/{org_id}/settings", response_model=OrgSettingsResponse)
+async def update_org_settings(
+    org_id: uuid.UUID,
+    req: OrgSettingsUpdateRequest,
+    user: User = Depends(require_role("super_admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update org-level platform settings (super admin only)."""
+    result = await db.execute(select(Organization).where(Organization.id == org_id))
+    org = result.scalar_one_or_none()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    settings = dict(org.settings or {})
+    if req.max_concurrent_calls is not None:
+        settings["max_concurrent_calls"] = req.max_concurrent_calls
+
+    org.settings = settings
+    org.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(org)
+
+    logger.info(
+        "admin_org_settings_updated",
+        org_id=str(org_id),
+        max_concurrent_calls=req.max_concurrent_calls,
+        by=str(user.id),
+    )
+
+    return OrgSettingsResponse(
+        org_id=org.id,
+        org_name=org.name,
+        max_concurrent_calls=int(settings.get("max_concurrent_calls", 15)),
+    )
+
+
 @router.get("/stats", response_model=PlatformStatsResponse)
 async def platform_stats(
     user: User = Depends(require_role("super_admin")),

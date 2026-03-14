@@ -29,6 +29,8 @@ import {
   impersonateUser,
   fetchOrgBalances,
   addCredits,
+  fetchOrgSettings,
+  updateOrgSettings,
   type AdminStats,
   type OrgSummary,
   type AdminUser,
@@ -221,6 +223,8 @@ function OrganizationsTab({
   const [expandedOrg, setExpandedOrg] = useState<string | null>(null);
   const [orgUsers, setOrgUsers] = useState<AdminUser[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [maxConcurrent, setMaxConcurrent] = useState(15);
+  const [savingConcurrent, setSavingConcurrent] = useState(false);
 
   async function handleCreateOrg(e: FormEvent) {
     e.preventDefault();
@@ -253,12 +257,28 @@ function OrganizationsTab({
     setExpandedOrg(orgId);
     setLoadingUsers(true);
     try {
-      const users = await fetchAdminUsers(orgId);
+      const [users, settings] = await Promise.all([
+        fetchAdminUsers(orgId),
+        fetchOrgSettings(orgId),
+      ]);
       setOrgUsers(users);
+      setMaxConcurrent(settings.max_concurrent_calls);
     } catch {
       setOrgUsers([]);
     } finally {
       setLoadingUsers(false);
+    }
+  }
+
+  async function handleSaveConcurrency(orgId: string) {
+    setSavingConcurrent(true);
+    try {
+      await updateOrgSettings(orgId, { max_concurrent_calls: maxConcurrent });
+      toast.success("Concurrency limit updated");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to update");
+    } finally {
+      setSavingConcurrent(false);
     }
   }
 
@@ -415,6 +435,43 @@ function OrganizationsTab({
                               ))}
                             </div>
                           )}
+                          <div className="mt-4 pt-4 border-t">
+                            <p className="text-sm font-medium mb-2">
+                              Call Concurrency Limit
+                            </p>
+                            <div className="flex items-center gap-3">
+                              <Input
+                                type="number"
+                                value={maxConcurrent}
+                                onChange={(e) =>
+                                  setMaxConcurrent(
+                                    Math.max(1, Math.min(100, parseInt(e.target.value) || 1))
+                                  )
+                                }
+                                min={1}
+                                max={100}
+                                className="w-24 text-center"
+                              />
+                              <span className="text-xs text-muted-foreground">
+                                max concurrent calls
+                              </span>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={savingConcurrent}
+                                onClick={() => handleSaveConcurrency(org.id)}
+                              >
+                                {savingConcurrent ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  "Save"
+                                )}
+                              </Button>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Limits how many calls can be active at the same time across all bots in this org.
+                            </p>
+                          </div>
                         </TableCell>
                       </TableRow>
                     )}
