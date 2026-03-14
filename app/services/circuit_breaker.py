@@ -20,6 +20,7 @@ import structlog
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.bot_config import BotConfig
 from app.models.call_analytics import CallAnalytics
 from app.models.call_queue import CircuitBreakerState, QueuedCall
 
@@ -44,8 +45,19 @@ async def get_or_create(db: AsyncSession, bot_id) -> CircuitBreakerState:
     return cb
 
 
+async def is_exempt(db: AsyncSession, bot_id) -> bool:
+    """Check if bot has circuit breaker disabled (exempt from tripping)."""
+    result = await db.execute(select(BotConfig).where(BotConfig.id == bot_id))
+    bot = result.scalar_one_or_none()
+    if bot is None:
+        return False
+    return not bot.circuit_breaker_enabled
+
+
 async def is_open(db: AsyncSession, bot_id) -> bool:
     """Check if circuit breaker is open (calls should be held)."""
+    if await is_exempt(db, bot_id):
+        return False
     cb = await get_or_create(db, bot_id)
     return cb.state == "open"
 
@@ -62,7 +74,11 @@ async def record_success(db: AsyncSession, bot_id) -> None:
 async def record_failure(db: AsyncSession, bot_id, reason: str) -> bool:
     """
     Record a system failure. Returns True if circuit just tripped open.
+    If circuit breaker is disabled for this bot, failures are logged but never trip.
     """
+    if await is_exempt(db, bot_id):
+        logger.info("circuit_breaker_exempt_failure", bot_id=str(bot_id), reason=reason)
+        return False
     cb = await get_or_create(db, bot_id)
     cb.consecutive_failures += 1
     cb.last_failure_at = datetime.now(timezone.utc)
@@ -156,6 +172,9 @@ async def check_alert_threshold(db: AsyncSession, bot_id) -> bool:
     Returns True if the bot was just paused.
     """
     if ALERT_PAUSE_THRESHOLD <= 0:
+        return False
+
+    if await is_exempt(db, bot_id):
         return False
 
     # Already open — nothing to do

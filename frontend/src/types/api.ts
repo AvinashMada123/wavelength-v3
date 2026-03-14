@@ -38,6 +38,7 @@ export interface BotConfig {
   plivo_caller_id: string;
   twilio_phone_number: string | null;
   goal_config: GoalConfig | null;
+  circuit_breaker_enabled: boolean;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -76,6 +77,7 @@ export interface CreateBotConfigRequest {
   twilio_account_sid?: string | null;
   twilio_auth_token?: string | null;
   twilio_phone_number?: string | null;
+  circuit_breaker_enabled?: boolean;
   goal_config?: GoalConfig | null;
 }
 
@@ -113,6 +115,7 @@ export interface UpdateBotConfigRequest {
   twilio_auth_token?: string | null;
   twilio_phone_number?: string | null;
   goal_config?: GoalConfig | null;
+  circuit_breaker_enabled?: boolean | null;
   is_active?: boolean | null;
 }
 

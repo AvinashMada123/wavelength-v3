@@ -90,6 +90,7 @@ interface BotForm {
   twilio_account_sid: string;
   twilio_auth_token: string;
   twilio_phone_number: string;
+  circuit_breaker_enabled: boolean;
 }
 
 const EMPTY_FORM: BotForm = {
@@ -125,6 +126,7 @@ const EMPTY_FORM: BotForm = {
   twilio_account_sid: "",
   twilio_auth_token: "",
   twilio_phone_number: "",
+  circuit_breaker_enabled: true,
 };
 
 const TIMING_OPTIONS = [
@@ -177,6 +179,7 @@ function botToForm(bot: BotConfig): BotForm {
     twilio_account_sid: "",
     twilio_auth_token: "",
     twilio_phone_number: bot.twilio_phone_number || "",
+    circuit_breaker_enabled: bot.circuit_breaker_enabled ?? true,
   };
 }
 
@@ -1894,6 +1897,32 @@ export default function BotEditorPage() {
                               </span>
                             </div>
                           </div>
+                        </div>
+                      </Section>
+
+                      <Separator />
+
+                      <Section
+                        title="Circuit Breaker"
+                        description="Automatically pause queued calls when consecutive failures are detected."
+                      >
+                        <div className="flex items-center justify-between rounded-lg border p-4">
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium">
+                              Circuit Breaker
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              When disabled, failures won&apos;t trip the circuit
+                              breaker and calls will keep flowing regardless of
+                              errors.
+                            </p>
+                          </div>
+                          <Switch
+                            checked={form.circuit_breaker_enabled}
+                            onCheckedChange={(v) =>
+                              setField("circuit_breaker_enabled", v)
+                            }
+                          />
                         </div>
                       </Section>
                     </CardContent>
