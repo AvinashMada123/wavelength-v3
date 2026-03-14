@@ -78,8 +78,6 @@ interface BotForm {
   context_variables: Record<string, string>;
   silence_timeout_secs: number;
   ghl_webhook_url: string;
-  ghl_api_key: string;
-  ghl_location_id: string;
   ghl_post_call_tag: string;
   ghl_workflows: GHLWorkflow[];
   max_call_duration: number;
@@ -115,8 +113,6 @@ const EMPTY_FORM: BotForm = {
   context_variables: {},
   silence_timeout_secs: 5,
   ghl_webhook_url: "",
-  ghl_api_key: "",
-  ghl_location_id: "",
   ghl_post_call_tag: "",
   ghl_workflows: [],
   max_call_duration: 480,
@@ -169,8 +165,6 @@ function botToForm(bot: BotConfig): BotForm {
     context_variables: bot.context_variables || {},
     silence_timeout_secs: bot.silence_timeout_secs,
     ghl_webhook_url: bot.ghl_webhook_url || "",
-    ghl_api_key: bot.ghl_api_key || "",
-    ghl_location_id: bot.ghl_location_id || "",
     ghl_post_call_tag: bot.ghl_post_call_tag || "",
     ghl_workflows: bot.ghl_workflows || [],
     max_call_duration: bot.max_call_duration ?? 480,
@@ -1314,56 +1308,17 @@ export default function BotEditorPage() {
                       <CardContent className="pt-6 space-y-8">
                         <Section
                           title="GoHighLevel"
-                          description="Connect your CRM for post-call tagging and workflow triggers."
+                          description="CRM tagging and workflow triggers for this bot."
                         >
                           <div className="space-y-4">
-                            <div className="space-y-2">
-                              <Label htmlFor="ghl_webhook_url">
-                                Webhook URL
-                              </Label>
-                              <Input
-                                id="ghl_webhook_url"
-                                value={form.ghl_webhook_url}
-                                onChange={(e) =>
-                                  setField("ghl_webhook_url", e.target.value)
-                                }
-                                placeholder="https://services.leadconnectorhq.com/hooks/..."
-                                className="font-mono text-sm"
-                              />
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              <div className="space-y-2">
-                                <Label htmlFor="ghl_api_key">API Key</Label>
-                                <Input
-                                  id="ghl_api_key"
-                                  type="password"
-                                  value={form.ghl_api_key}
-                                  onChange={(e) =>
-                                    setField("ghl_api_key", e.target.value)
-                                  }
-                                  placeholder={
-                                    !isNew ? "(unchanged)" : "Your GHL API key"
-                                  }
-                                  className="font-mono text-sm"
-                                />
-                              </div>
-                              <div className="space-y-2">
-                                <Label htmlFor="ghl_location_id">
-                                  Location ID
-                                </Label>
-                                <Input
-                                  id="ghl_location_id"
-                                  value={form.ghl_location_id}
-                                  onChange={(e) =>
-                                    setField(
-                                      "ghl_location_id",
-                                      e.target.value,
-                                    )
-                                  }
-                                  placeholder="e.g. abc123XYZ"
-                                  className="font-mono text-sm"
-                                />
-                              </div>
+                            <div className="rounded-lg border border-border/50 bg-muted/30 p-3">
+                              <p className="text-xs text-muted-foreground">
+                                GHL API Key and Location ID are configured at the account level in{" "}
+                                <a href="/settings" className="text-violet-400 hover:underline">
+                                  Settings
+                                </a>
+                                .
+                              </p>
                             </div>
                             <div className="space-y-2">
                               <Label htmlFor="ghl_post_call_tag">

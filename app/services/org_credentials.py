@@ -21,10 +21,10 @@ async def enrich_with_org_creds(db: AsyncSession, bot_config) -> None:
     if not org:
         return
 
-    # GHL credentials
-    if not getattr(bot_config, "ghl_api_key", None) and org.ghl_api_key:
+    # GHL credentials — always from org (account-wide)
+    if org.ghl_api_key:
         bot_config.ghl_api_key = org.ghl_api_key
-    if not getattr(bot_config, "ghl_location_id", None) and org.ghl_location_id:
+    if org.ghl_location_id:
         bot_config.ghl_location_id = org.ghl_location_id
 
     # Telephony credentials (for legacy code paths)

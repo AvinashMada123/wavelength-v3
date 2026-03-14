@@ -101,8 +101,8 @@ async def _post_ghl_outcome(
     error: str | None = None,
     metadata: dict | None = None,
 ):
-    if not ctx.ghl_webhook_url or ghl_client is None:
-        return
+    # Webhook URL posting disabled — GHL integration uses tag-based workflows now
+    return
 
     outcome_data = {
         "call_sid": ctx.call_sid,
