@@ -12,12 +12,15 @@ from pydantic import BaseModel
 from sqlalchemy import and_, case, extract, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import asyncio
+
 from app.auth.dependencies import get_current_user, get_current_org
 from app.database import get_db
 from app.models.billing import CreditTransaction
 from app.models.bot_config import BotConfig
 from app.models.call_analytics import CallAnalytics
 from app.models.call_log import CallLog
+from app.services.call_analyzer import CallAnalyzer
 
 logger = structlog.get_logger(__name__)
 
@@ -419,6 +422,201 @@ async def get_cost_breakdown(
         cost_per_conversion=cost_per_conversion,
         cost_by_type=cost_by_type,
         daily_costs=daily_costs,
+    )
+
+
+# --- Reanalysis endpoint ---
+
+
+class ReanalysisResponse(BaseModel):
+    total_eligible: int
+    processed: int
+    succeeded: int
+    failed: int
+    errors: list[str]
+
+
+def _compute_agent_word_share(transcript: list[dict]) -> float:
+    bot_words = sum(len(t["content"].split()) for t in transcript if t.get("role") == "assistant")
+    user_words = sum(len(t["content"].split()) for t in transcript if t.get("role") == "user")
+    total = bot_words + user_words
+    return round(bot_words / total, 2) if total > 0 else 0.0
+
+
+def _get_max_severity(red_flags: list) -> str | None:
+    severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    if not red_flags:
+        return None
+    severities = [rf.get("severity", "low") for rf in red_flags]
+    return min(severities, key=lambda s: severity_order.get(s, 99))
+
+
+@router.post("/reanalyze", response_model=ReanalysisResponse)
+async def reanalyze_calls(
+    bot_id: uuid.UUID | None = Query(None, description="Only reanalyze calls for this bot"),
+    limit: int = Query(100, ge=1, le=500, description="Max calls to reanalyze"),
+    force: bool = Query(False, description="Re-run even if CallAnalytics row exists"),
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
+    """Reanalyze historical calls that have transcripts.
+
+    Finds calls with transcript data and runs the enhanced CallAnalyzer
+    to populate/update CallAnalytics rows with sentiment, temperature,
+    objections, buying signals, etc.
+    """
+    # Find eligible calls: have metadata with transcript
+    filters = [
+        CallLog.org_id == org_id,
+        CallLog.status == "completed",
+        CallLog.metadata_.isnot(None),
+    ]
+    if bot_id:
+        filters.append(CallLog.bot_id == bot_id)
+
+    if not force:
+        # Only calls WITHOUT existing CallAnalytics row
+        subq = select(CallAnalytics.call_log_id).where(
+            CallAnalytics.call_log_id.isnot(None)
+        ).correlate(CallLog)
+        filters.append(~CallLog.id.in_(subq))
+
+    query = (
+        select(CallLog)
+        .where(*filters)
+        .order_by(CallLog.created_at.desc())
+        .limit(limit)
+    )
+    result = await db.execute(query)
+    calls = result.scalars().all()
+
+    total_eligible = len(calls)
+    if total_eligible == 0:
+        return ReanalysisResponse(
+            total_eligible=0, processed=0, succeeded=0, failed=0, errors=[]
+        )
+
+    # Load bot configs for goal_config
+    bot_ids = list({c.bot_id for c in calls})
+    bot_result = await db.execute(
+        select(BotConfig).where(BotConfig.id.in_(bot_ids))
+    )
+    bots_by_id = {b.id: b for b in bot_result.scalars().all()}
+
+    analyzer = CallAnalyzer()
+    succeeded = 0
+    failed = 0
+    errors: list[str] = []
+
+    for call in calls:
+        try:
+            meta = call.metadata_ or {}
+            transcript = meta.get("transcript", [])
+            if not transcript or len(transcript) < 2:
+                continue
+
+            bot_cfg = bots_by_id.get(call.bot_id)
+            goal_cfg = None
+            system_prompt = ""
+            if bot_cfg:
+                goal_cfg = bot_cfg.goal_config
+                system_prompt = bot_cfg.system_prompt_template or ""
+
+            analysis = await analyzer.analyze(
+                transcript=transcript,
+                goal_config=goal_cfg,
+                system_prompt=system_prompt,
+                realtime_red_flags=[],
+                call_sid=call.call_sid,
+            )
+
+            if not analysis:
+                failed += 1
+                errors.append(f"{call.call_sid}: analysis returned None")
+                continue
+
+            # Build analytics data
+            red_flags_dicts = [rf.model_dump() for rf in analysis.red_flags]
+            has_flags = len(red_flags_dicts) > 0
+            max_severity = _get_max_severity(red_flags_dicts) if has_flags else None
+
+            goal_type = None
+            if goal_cfg:
+                goal_type = goal_cfg.get("goal_type") if isinstance(goal_cfg, dict) else getattr(goal_cfg, "goal_type", None)
+
+            analytics_data = dict(
+                org_id=call.org_id,
+                bot_id=call.bot_id,
+                goal_type=goal_type,
+                goal_outcome=analysis.goal_outcome,
+                has_red_flags=has_flags,
+                red_flag_max_severity=max_severity,
+                red_flags=red_flags_dicts if has_flags else None,
+                captured_data=analysis.captured_data or None,
+                sentiment=analysis.sentiment,
+                sentiment_score=analysis.sentiment_score,
+                lead_temperature=analysis.lead_temperature,
+                objections=analysis.objections,
+                buying_signals=analysis.buying_signals,
+                turn_count=len([t for t in transcript if t.get("role") == "user"]),
+                call_duration_secs=call.call_duration,
+                agent_word_share=_compute_agent_word_share(transcript),
+                analysis_input_tokens=analysis.input_tokens,
+                analysis_output_tokens=analysis.output_tokens,
+            )
+
+            # Upsert
+            existing = await db.execute(
+                select(CallAnalytics).where(CallAnalytics.call_log_id == call.id)
+            )
+            existing_row = existing.scalar_one_or_none()
+
+            if existing_row:
+                for key, value in analytics_data.items():
+                    setattr(existing_row, key, value)
+            else:
+                row = CallAnalytics(call_log_id=call.id, **analytics_data)
+                db.add(row)
+
+            # Update call metadata with new analysis fields
+            updated_meta = dict(meta)
+            if analysis.summary:
+                updated_meta["interest_level"] = analysis.interest_level
+            if analysis.sentiment:
+                updated_meta["sentiment"] = analysis.sentiment
+                updated_meta["sentiment_score"] = analysis.sentiment_score
+            if analysis.lead_temperature:
+                updated_meta["lead_temperature"] = analysis.lead_temperature
+            if analysis.goal_outcome:
+                updated_meta["goal_outcome"] = analysis.goal_outcome
+            call.metadata_ = updated_meta
+
+            if analysis.summary and not call.summary:
+                call.summary = analysis.summary
+
+            await db.commit()
+            succeeded += 1
+
+            logger.info(
+                "reanalysis_completed",
+                call_sid=call.call_sid,
+                sentiment=analysis.sentiment,
+                temperature=analysis.lead_temperature,
+                goal_outcome=analysis.goal_outcome,
+            )
+
+        except Exception as e:
+            failed += 1
+            errors.append(f"{call.call_sid}: {str(e)[:100]}")
+            logger.error("reanalysis_failed", call_sid=call.call_sid, error=str(e))
+            await db.rollback()
+
+    return ReanalysisResponse(
+        total_eligible=total_eligible,
+        processed=succeeded + failed,
+        succeeded=succeeded,
+        failed=failed,
+        errors=errors[:20],  # cap error messages
     )
 
 

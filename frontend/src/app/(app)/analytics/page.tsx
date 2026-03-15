@@ -85,7 +85,7 @@ import {
 } from "@/hooks/use-analytics";
 import { useCallLogs } from "@/hooks/use-calls";
 import { formatDuration, timeAgo } from "@/lib/utils";
-import { acknowledgeAlert, snoozeAlert } from "@/lib/api";
+import { acknowledgeAlert, snoozeAlert, reanalyzeCalls } from "@/lib/api";
 import { toast } from "sonner";
 import type { TrendPoint } from "@/types/api";
 
@@ -424,6 +424,32 @@ export default function AnalyticsPage() {
               </SelectContent>
             </Select>
             <DateRangePicker value={dateRange} onChange={setDateRange} />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                toast.info("Reanalyzing calls... This may take a few minutes.");
+                try {
+                  const result = await reanalyzeCalls({
+                    bot_id: effectiveBotId || undefined,
+                    limit: 200,
+                  });
+                  if (result.succeeded > 0) {
+                    toast.success(
+                      `Reanalyzed ${result.succeeded} calls. ${result.failed > 0 ? `${result.failed} failed.` : ""} Refresh to see updated data.`
+                    );
+                  } else if (result.total_eligible === 0) {
+                    toast.info("All calls are already analyzed. Use force=true to re-run.");
+                  } else {
+                    toast.error(`Reanalysis failed for ${result.failed} calls.`);
+                  }
+                } catch (e: any) {
+                  toast.error(e.message || "Reanalysis failed");
+                }
+              }}
+            >
+              Reanalyze Calls
+            </Button>
             {loading && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-violet-500 border-t-transparent" />

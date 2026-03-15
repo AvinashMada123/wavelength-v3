@@ -721,3 +721,26 @@ export function fetchCostBreakdown(params?: {
   const qs = sp.toString();
   return apiFetch(`/api/analytics/cost-breakdown${qs ? `?${qs}` : ""}`);
 }
+
+// --- Reanalysis ---
+
+export interface ReanalysisResult {
+  total_eligible: number;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  errors: string[];
+}
+
+export function reanalyzeCalls(params?: {
+  bot_id?: string;
+  limit?: number;
+  force?: boolean;
+}): Promise<ReanalysisResult> {
+  const sp = new URLSearchParams();
+  if (params?.bot_id) sp.set("bot_id", params.bot_id);
+  if (params?.limit) sp.set("limit", String(params.limit));
+  if (params?.force) sp.set("force", "true");
+  const qs = sp.toString();
+  return apiFetch(`/api/analytics/reanalyze${qs ? `?${qs}` : ""}`, { method: "POST" });
+}
