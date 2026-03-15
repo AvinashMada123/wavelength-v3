@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import case, extract, func, select, update
+from sqlalchemy import and_, case, extract, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user, get_current_org
@@ -177,7 +177,7 @@ async def get_dashboard(
     # --- Total calls & connected % & avg duration ---
     stats_query = select(
         func.count().label("total"),
-        func.sum(case((CallLog.status == "completed", 1), else_=0)).label("connected"),
+        func.sum(case((and_(CallLog.status == "completed", CallLog.call_duration > 10), 1), else_=0)).label("connected"),
         func.avg(CallLog.call_duration).label("avg_duration"),
     ).where(*cl_filters)
     stats_row = (await db.execute(stats_query)).one()
@@ -244,7 +244,7 @@ async def get_dashboard(
         select(
             func.date_trunc("day", CallLog.created_at).label("day"),
             func.count().label("total"),
-            func.sum(case((CallLog.status == "completed", 1), else_=0)).label("connected"),
+            func.sum(case((and_(CallLog.status == "completed", CallLog.call_duration > 10), 1), else_=0)).label("connected"),
         )
         .where(*cl_filters)
         .group_by("day")
