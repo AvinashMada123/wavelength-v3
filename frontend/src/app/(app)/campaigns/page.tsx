@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Megaphone,
@@ -17,6 +18,7 @@ import {
   AlertCircle,
   Ban,
   FileEdit,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -116,6 +118,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function CampaignsPage() {
+  const router = useRouter();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -594,6 +597,15 @@ export default function CampaignsPage() {
                                 {campaign.completed_leads}/{campaign.total_leads}{" "}
                                 leads completed
                               </span>
+                              {campaign.total_leads > 0 && (
+                                <span className="text-blue-400">
+                                  {Math.round(
+                                    ((campaign.completed_leads - campaign.failed_leads) /
+                                      campaign.total_leads) *
+                                      100
+                                  )}% connected
+                                </span>
+                              )}
                               {campaign.failed_leads > 0 && (
                                 <span className="text-red-400">
                                   {campaign.failed_leads} failed
@@ -605,11 +617,22 @@ export default function CampaignsPage() {
                               </span>
                             </div>
                           </div>
-                          <div className="flex items-center gap-3 sm:w-48">
+                          <div className="flex items-center gap-3 sm:w-56">
                             <Progress value={progressPct} className="flex-1" />
                             <span className="text-xs font-medium text-muted-foreground w-10 text-right">
                               {progressPct}%
                             </span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-xs text-violet-400 hover:text-violet-300"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                router.push(`/campaigns/${campaign.id}`);
+                              }}
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                            </Button>
                           </div>
                         </div>
 
