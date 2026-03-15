@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   BarChart3,
@@ -246,7 +246,6 @@ export default function AnalyticsPage() {
     failed: number;
     callName: string;
   } | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
 
   const selectedBot = useMemo(
     () => bots.find((b) => b.id === effectiveBotId),
@@ -455,8 +454,6 @@ export default function AnalyticsPage() {
               size="sm"
               disabled={!!reanalysis?.running}
               onClick={async () => {
-                const abort = new AbortController();
-                abortRef.current = abort;
                 setReanalysis({ running: true, total: 0, current: 0, succeeded: 0, failed: 0, callName: "" });
 
                 try {
@@ -466,65 +463,66 @@ export default function AnalyticsPage() {
                   params.set("limit", "500");
                   params.set("force", "true");
 
-                  const res = await fetch(`/api/analytics/reanalyze-stream?${params}`, {
+                  const startRes = await fetch(`/api/analytics/reanalyze-start?${params}`, {
                     method: "POST",
                     headers: { Authorization: `Bearer ${token}` },
-                    signal: abort.signal,
                   });
 
-                  if (!res.ok || !res.body) {
+                  if (!startRes.ok) {
                     toast.error("Failed to start reanalysis");
                     setReanalysis(null);
                     return;
                   }
 
-                  const reader = res.body.getReader();
-                  const decoder = new TextDecoder();
-                  let buffer = "";
+                  const startData = await startRes.json();
+                  const jobId = startData.job_id;
 
-                  while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split("\n");
-                    buffer = lines.pop() || "";
-                    for (const line of lines) {
-                      if (!line.startsWith("data: ")) continue;
+                  if (startData.status === "done" && startData.total === 0) {
+                    toast.info("All calls are already analyzed.");
+                    setReanalysis(null);
+                    return;
+                  }
+
+                  setReanalysis(prev => prev ? { ...prev, total: startData.total } : prev);
+
+                  // Poll for progress
+                  const poll = async () => {
+                    while (true) {
+                      await new Promise(r => setTimeout(r, 2000));
                       try {
-                        const evt = JSON.parse(line.slice(6));
-                        if (evt.type === "started") {
-                          setReanalysis(prev => prev ? { ...prev, total: evt.total } : prev);
-                        } else if (evt.type === "progress") {
-                          setReanalysis(prev => prev ? {
-                            ...prev,
-                            current: evt.current,
-                            total: evt.total,
-                            succeeded: evt.succeeded,
-                            failed: evt.failed,
-                            callName: evt.call_name || "",
-                          } : prev);
-                        } else if (evt.type === "done") {
-                          if (evt.succeeded > 0) {
-                            toast.success(`Reanalyzed ${evt.succeeded} calls.${evt.failed > 0 ? ` ${evt.failed} failed.` : ""}`);
-                          } else if (evt.total === 0) {
-                            toast.info("All calls are already analyzed.");
+                        const statusRes = await fetch(`/api/analytics/reanalyze-status/${jobId}`, {
+                          headers: { Authorization: `Bearer ${token}` },
+                        });
+                        if (!statusRes.ok) break;
+                        const status = await statusRes.json();
+
+                        setReanalysis(prev => prev ? {
+                          ...prev,
+                          current: status.current,
+                          total: status.total,
+                          succeeded: status.succeeded,
+                          failed: status.failed,
+                          callName: status.call_name || "",
+                        } : prev);
+
+                        if (status.status === "done") {
+                          if (status.succeeded > 0) {
+                            toast.success(`Reanalyzed ${status.succeeded} calls.${status.failed > 0 ? ` ${status.failed} failed.` : ""}`);
                           } else {
-                            toast.error(`Reanalysis failed for ${evt.failed} calls.`);
+                            toast.error(`Reanalysis failed for ${status.failed} calls.`);
                           }
                           setReanalysis(null);
+                          return;
                         }
-                      } catch {}
+                      } catch {
+                        break;
+                      }
                     }
-                  }
-                  // Stream ended without done event
-                  setReanalysis(prev => {
-                    if (prev?.running) return null;
-                    return prev;
-                  });
+                    setReanalysis(null);
+                  };
+                  await poll();
                 } catch (e: any) {
-                  if (e.name !== "AbortError") {
-                    toast.error(e.message || "Reanalysis failed");
-                  }
+                  toast.error(e.message || "Reanalysis failed");
                   setReanalysis(null);
                 }
               }}
@@ -973,17 +971,42 @@ export default function AnalyticsPage() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                      <div className="flex gap-3 mb-3 opacity-30">
-                        <Smile className="h-8 w-8" />
-                        <Meh className="h-8 w-8" />
-                        <Frown className="h-8 w-8" />
+                    {!summary?.sentiment_distribution || Object.values(summary.sentiment_distribution).every(v => v === 0) ? (
+                      <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                        <div className="flex gap-3 mb-3 opacity-30">
+                          <Smile className="h-8 w-8" />
+                          <Meh className="h-8 w-8" />
+                          <Frown className="h-8 w-8" />
+                        </div>
+                        <p className="text-sm text-center max-w-xs">
+                          No sentiment data yet — reanalyze calls to generate
+                        </p>
                       </div>
-                      <p className="text-sm text-center max-w-xs">
-                        Sentiment analysis data will appear here once calls are
-                        processed
-                      </p>
-                    </div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height={260}>
+                        <PieChart>
+                          <Pie
+                            data={[
+                              { name: "Positive", value: summary.sentiment_distribution.positive || 0, fill: EMERALD },
+                              { name: "Neutral", value: summary.sentiment_distribution.neutral || 0, fill: AMBER },
+                              { name: "Negative", value: summary.sentiment_distribution.negative || 0, fill: ROSE },
+                            ].filter(d => d.value > 0)}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={60}
+                            outerRadius={100}
+                            paddingAngle={3}
+                            dataKey="value"
+                            label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
+                          >
+                            {[EMERALD, AMBER, ROSE].map((color, i) => (
+                              <Cell key={i} fill={color} />
+                            ))}
+                          </Pie>
+                          <Tooltip contentStyle={{ background: "#1a1a2e", border: "1px solid #333", borderRadius: 8 }} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    )}
                   </CardContent>
                 </Card>
               </div>

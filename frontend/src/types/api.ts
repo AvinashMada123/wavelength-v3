@@ -226,6 +226,7 @@ export interface AnalyticsSummaryResponse {
   avg_agent_word_share: number | null;
   red_flag_rate: number;
   total_red_flags: number;
+  sentiment_distribution: Record<string, number> | null;
   period_start: string | null;
   period_end: string | null;
 }

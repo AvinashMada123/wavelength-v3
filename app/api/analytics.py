@@ -7,8 +7,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import and_, case, extract, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,6 +44,7 @@ class AnalyticsSummaryResponse(BaseModel):
     avg_agent_word_share: float | None
     red_flag_rate: float
     total_red_flags: int
+    sentiment_distribution: dict[str, int] | None = None
     period_start: datetime | None
     period_end: datetime | None
 
@@ -200,6 +200,7 @@ async def get_dashboard(
         CallAnalytics.goal_outcome,
         CallAnalytics.red_flags,
         CallAnalytics.captured_data,
+        CallAnalytics.sentiment,
     ).where(*ca_filters)
     analytics_result = await db.execute(analytics_query)
     analytics_rows = analytics_result.all()
@@ -234,9 +235,8 @@ async def get_dashboard(
         elif outcome not in ("none", "unknown"):
             conversions += 1
 
-        # Extract sentiment from captured_data if available
-        captured = row.captured_data or {}
-        sentiment_val = captured.get("sentiment")
+        # Extract sentiment from the dedicated column
+        sentiment_val = row.sentiment
         if sentiment_val in sentiment_dist:
             sentiment_dist[sentiment_val] += 1
 
@@ -675,8 +675,24 @@ async def reanalyze_calls(
     )
 
 
-@router.post("/reanalyze-stream")
-async def reanalyze_calls_stream(
+# --- Background reanalysis with polling ---
+
+# In-memory job tracker (single-process safe)
+_reanalysis_jobs: dict[str, dict] = {}
+
+
+class ReanalysisJobStatus(BaseModel):
+    job_id: str
+    status: str  # "running" | "done"
+    total: int
+    current: int
+    succeeded: int
+    failed: int
+    call_name: str
+
+
+@router.post("/reanalyze-start", response_model=ReanalysisJobStatus)
+async def start_reanalysis(
     request: Request,
     bot_id: uuid.UUID | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
@@ -684,8 +700,8 @@ async def reanalyze_calls_stream(
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_current_org),
 ):
-    """Streaming reanalysis — sends SSE progress events as each call completes."""
-    import json
+    """Start a background reanalysis job and return a job_id for polling."""
+    from app.database import async_session_factory
 
     filters = [
         CallLog.org_id == org_id,
@@ -702,130 +718,156 @@ async def reanalyze_calls_stream(
         filters.append(~CallLog.id.in_(subq))
 
     result = await db.execute(
-        select(CallLog)
+        select(CallLog.id, CallLog.bot_id, CallLog.call_sid, CallLog.contact_name)
         .where(*filters)
         .order_by(CallLog.created_at.desc())
         .limit(limit)
     )
-    calls = result.scalars().all()
-    total = len(calls)
+    call_refs = result.all()
+    total = len(call_refs)
+
+    job_id = str(uuid.uuid4())[:8]
+    job = {
+        "status": "running" if total > 0 else "done",
+        "total": total,
+        "current": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "call_name": "",
+    }
+    _reanalysis_jobs[job_id] = job
 
     if total == 0:
-        async def empty_stream():
-            yield f"data: {json.dumps({'type': 'done', 'total': 0, 'succeeded': 0, 'failed': 0})}\n\n"
-        return StreamingResponse(empty_stream(), media_type="text/event-stream")
+        return ReanalysisJobStatus(job_id=job_id, **job)
 
-    bot_ids_set = list({c.bot_id for c in calls})
-    bot_result = await db.execute(
-        select(BotConfig).where(BotConfig.id.in_(bot_ids_set))
-    )
-    bots_by_id = {b.id: b for b in bot_result.scalars().all()}
+    call_ids = [r.id for r in call_refs]
+    call_names = {r.id: r.contact_name or "Unknown" for r in call_refs}
 
-    async def event_stream():
-        yield f"data: {json.dumps({'type': 'started', 'total': total})}\n\n"
+    async def run_reanalysis():
+        async with async_session_factory() as session:
+            # Load full call objects
+            res = await session.execute(
+                select(CallLog).where(CallLog.id.in_(call_ids))
+            )
+            calls = res.scalars().all()
 
-        analyzer = CallAnalyzer()
-        succeeded = 0
-        failed = 0
+            bot_ids_set = list({c.bot_id for c in calls})
+            bot_res = await session.execute(
+                select(BotConfig).where(BotConfig.id.in_(bot_ids_set))
+            )
+            bots_by_id = {b.id: b for b in bot_res.scalars().all()}
 
-        for i, call in enumerate(calls):
-            if await request.is_disconnected():
-                break
-            try:
-                meta = call.metadata_ or {}
-                transcript = meta.get("transcript", [])
-                if not transcript or len(transcript) < 2:
-                    continue
+            analyzer = CallAnalyzer()
 
-                bot_cfg = bots_by_id.get(call.bot_id)
-                goal_cfg = None
-                system_prompt = ""
-                if bot_cfg:
-                    goal_cfg = bot_cfg.goal_config
-                    system_prompt = bot_cfg.system_prompt_template or ""
+            for i, call in enumerate(calls):
+                job["call_name"] = call_names.get(call.id, "Unknown")
+                try:
+                    meta = call.metadata_ or {}
+                    transcript = meta.get("transcript", [])
+                    if not transcript or len(transcript) < 2:
+                        job["current"] = i + 1
+                        continue
 
-                analysis = await analyzer.analyze(
-                    transcript=transcript,
-                    goal_config=goal_cfg,
-                    system_prompt=system_prompt,
-                    realtime_red_flags=[],
-                    call_sid=call.call_sid,
-                )
+                    bot_cfg = bots_by_id.get(call.bot_id)
+                    goal_cfg = None
+                    system_prompt = ""
+                    if bot_cfg:
+                        goal_cfg = bot_cfg.goal_config
+                        system_prompt = bot_cfg.system_prompt_template or ""
 
-                if not analysis:
-                    failed += 1
-                    yield f"data: {json.dumps({'type': 'progress', 'current': i + 1, 'total': total, 'succeeded': succeeded, 'failed': failed, 'call_name': call.contact_name or 'Unknown'})}\n\n"
-                    continue
+                    analysis = await analyzer.analyze(
+                        transcript=transcript,
+                        goal_config=goal_cfg,
+                        system_prompt=system_prompt,
+                        realtime_red_flags=[],
+                        call_sid=call.call_sid,
+                    )
 
-                red_flags_dicts = [rf.model_dump() for rf in analysis.red_flags]
-                has_flags = len(red_flags_dicts) > 0
-                max_severity = _get_max_severity(red_flags_dicts) if has_flags else None
+                    if not analysis:
+                        job["failed"] += 1
+                        job["current"] = i + 1
+                        continue
 
-                goal_type = None
-                if goal_cfg:
-                    goal_type = goal_cfg.get("goal_type") if isinstance(goal_cfg, dict) else getattr(goal_cfg, "goal_type", None)
+                    red_flags_dicts = [rf.model_dump() for rf in analysis.red_flags]
+                    has_flags = len(red_flags_dicts) > 0
+                    max_severity = _get_max_severity(red_flags_dicts) if has_flags else None
 
-                analytics_data = dict(
-                    org_id=call.org_id,
-                    bot_id=call.bot_id,
-                    goal_type=goal_type,
-                    goal_outcome=analysis.goal_outcome,
-                    has_red_flags=has_flags,
-                    red_flag_max_severity=max_severity,
-                    red_flags=red_flags_dicts if has_flags else None,
-                    captured_data=analysis.captured_data or None,
-                    sentiment=analysis.sentiment,
-                    sentiment_score=analysis.sentiment_score,
-                    lead_temperature=analysis.lead_temperature,
-                    objections=analysis.objections,
-                    buying_signals=analysis.buying_signals,
-                    turn_count=len([t for t in transcript if t.get("role") == "user"]),
-                    call_duration_secs=call.call_duration,
-                    agent_word_share=_compute_agent_word_share(transcript),
-                    analysis_input_tokens=analysis.input_tokens,
-                    analysis_output_tokens=analysis.output_tokens,
-                )
+                    goal_type = None
+                    if goal_cfg:
+                        goal_type = goal_cfg.get("goal_type") if isinstance(goal_cfg, dict) else getattr(goal_cfg, "goal_type", None)
 
-                existing = await db.execute(
-                    select(CallAnalytics).where(CallAnalytics.call_log_id == call.id)
-                )
-                existing_row = existing.scalar_one_or_none()
+                    analytics_data = dict(
+                        org_id=call.org_id,
+                        bot_id=call.bot_id,
+                        goal_type=goal_type,
+                        goal_outcome=analysis.goal_outcome,
+                        has_red_flags=has_flags,
+                        red_flag_max_severity=max_severity,
+                        red_flags=red_flags_dicts if has_flags else None,
+                        captured_data=analysis.captured_data or None,
+                        sentiment=analysis.sentiment,
+                        sentiment_score=analysis.sentiment_score,
+                        lead_temperature=analysis.lead_temperature,
+                        objections=analysis.objections,
+                        buying_signals=analysis.buying_signals,
+                        turn_count=len([t for t in transcript if t.get("role") == "user"]),
+                        call_duration_secs=call.call_duration,
+                        agent_word_share=_compute_agent_word_share(transcript),
+                        analysis_input_tokens=analysis.input_tokens,
+                        analysis_output_tokens=analysis.output_tokens,
+                    )
 
-                if existing_row:
-                    for key, value in analytics_data.items():
-                        setattr(existing_row, key, value)
-                else:
-                    row = CallAnalytics(call_log_id=call.id, **analytics_data)
-                    db.add(row)
+                    existing = await session.execute(
+                        select(CallAnalytics).where(CallAnalytics.call_log_id == call.id)
+                    )
+                    existing_row = existing.scalar_one_or_none()
 
-                updated_meta = dict(meta)
-                if analysis.summary:
-                    updated_meta["interest_level"] = analysis.interest_level
-                if analysis.sentiment:
-                    updated_meta["sentiment"] = analysis.sentiment
-                    updated_meta["sentiment_score"] = analysis.sentiment_score
-                if analysis.lead_temperature:
-                    updated_meta["lead_temperature"] = analysis.lead_temperature
-                if analysis.goal_outcome:
-                    updated_meta["goal_outcome"] = analysis.goal_outcome
-                call.metadata_ = updated_meta
+                    if existing_row:
+                        for key, value in analytics_data.items():
+                            setattr(existing_row, key, value)
+                    else:
+                        row = CallAnalytics(call_log_id=call.id, **analytics_data)
+                        session.add(row)
 
-                if analysis.summary and not call.summary:
-                    call.summary = analysis.summary
+                    updated_meta = dict(meta)
+                    if analysis.summary:
+                        updated_meta["interest_level"] = analysis.interest_level
+                    if analysis.sentiment:
+                        updated_meta["sentiment"] = analysis.sentiment
+                        updated_meta["sentiment_score"] = analysis.sentiment_score
+                    if analysis.lead_temperature:
+                        updated_meta["lead_temperature"] = analysis.lead_temperature
+                    if analysis.goal_outcome:
+                        updated_meta["goal_outcome"] = analysis.goal_outcome
+                    call.metadata_ = updated_meta
 
-                await db.commit()
-                succeeded += 1
+                    if analysis.summary and not call.summary:
+                        call.summary = analysis.summary
 
-            except Exception as e:
-                failed += 1
-                logger.error("reanalysis_stream_failed", call_sid=call.call_sid, error=str(e))
-                await db.rollback()
+                    await session.commit()
+                    job["succeeded"] += 1
 
-            yield f"data: {json.dumps({'type': 'progress', 'current': i + 1, 'total': total, 'succeeded': succeeded, 'failed': failed, 'call_name': call.contact_name or 'Unknown'})}\n\n"
+                except Exception as e:
+                    job["failed"] += 1
+                    logger.error("reanalysis_bg_failed", call_sid=call.call_sid, error=str(e))
+                    await session.rollback()
 
-        yield f"data: {json.dumps({'type': 'done', 'total': total, 'succeeded': succeeded, 'failed': failed})}\n\n"
+                job["current"] = i + 1
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+            job["status"] = "done"
+
+    asyncio.create_task(run_reanalysis())
+
+    return ReanalysisJobStatus(job_id=job_id, **job)
+
+
+@router.get("/reanalyze-status/{job_id}", response_model=ReanalysisJobStatus)
+async def get_reanalysis_status(job_id: str):
+    """Poll reanalysis job progress."""
+    job = _reanalysis_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return ReanalysisJobStatus(job_id=job_id, **job)
 
 
 # --- Bot-specific endpoints ---
@@ -863,6 +905,7 @@ async def get_analytics_summary(
     total_word_share = 0.0
     word_share_count = 0
     red_flag_count = sum(1 for r in rows if r.has_red_flags)
+    sent_dist: dict[str, int] = {"positive": 0, "neutral": 0, "negative": 0}
 
     for r in rows:
         outcome = r.goal_outcome or "unknown"
@@ -873,6 +916,8 @@ async def get_analytics_summary(
         if r.agent_word_share is not None:
             total_word_share += r.agent_word_share
             word_share_count += 1
+        if r.sentiment in sent_dist:
+            sent_dist[r.sentiment] += 1
 
     outcomes = [
         OutcomeSummary(
@@ -883,6 +928,8 @@ async def get_analytics_summary(
         for k, v in sorted(outcome_counts.items(), key=lambda x: -x[1])
     ]
 
+    has_sentiment = any(v > 0 for v in sent_dist.values())
+
     return AnalyticsSummaryResponse(
         bot_id=bot_id,
         total_analyzed=total,
@@ -891,6 +938,7 @@ async def get_analytics_summary(
         avg_agent_word_share=round(total_word_share / word_share_count, 2) if word_share_count else None,
         red_flag_rate=round(red_flag_count / total * 100, 1),
         total_red_flags=red_flag_count,
+        sentiment_distribution=sent_dist if has_sentiment else None,
         period_start=start_date,
         period_end=end_date,
     )
