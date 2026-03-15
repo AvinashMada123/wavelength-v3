@@ -55,7 +55,8 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { fetchBots, fetchCallLogs, fetchCallDetail, triggerCall, checkHealth, getRecordingUrl } from "@/lib/api";
+import { fetchBots, fetchCallLogs, fetchCallDetail, triggerCall, checkHealth, getRecordingUrl, fetchLeads } from "@/lib/api";
+import type { Lead } from "@/lib/api";
 import { formatDate, formatDuration, formatPhoneNumber, timeAgo, cn } from "@/lib/utils";
 import type { BotConfig, CallLog } from "@/types/api";
 
@@ -128,6 +129,53 @@ export default function CallsPage() {
   const [contactName, setContactName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const [triggering, setTriggering] = useState(false);
+
+  // Lead search
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [leadSearch, setLeadSearch] = useState("");
+  const [leadDropdownOpen, setLeadDropdownOpen] = useState(false);
+  const [loadingLeads, setLoadingLeads] = useState(false);
+  const leadSearchRef = useRef<HTMLInputElement>(null);
+  const leadDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Debounced lead search
+  useEffect(() => {
+    if (!leadSearch.trim()) {
+      setLeads([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setLoadingLeads(true);
+      try {
+        const res = await fetchLeads({ search: leadSearch, page_size: 10 });
+        setLeads(res.items);
+        setLeadDropdownOpen(true);
+      } catch {
+        setLeads([]);
+      } finally {
+        setLoadingLeads(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [leadSearch]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (leadDropdownRef.current && !leadDropdownRef.current.contains(e.target as Node)) {
+        setLeadDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  function selectLead(lead: Lead) {
+    setContactName(lead.contact_name);
+    setContactPhone(lead.phone_number);
+    setLeadSearch("");
+    setLeadDropdownOpen(false);
+  }
 
   // Filters
   const [filterBotId, setFilterBotId] = useState<string>("all");
@@ -289,9 +337,54 @@ export default function CallsPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Trigger Call</CardTitle>
-              <CardDescription>Start an outbound call to a contact</CardDescription>
+              <CardDescription>Search for a lead or enter contact details manually</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              {/* Lead search */}
+              <div className="relative" ref={leadDropdownRef}>
+                <Label>Search Leads</Label>
+                <div className="relative mt-1.5">
+                  <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    ref={leadSearchRef}
+                    value={leadSearch}
+                    onChange={(e) => setLeadSearch(e.target.value)}
+                    onFocus={() => leads.length > 0 && setLeadDropdownOpen(true)}
+                    placeholder="Search by name, phone, or email..."
+                    className="pl-8"
+                  />
+                  {loadingLeads && (
+                    <Loader2 className="absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+                  )}
+                </div>
+                {leadDropdownOpen && leads.length > 0 && (
+                  <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-lg max-h-60 overflow-y-auto">
+                    {leads.map((lead) => (
+                      <button
+                        key={lead.id}
+                        type="button"
+                        onClick={() => selectLead(lead)}
+                        className="flex w-full items-center justify-between px-3 py-2 text-sm hover:bg-accent transition-colors text-left"
+                      >
+                        <div>
+                          <p className="font-medium">{lead.contact_name}</p>
+                          <p className="text-xs text-muted-foreground">{lead.phone_number}</p>
+                        </div>
+                        {lead.company && (
+                          <span className="text-xs text-muted-foreground">{lead.company}</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {leadDropdownOpen && leadSearch.trim() && !loadingLeads && leads.length === 0 && (
+                  <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-lg px-3 py-4 text-center text-sm text-muted-foreground">
+                    No leads found
+                  </div>
+                )}
+              </div>
+
+              {/* Bot + Contact fields */}
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                 <div className="space-y-2">
                   <Label>Bot</Label>
