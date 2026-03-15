@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
   BarChart3,
@@ -210,6 +211,7 @@ function PlaceholderState({ message }: { message: string }) {
 
 export default function AnalyticsPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [selectedBotId, setSelectedBotId] = useState<string>("");
   const [dateRange, setDateRange] = useState<DateRangeType>(() => createDateRange("30d"));
 
@@ -512,6 +514,8 @@ export default function AnalyticsPage() {
                             toast.error(`Reanalysis failed for ${status.failed} calls.`);
                           }
                           setReanalysis(null);
+                          queryClient.invalidateQueries({ queryKey: ["analytics"] });
+                          queryClient.invalidateQueries({ queryKey: ["calls"] });
                           return;
                         }
                       } catch {
