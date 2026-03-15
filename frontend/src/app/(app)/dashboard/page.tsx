@@ -64,6 +64,7 @@ import {
   useAnalyticsSummary,
   useAnalyticsTrends,
   useAnalyticsRedFlags,
+  useDashboardAnalytics,
 } from "@/hooks/use-analytics";
 import { formatDuration, formatPhoneNumber } from "@/lib/utils";
 import { TimeDisplay } from "@/components/time-display";
@@ -324,15 +325,55 @@ export default function DashboardPage() {
   });
   const { data: redFlags = [] } = useAnalyticsRedFlags(analyticsBotId);
 
+  // Use backend dashboard analytics for accurate KPIs (server-side SQL)
+  const periodDays = useMemo(() => {
+    const s = new Date(range.start + "T00:00:00");
+    const e = new Date(range.end + "T00:00:00");
+    return Math.max(1, Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)));
+  }, [range]);
+  const { data: dashData } = useDashboardAnalytics({
+    bot_id: selectedBotId !== "all" ? selectedBotId : undefined,
+    days: periodDays,
+  });
+
   const loading = botsLoading || callsLoading;
 
-  // -- KPI computations --
+  // -- KPI computations (prefer backend data, fallback to client-side) --
   const kpis = useMemo(() => {
-    const total = calls.length;
-    const completed = calls.filter((c) => c.status === "completed").length;
-    const connected = completed;
-    const connectedPct = total > 0 ? Math.round((connected / total) * 100) : 0;
+    // Use backend analytics if available
+    if (dashData) {
+      // Compute trend vs previous period from client-side calls
+      const prevStart = new Date(range.start);
+      prevStart.setDate(prevStart.getDate() - periodDays);
+      const prevStartStr = prevStart.toISOString().slice(0, 10);
+      const prevCalls = allCalls.filter((c) => {
+        const d = c.created_at.slice(0, 10);
+        return d >= prevStartStr && d < range.start;
+      });
+      const prevTotal = prevCalls.length;
+      const callTrend =
+        prevTotal > 0
+          ? Math.round(((dashData.total_calls - prevTotal) / prevTotal) * 100)
+          : 0;
 
+      return {
+        total: dashData.total_calls,
+        connectedPct: dashData.connected_pct,
+        avgDuration: dashData.avg_duration_secs ?? 0,
+        conversionPct: dashData.conversion_pct,
+        totalCost: dashData.total_cost,
+        costPerConversion: dashData.cost_per_conversion,
+        callTrend,
+        successCalls: dashData.conversion_funnel.converted,
+      };
+    }
+
+    // Fallback: client-side computation from raw calls
+    const total = calls.length;
+    const connected = calls.filter(
+      (c) => c.status === "completed" && (c.call_duration ?? 0) > 10
+    ).length;
+    const connectedPct = total > 0 ? Math.round((connected / total) * 100) : 0;
     const durations = calls
       .filter((c) => c.call_duration && c.call_duration > 0)
       .map((c) => c.call_duration!);
@@ -341,36 +382,17 @@ export default function DashboardPage() {
         ? durations.reduce((a, b) => a + b, 0) / durations.length
         : 0;
 
-    const successCalls = calls.filter(
-      (c) => c.analytics?.goal_outcome === "success"
-    ).length;
-    const conversionPct =
-      total > 0 ? Math.round((successCalls / total) * 100) : 0;
-
-    // Compute trend vs previous period
-    const startDate = new Date(range.start + "T00:00:00");
-    const endDate = new Date(range.end + "T00:00:00");
-    const periodDays = Math.max(1, Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
-    const prevStart = new Date(range.start);
-    prevStart.setDate(prevStart.getDate() - periodDays);
-    const prevStartStr = prevStart.toISOString().slice(0, 10);
-    const prevCalls = allCalls.filter((c) => {
-      const d = c.created_at.slice(0, 10);
-      return d >= prevStartStr && d < range.start;
-    });
-    const prevTotal = prevCalls.length;
-    const callTrend =
-      prevTotal > 0 ? Math.round(((total - prevTotal) / prevTotal) * 100) : 0;
-
     return {
       total,
       connectedPct,
       avgDuration,
-      conversionPct,
-      callTrend,
-      successCalls,
+      conversionPct: 0,
+      totalCost: 0,
+      costPerConversion: 0,
+      callTrend: 0,
+      successCalls: 0,
     };
-  }, [calls, allCalls, range]);
+  }, [dashData, calls, allCalls, range, periodDays]);
 
   // -- Chart data --
   const dailyVolumeDays = useMemo(() => {
@@ -391,7 +413,19 @@ export default function DashboardPage() {
 
   const heatmap = useMemo(() => buildHeatmap(calls), [calls]);
 
-  const funnel = useMemo(() => buildFunnel(calls), [calls]);
+  const funnel = useMemo(() => {
+    // Prefer backend funnel data when available
+    if (dashData?.conversion_funnel) {
+      const f = dashData.conversion_funnel;
+      return [
+        { stage: "Attempted", value: f.initiated, color: VIOLET, tip: "Total calls initiated in this period" },
+        { stage: "Connected", value: f.connected, color: INDIGO, tip: "Calls lasting > 10 seconds (real human connection)" },
+        { stage: "Qualified", value: f.analyzed, color: AMBER, tip: "Calls with goal analysis completed" },
+        { stage: "Converted", value: f.converted, color: EMERALD, tip: "Calls matching primary success criteria" },
+      ];
+    }
+    return buildFunnel(calls);
+  }, [dashData, calls]);
 
   // Sentiment extracted from call captured_data
   const sentimentData = useMemo(() => {
@@ -499,16 +533,16 @@ export default function DashboardPage() {
               delay={0.24}
             />
             <KPICard
-              title="Total Cost"
-              value="$0.00"
+              title="Credits Used"
+              value={`${kpis.totalCost.toFixed(1)}`}
               icon={DollarSign}
               gradient="from-rose-500 to-pink-500"
               loading={loading}
               delay={0.32}
             />
             <KPICard
-              title="Cost per Conversion"
-              value="$0.00"
+              title="Credits / Conversion"
+              value={kpis.costPerConversion ? kpis.costPerConversion.toFixed(1) : "—"}
               icon={DollarSign}
               gradient="from-fuchsia-500 to-purple-500"
               loading={loading}
