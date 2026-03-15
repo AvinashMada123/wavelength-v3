@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import {
   ArrowLeft,
@@ -22,6 +22,7 @@ import {
   Target,
   AlertTriangle,
   Database,
+  Undo2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -49,7 +50,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 import { useAuth } from "@/contexts/auth-context";
-import { fetchBot, createBot, updateBot } from "@/lib/api";
+import { useBot, useCreateBot, useUpdateBot } from "@/hooks/use-bots";
 import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, ELEVENLABS_VOICE_GROUPS, SARVAM_LANGUAGE_OPTIONS, DEEPGRAM_LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS_CLIENT, LLM_PROVIDER_OPTIONS, LLM_MODEL_OPTIONS } from "@/lib/constants";
 import type { BotConfig, GHLWorkflow, GoalConfig, SuccessCriterion, RedFlagConfig, DataCaptureField } from "@/types/api";
 
@@ -126,6 +127,30 @@ const TIMING_OPTIONS = [
 ] as const;
 
 // ---------------------------------------------------------------------------
+// Severity badge colors for red flags
+// ---------------------------------------------------------------------------
+
+const SEVERITY_COLORS: Record<string, string> = {
+  critical: "bg-red-500/15 text-red-400 border-red-500/30",
+  high: "bg-orange-500/15 text-orange-400 border-orange-500/30",
+  medium: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
+  low: "bg-blue-500/15 text-blue-400 border-blue-500/30",
+};
+
+// ---------------------------------------------------------------------------
+// Tab descriptions
+// ---------------------------------------------------------------------------
+
+const TAB_DESCRIPTIONS: Record<string, string> = {
+  general: "Set up your agent's identity, greeting message, and optional event or location context.",
+  "voice-prompt": "Configure voice personality, speech recognition, language, and the system prompt that drives your agent's behavior.",
+  telephony: "Choose the telephony provider for outbound calls. Credentials are managed in account settings.",
+  integrations: "Connect your bot to GoHighLevel for CRM tagging, workflow triggers, and external API access.",
+  goals: "Define call objectives, success criteria, red flags, and structured data to capture from conversations.",
+  settings: "Fine-tune call duration limits, silence timeouts, and circuit breaker thresholds.",
+};
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -168,6 +193,11 @@ function botToForm(bot: BotConfig): BotForm {
   };
 }
 
+/** Deep-compare two form snapshots (ignoring reference equality). */
+function formsEqual(a: BotForm, b: BotForm): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 // ---------------------------------------------------------------------------
 // Section wrapper for consistent spacing inside tabs
 // ---------------------------------------------------------------------------
@@ -195,6 +225,105 @@ function Section({
 }
 
 // ---------------------------------------------------------------------------
+// Loading skeleton that matches the form layout
+// ---------------------------------------------------------------------------
+
+function BotEditorSkeleton() {
+  return (
+    <>
+      <Header title="Loading..." />
+      <PageTransition>
+        <div className="flex flex-col h-[calc(100vh-3.5rem)]">
+          {/* Top bar skeleton */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-border/50">
+            <div className="flex items-center gap-3">
+              <Skeleton className="h-9 w-9 rounded-lg" />
+              <div className="space-y-1.5">
+                <Skeleton className="h-5 w-40" />
+                <Skeleton className="h-3 w-24" />
+              </div>
+            </div>
+            <Skeleton className="h-9 w-[100px] rounded-md" />
+          </div>
+
+          {/* Content skeleton */}
+          <div className="flex-1 overflow-hidden">
+            <div className="max-w-4xl mx-auto px-6 py-6 space-y-6">
+              {/* Tab bar skeleton */}
+              <div className="flex gap-2">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <Skeleton key={i} className="h-9 w-24 rounded-md" />
+                ))}
+              </div>
+
+              {/* Tab description skeleton */}
+              <Skeleton className="h-4 w-96" />
+
+              {/* Card skeleton matching General tab */}
+              <div className="rounded-lg border border-border/50 p-6 space-y-6">
+                {/* Section header */}
+                <div className="space-y-1">
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-3 w-64" />
+                </div>
+                {/* Two column fields */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Skeleton className="h-3 w-20" />
+                    <Skeleton className="h-9 w-full rounded-md" />
+                  </div>
+                  <div className="space-y-2">
+                    <Skeleton className="h-3 w-24" />
+                    <Skeleton className="h-9 w-full rounded-md" />
+                  </div>
+                </div>
+
+                <Skeleton className="h-px w-full" />
+
+                {/* Greeting section */}
+                <div className="space-y-1">
+                  <Skeleton className="h-4 w-16" />
+                  <Skeleton className="h-3 w-80" />
+                </div>
+                <div className="space-y-2">
+                  <Skeleton className="h-3 w-28" />
+                  <Skeleton className="h-9 w-full rounded-md" />
+                </div>
+
+                <Skeleton className="h-px w-full" />
+
+                {/* Location & Event */}
+                <div className="space-y-1">
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-3 w-72" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="space-y-2">
+                      <Skeleton className="h-3 w-20" />
+                      <Skeleton className="h-9 w-full rounded-md" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Footer skeleton */}
+          <div className="border-t border-border/50 px-6 py-3 flex items-center justify-between">
+            <Skeleton className="h-3 w-64" />
+            <div className="flex items-center gap-3">
+              <Skeleton className="h-9 w-20 rounded-md" />
+              <Skeleton className="h-9 w-[100px] rounded-md" />
+            </div>
+          </div>
+        </div>
+      </PageTransition>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -206,33 +335,50 @@ export default function BotEditorPage() {
   const botId = params.botId as string;
   const isNew = botId === "new";
 
+  // ---- React Query hooks ----
+  const { data: botData, isLoading: botLoading, isError: botError } = useBot(botId);
+  const createBotMutation = useCreateBot();
+  const updateBotMutation = useUpdateBot();
+  const saving = createBotMutation.isPending || updateBotMutation.isPending;
+
   const [form, setForm] = useState<BotForm>(EMPTY_FORM);
   const [goalConfig, setGoalConfig] = useState<GoalConfig | null>(null);
-  const [loading, setLoading] = useState(!isNew);
-  const [saving, setSaving] = useState(false);
   const [copiedCurl, setCopiedCurl] = useState(false);
   const [newVarName, setNewVarName] = useState("");
+  const [activeTab, setActiveTab] = useState("general");
 
-  // ---- Data loading ----
+  // Track the "saved" snapshot for unsaved-changes detection
+  const [savedForm, setSavedForm] = useState<BotForm>(EMPTY_FORM);
+  const [savedGoalConfig, setSavedGoalConfig] = useState<GoalConfig | null>(null);
 
-  const loadBot = useCallback(async () => {
-    try {
-      const bot = await fetchBot(botId);
-      setForm(botToForm(bot));
-      setGoalConfig(bot.goal_config || null);
-    } catch {
+  const hasUnsavedChanges = useMemo(() => {
+    const formChanged = !formsEqual(form, savedForm);
+    const goalChanged = JSON.stringify(goalConfig) !== JSON.stringify(savedGoalConfig);
+    return formChanged || goalChanged;
+  }, [form, savedForm, goalConfig, savedGoalConfig]);
+
+  // ---- Populate form from React Query data ----
+
+  const hasHydrated = useRef(false);
+  useEffect(() => {
+    if (botData && !hasHydrated.current) {
+      const formData = botToForm(botData);
+      setForm(formData);
+      setSavedForm(formData);
+      const gc = botData.goal_config || null;
+      setGoalConfig(gc);
+      setSavedGoalConfig(gc);
+      hasHydrated.current = true;
+    }
+  }, [botData]);
+
+  // Handle fetch error
+  useEffect(() => {
+    if (botError) {
       toast.error("Failed to load bot configuration");
       router.push("/bots");
-    } finally {
-      setLoading(false);
     }
-  }, [botId, router]);
-
-  useEffect(() => {
-    if (!isNew) {
-      loadBot();
-    }
-  }, [isNew, loadBot]);
+  }, [botError, router]);
 
   // ---- Form helpers ----
 
@@ -409,6 +555,13 @@ export default function BotEditorPage() {
     );
   }
 
+  // ---- Discard changes ----
+
+  function discardChanges() {
+    setForm(savedForm);
+    setGoalConfig(savedGoalConfig);
+  }
+
   // ---- Validation & save ----
 
   async function handleSave() {
@@ -425,7 +578,6 @@ export default function BotEditorPage() {
 
     // Telephony credentials are now at the account level (Settings page)
 
-    setSaving(true);
     try {
       const payload: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(form)) {
@@ -462,42 +614,27 @@ export default function BotEditorPage() {
       }
 
       if (isNew) {
-        await createBot(payload as never);
+        await createBotMutation.mutateAsync(payload as never);
         toast.success("Bot created successfully");
       } else {
-        await updateBot(botId, payload);
+        await updateBotMutation.mutateAsync({ id: botId, data: payload as never });
         toast.success("Bot updated successfully");
       }
+
+      // Update saved snapshot so unsaved indicator clears
+      setSavedForm(form);
+      setSavedGoalConfig(goalConfig);
+
       router.push("/bots");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save bot");
-    } finally {
-      setSaving(false);
     }
   }
 
   // ---- Loading skeleton ----
 
-  if (loading) {
-    return (
-      <>
-        <Header title="Loading..." />
-        <PageTransition>
-          <div className="p-6 max-w-4xl mx-auto space-y-6">
-            <div className="flex items-center gap-3">
-              <Skeleton className="h-9 w-9 rounded-lg" />
-              <Skeleton className="h-7 w-48" />
-            </div>
-            <Skeleton className="h-10 w-full max-w-md" />
-            <div className="space-y-4 mt-6">
-              <Skeleton className="h-40 w-full" />
-              <Skeleton className="h-40 w-full" />
-              <Skeleton className="h-20 w-full" />
-            </div>
-          </div>
-        </PageTransition>
-      </>
-    );
+  if (!isNew && botLoading) {
+    return <BotEditorSkeleton />;
   }
 
   // ---- Render ----
@@ -547,8 +684,8 @@ export default function BotEditorPage() {
           {/* Tabs area */}
           <ScrollArea className="flex-1">
             <div className="max-w-4xl mx-auto px-6 py-6">
-              <Tabs defaultValue="general" className="w-full">
-                <TabsList className="w-full justify-start mb-6">
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                <TabsList className="w-full justify-start mb-4">
                   <TabsTrigger value="general" className="gap-1.5">
                     <User className="h-3.5 w-3.5" />
                     General
@@ -574,6 +711,11 @@ export default function BotEditorPage() {
                     Settings
                   </TabsTrigger>
                 </TabsList>
+
+                {/* Tab description */}
+                <p className="text-sm text-muted-foreground mb-6">
+                  {TAB_DESCRIPTIONS[activeTab] || ""}
+                </p>
 
                 {/* ================================================================
                     TAB 1: General
@@ -1186,12 +1328,13 @@ export default function BotEditorPage() {
 
                         {form.ghl_workflows.length === 0 && (
                           <div className="rounded-lg border border-dashed p-8 text-center">
+                            <Webhook className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
                             <p className="text-sm text-muted-foreground">
                               No workflows configured yet.
                             </p>
-                            <p className="text-xs text-muted-foreground mt-1">
+                            <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
                               Add a workflow to trigger CRM automations based
-                              on call events.
+                              on call events like confirmations, objections, or post-call tags.
                             </p>
                           </div>
                         )}
@@ -1366,20 +1509,19 @@ export default function BotEditorPage() {
                 </TabsContent>
 
                 {/* ================================================================
-                    TAB 5: Settings
-                   ================================================================ */}
-                {/* ================================================================
-                    TAB: Goals
+                    TAB 5: Goals
                    ================================================================ */}
                 <TabsContent value="goals">
                   <Card>
                     <CardContent className="pt-6 space-y-8">
                       {!goalConfig ? (
-                        <div className="flex flex-col items-center justify-center py-12">
-                          <Target className="h-10 w-10 text-muted-foreground/30 mb-3" />
-                          <p className="text-sm font-medium mb-1">No Goal Configuration</p>
-                          <p className="text-xs text-muted-foreground mb-4 text-center max-w-md">
-                            Enable goal-based analytics to track call outcomes, detect red flags, and capture structured data from conversations.
+                        <div className="flex flex-col items-center justify-center py-16">
+                          <div className="rounded-full bg-violet-500/10 p-4 mb-4">
+                            <Target className="h-8 w-8 text-violet-400" />
+                          </div>
+                          <p className="text-base font-medium mb-1">No Goal Configuration</p>
+                          <p className="text-sm text-muted-foreground mb-6 text-center max-w-md leading-relaxed">
+                            Enable goal-based analytics to track call outcomes, detect red flags, and capture structured data from every conversation.
                           </p>
                           <Button onClick={initGoalConfig} className="gap-1.5">
                             <Plus className="h-4 w-4" />
@@ -1416,6 +1558,13 @@ export default function BotEditorPage() {
                           {/* Success Criteria */}
                           <Section title="Success Criteria" description="Define possible outcomes. Exactly one must be marked as primary.">
                             <div className="space-y-3">
+                              {goalConfig.success_criteria.length === 0 && (
+                                <div className="rounded-lg border border-dashed p-6 text-center">
+                                  <Check className="h-6 w-6 text-muted-foreground/30 mx-auto mb-2" />
+                                  <p className="text-sm text-muted-foreground">No success criteria defined yet.</p>
+                                  <p className="text-xs text-muted-foreground mt-1">Add criteria to track how calls are resolved.</p>
+                                </div>
+                              )}
                               {goalConfig.success_criteria.map((c, i) => (
                                 <div key={i} className="flex items-center gap-3 rounded-lg border p-3">
                                   <div className="flex-1 grid grid-cols-2 gap-3">
@@ -1463,8 +1612,15 @@ export default function BotEditorPage() {
                           <Separator />
 
                           {/* Red Flags */}
-                          <Section title="Red Flags" description="Define signals to watch for during or after calls.">
+                          <Section title="Red Flags" description="Define signals to watch for during or after calls. Critical and high severity flags trigger alerts.">
                             <div className="space-y-3">
+                              {(goalConfig.red_flags || []).length === 0 && (
+                                <div className="rounded-lg border border-dashed p-6 text-center">
+                                  <AlertTriangle className="h-6 w-6 text-muted-foreground/30 mx-auto mb-2" />
+                                  <p className="text-sm text-muted-foreground">No red flags configured.</p>
+                                  <p className="text-xs text-muted-foreground mt-1">Add red flags to detect concerning signals like DND requests or legal threats.</p>
+                                </div>
+                              )}
                               {(goalConfig.red_flags || []).map((rf, i) => (
                                 <div key={i} className="rounded-lg border p-3 space-y-3">
                                   <div className="flex items-center gap-3">
@@ -1490,16 +1646,24 @@ export default function BotEditorPage() {
                                       <X className="h-3.5 w-3.5" />
                                     </Button>
                                   </div>
-                                  <div className="grid grid-cols-3 gap-3">
-                                    <Select value={rf.severity} onValueChange={(v) => updateRedFlag(i, { severity: v as RedFlagConfig["severity"] })}>
-                                      <SelectTrigger><SelectValue placeholder="Severity" /></SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="critical">Critical</SelectItem>
-                                        <SelectItem value="high">High</SelectItem>
-                                        <SelectItem value="medium">Medium</SelectItem>
-                                        <SelectItem value="low">Low</SelectItem>
-                                      </SelectContent>
-                                    </Select>
+                                  <div className="grid grid-cols-3 gap-3 items-center">
+                                    <div className="flex items-center gap-2">
+                                      <Select value={rf.severity} onValueChange={(v) => updateRedFlag(i, { severity: v as RedFlagConfig["severity"] })}>
+                                        <SelectTrigger><SelectValue placeholder="Severity" /></SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="critical">Critical</SelectItem>
+                                          <SelectItem value="high">High</SelectItem>
+                                          <SelectItem value="medium">Medium</SelectItem>
+                                          <SelectItem value="low">Low</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                      <Badge
+                                        variant="outline"
+                                        className={`text-[10px] shrink-0 capitalize ${SEVERITY_COLORS[rf.severity] || ""}`}
+                                      >
+                                        {rf.severity}
+                                      </Badge>
+                                    </div>
                                     <Select value={rf.detect_in || "post_call"} onValueChange={(v) => updateRedFlag(i, { detect_in: v as "realtime" | "post_call" })}>
                                       <SelectTrigger><SelectValue placeholder="Detection" /></SelectTrigger>
                                       <SelectContent>
@@ -1529,6 +1693,13 @@ export default function BotEditorPage() {
                           {/* Data Capture Fields */}
                           <Section title="Data Capture Fields" description="Structured data to extract from each call transcript.">
                             <div className="space-y-3">
+                              {(goalConfig.data_capture_fields || []).length === 0 && (
+                                <div className="rounded-lg border border-dashed p-6 text-center">
+                                  <Database className="h-6 w-6 text-muted-foreground/30 mx-auto mb-2" />
+                                  <p className="text-sm text-muted-foreground">No capture fields defined.</p>
+                                  <p className="text-xs text-muted-foreground mt-1">Add fields to extract structured data like dates, preferences, or decisions from transcripts.</p>
+                                </div>
+                              )}
                               {(goalConfig.data_capture_fields || []).map((f, i) => (
                                 <div key={i} className="rounded-lg border p-3 space-y-3">
                                   <div className="flex items-start gap-3">
@@ -1600,6 +1771,9 @@ export default function BotEditorPage() {
                   </Card>
                 </TabsContent>
 
+                {/* ================================================================
+                    TAB 6: Settings
+                   ================================================================ */}
                 <TabsContent value="settings">
                   <Card>
                     <CardContent className="pt-6 space-y-8">
@@ -1736,14 +1910,40 @@ export default function BotEditorPage() {
             </div>
           </ScrollArea>
 
-          {/* Sticky footer save bar */}
-          <div className="border-t border-border/50 bg-background/80 backdrop-blur-md px-6 py-3 flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">
-              {isNew
-                ? "Fill in the required fields and save to create your bot."
-                : "Changes are saved when you click Save."}
-            </p>
+          {/* Sticky footer save bar with unsaved changes indicator */}
+          <div className={`border-t px-6 py-3 flex items-center justify-between transition-colors ${
+            hasUnsavedChanges
+              ? "border-amber-500/40 bg-amber-500/5 backdrop-blur-md"
+              : "border-border/50 bg-background/80 backdrop-blur-md"
+          }`}>
+            <div className="flex items-center gap-2">
+              {hasUnsavedChanges ? (
+                <>
+                  <div className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+                  <p className="text-xs font-medium text-amber-300">
+                    Unsaved changes
+                  </p>
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  {isNew
+                    ? "Fill in the required fields and save to create your bot."
+                    : "All changes saved."}
+                </p>
+              )}
+            </div>
             <div className="flex items-center gap-3">
+              {hasUnsavedChanges && !isNew && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={discardChanges}
+                  className="gap-1.5 text-muted-foreground"
+                >
+                  <Undo2 className="h-3.5 w-3.5" />
+                  Discard
+                </Button>
+              )}
               <Button
                 variant="outline"
                 onClick={() => router.push("/bots")}
