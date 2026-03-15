@@ -14,6 +14,7 @@ import json
 import re
 import time
 
+import aiohttp
 import structlog
 from pipecat.frames.frames import EndFrame, TTSSpeakFrame
 from pipecat.pipeline.runner import PipelineRunner
@@ -99,14 +100,15 @@ async def _synthesize_greeting(
                 ),
             )
         elif tts_provider == "elevenlabs":
-            from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+            from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
 
-            tts = ElevenLabsTTSService(
+            tts = ElevenLabsHttpTTSService(
                 api_key=settings.ELEVENLABS_API_KEY,
                 voice_id=call_context.tts_voice,
                 model="eleven_flash_v2_5",
                 sample_rate=16000,
-                params=ElevenLabsTTSService.InputParams(
+                aiohttp_session=aiohttp.ClientSession(),
+                params=ElevenLabsHttpTTSService.InputParams(
                     stability=0.5,
                     similarity_boost=0.75,
                     use_speaker_boost=False,

@@ -745,7 +745,7 @@ export default function BotEditorPage() {
                                   onValueChange={(v) => {
                                     setField("tts_provider", v as "gemini" | "sarvam" | "elevenlabs");
                                     // Reset voice to provider default
-                                    setField("tts_voice", v === "sarvam" ? "priya" : v === "elevenlabs" ? "txk8uOzZ0iCh0B9mFSRG" : "Kore");
+                                    setField("tts_voice", v === "sarvam" ? "priya" : v === "elevenlabs" ? "fA4eSDsx5xNZ1RV7zEu5" : "Kore");
                                   }}
                                 >
                                   <SelectTrigger>
