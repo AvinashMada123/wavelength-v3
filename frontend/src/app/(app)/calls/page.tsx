@@ -39,29 +39,11 @@ import { Badge } from "@/components/ui/badge";
 import { fetchBots, fetchCallLogs, triggerCall, checkHealth, fetchLeads } from "@/lib/api";
 import type { Lead } from "@/lib/api";
 import { formatPhoneNumber, timeAgo } from "@/lib/utils";
+import { CALL_STATUS_CONFIG } from "@/lib/status-config";
 import type { BotConfig, CallLog } from "@/types/api";
 
-const STATUS_CONFIG: Record<
-  string,
-  {
-    variant: "default" | "secondary" | "destructive" | "outline";
-    icon: typeof Clock;
-    color: string;
-  }
-> = {
-  initiated: { variant: "outline", icon: Clock, color: "text-muted-foreground" },
-  ringing: { variant: "outline", icon: PhoneCall, color: "text-blue-400" },
-  "in-progress": { variant: "default", icon: Activity, color: "text-green-400" },
-  completed: { variant: "secondary", icon: CheckCircle2, color: "text-emerald-400" },
-  failed: { variant: "destructive", icon: XCircle, color: "text-red-400" },
-  error: { variant: "destructive", icon: XCircle, color: "text-red-400" },
-  "no-answer": { variant: "secondary", icon: Phone, color: "text-amber-400" },
-  busy: { variant: "secondary", icon: Phone, color: "text-amber-400" },
-  voicemail: { variant: "secondary", icon: Phone, color: "text-amber-400" },
-};
-
 function StatusBadge({ status }: { status: string }) {
-  const config = STATUS_CONFIG[status] || {
+  const config = CALL_STATUS_CONFIG[status] || {
     variant: "outline" as const,
     icon: Clock,
     color: "text-muted-foreground",

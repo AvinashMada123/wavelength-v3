@@ -18,7 +18,9 @@ import {
   Target,
   Volume2,
   X,
+  ExternalLink,
 } from "lucide-react";
+import Link from "next/link";
 import { Header } from "@/components/layout/header";
 import { PageTransition } from "@/components/layout/page-transition";
 import { Button } from "@/components/ui/button";
@@ -36,6 +38,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useCallDetail } from "@/hooks/use-calls";
 import { getRecordingUrl } from "@/lib/api";
 import { formatDate, formatDuration, formatPhoneNumber, cn } from "@/lib/utils";
+import { SEVERITY_COLORS, INTEREST_CONFIG } from "@/lib/status-config";
 
 // ---------- Score badge ----------
 
@@ -92,14 +95,6 @@ function StatusBadge({ status }: { status: string }) {
     </Badge>
   );
 }
-
-// ---------- Interest badge ----------
-
-const INTEREST_CONFIG: Record<string, { color: string; label: string }> = {
-  high: { color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20", label: "High Interest" },
-  medium: { color: "bg-amber-500/10 text-amber-400 border-amber-500/20", label: "Medium Interest" },
-  low: { color: "bg-red-500/10 text-red-400 border-red-500/20", label: "Low Interest" },
-};
 
 // ---------- Audio Player ----------
 
@@ -362,15 +357,6 @@ function TalkRatioBar({ agentShare }: { agentShare: number }) {
   );
 }
 
-// ---------- Severity colors ----------
-
-const SEVERITY_COLORS: Record<string, string> = {
-  critical: "bg-red-500/10 text-red-500 border-red-500/20",
-  high: "bg-orange-500/10 text-orange-500 border-orange-500/20",
-  medium: "bg-amber-500/10 text-amber-500 border-amber-500/20",
-  low: "bg-blue-500/10 text-blue-500 border-blue-500/20",
-};
-
 // ---------- Main Page ----------
 
 export default function CallDetailPage() {
@@ -518,7 +504,17 @@ export default function CallDetailPage() {
               className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
             >
               <div>
-                <h1 className="text-2xl font-bold">{call.contact_name}</h1>
+                <div className="flex items-center gap-3">
+                  <h1 className="text-2xl font-bold">{call.contact_name}</h1>
+                  {call.contact_phone && (
+                    <Button variant="outline" size="sm" className="h-7 text-xs gap-1" asChild>
+                      <Link href={`/leads?search=${encodeURIComponent(call.contact_phone)}`}>
+                        <ExternalLink className="h-3 w-3" />
+                        View Lead
+                      </Link>
+                    </Button>
+                  )}
+                </div>
                 <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
                   <span>{formatPhoneNumber(call.contact_phone)}</span>
                   <span className="text-muted-foreground/40">|</span>
