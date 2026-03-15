@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
@@ -66,48 +66,14 @@ import {
   type Campaign,
   type Lead,
 } from "@/lib/api";
+import { CAMPAIGN_STATUS_CONFIG } from "@/lib/status-config";
+import { DateRangePicker, type DateRange } from "@/components/date-range-picker";
 import type { BotConfig } from "@/types/api";
 
 const PAGE_SIZE = 10;
 
-const STATUS_CONFIG: Record<
-  string,
-  { label: string; variant: "default" | "secondary" | "destructive" | "outline"; className: string; icon: typeof Clock }
-> = {
-  draft: {
-    label: "Draft",
-    variant: "secondary",
-    className: "bg-zinc-500/10 text-zinc-400 border-zinc-500/20",
-    icon: FileEdit,
-  },
-  running: {
-    label: "Running",
-    variant: "default",
-    className: "bg-blue-500/10 text-blue-400 border-blue-500/20",
-    icon: Play,
-  },
-  paused: {
-    label: "Paused",
-    variant: "outline",
-    className: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
-    icon: Pause,
-  },
-  completed: {
-    label: "Completed",
-    variant: "secondary",
-    className: "bg-green-500/10 text-green-400 border-green-500/20",
-    icon: CheckCircle2,
-  },
-  cancelled: {
-    label: "Cancelled",
-    variant: "destructive",
-    className: "bg-red-500/10 text-red-400 border-red-500/20",
-    icon: Ban,
-  },
-};
-
 function StatusBadge({ status }: { status: string }) {
-  const config = STATUS_CONFIG[status] || STATUS_CONFIG.draft;
+  const config = CAMPAIGN_STATUS_CONFIG[status] || CAMPAIGN_STATUS_CONFIG.draft;
   const Icon = config.icon;
   return (
     <Badge variant="outline" className={`gap-1 ${config.className}`}>
@@ -123,6 +89,7 @@ export default function CampaignsPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null });
   const [loading, setLoading] = useState(true);
 
   // Detail view
@@ -144,6 +111,17 @@ export default function CampaignsPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [botsLoading, setBotsLoading] = useState(false);
   const [leadsLoading, setLeadsLoading] = useState(false);
+
+  // Client-side date filtering
+  const filteredCampaigns = useMemo(() => {
+    if (!dateRange.from && !dateRange.to) return campaigns;
+    return campaigns.filter((c) => {
+      const d = c.created_at.slice(0, 10);
+      if (dateRange.from && d < dateRange.from) return false;
+      if (dateRange.to && d > dateRange.to) return false;
+      return true;
+    });
+  }, [campaigns, dateRange]);
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
@@ -168,20 +146,45 @@ export default function CampaignsPage() {
     loadCampaigns();
   }, [loadCampaigns]);
 
-  // Load bots and leads when create dialog opens
+  // Load bots when create dialog opens
   useEffect(() => {
     if (!createOpen) return;
     setBotsLoading(true);
-    setLeadsLoading(true);
     fetchBots()
       .then(setBots)
       .catch(() => toast.error("Failed to load bots"))
       .finally(() => setBotsLoading(false));
-    fetchLeads({ page_size: 200 })
+    // Load initial leads (first page)
+    setLeadsLoading(true);
+    fetchLeads({ page_size: 30 })
       .then((data) => setLeads(data.items))
       .catch(() => toast.error("Failed to load leads"))
       .finally(() => setLeadsLoading(false));
   }, [createOpen]);
+
+  // Debounced lead search for campaign create dialog
+  const leadSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!createOpen) return;
+    if (leadSearchTimerRef.current) clearTimeout(leadSearchTimerRef.current);
+    leadSearchTimerRef.current = setTimeout(async () => {
+      setLeadsLoading(true);
+      try {
+        const data = await fetchLeads({
+          search: leadSearch || undefined,
+          page_size: 30,
+        });
+        setLeads(data.items);
+      } catch {
+        // keep existing leads on error
+      } finally {
+        setLeadsLoading(false);
+      }
+    }, 300);
+    return () => {
+      if (leadSearchTimerRef.current) clearTimeout(leadSearchTimerRef.current);
+    };
+  }, [leadSearch, createOpen]);
 
   async function handleCreate() {
     if (!formName.trim()) {
@@ -301,16 +304,8 @@ export default function CampaignsPage() {
     });
   }
 
-  const filteredLeads = leads.filter((lead) => {
-    if (!leadSearch) return true;
-    const search = leadSearch.toLowerCase();
-    return (
-      lead.contact_name.toLowerCase().includes(search) ||
-      lead.phone_number.includes(search) ||
-      (lead.email && lead.email.toLowerCase().includes(search)) ||
-      (lead.company && lead.company.toLowerCase().includes(search))
-    );
-  });
+  // Leads are now fetched server-side with search param, no client-side filtering needed
+  const filteredLeads = leads;
 
   const botsMap = new Map<string, string>();
   bots.forEach((b) => botsMap.set(b.id, b.agent_name));
@@ -349,6 +344,7 @@ export default function CampaignsPage() {
                 <SelectItem value="cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>
+              <DateRangePicker value={dateRange} onChange={setDateRange} />
 
             <Dialog
               open={createOpen}
@@ -539,7 +535,7 @@ export default function CampaignsPage() {
                 <Skeleton key={i} className="h-24 w-full" />
               ))}
             </div>
-          ) : campaigns.length === 0 ? (
+          ) : filteredCampaigns.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-16">
                 <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted mb-4">
@@ -561,7 +557,7 @@ export default function CampaignsPage() {
             </Card>
           ) : (
             <div className="space-y-3">
-              {campaigns.map((campaign, i) => {
+              {filteredCampaigns.map((campaign, i) => {
                 const progressPct =
                   campaign.total_leads > 0
                     ? Math.round(

@@ -1,0 +1,254 @@
+"use client";
+
+import { useState, useMemo, useCallback } from "react";
+import { CalendarDays } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
+
+// -- Types --
+
+export interface DateRange {
+  from: string | null;
+  to: string | null;
+}
+
+type PresetKey = "today" | "7d" | "30d" | "90d" | "custom";
+
+interface Preset {
+  key: PresetKey;
+  label: string;
+}
+
+const PRESETS: Preset[] = [
+  { key: "today", label: "Today" },
+  { key: "7d", label: "Last 7 days" },
+  { key: "30d", label: "Last 30 days" },
+  { key: "90d", label: "Last 90 days" },
+  { key: "custom", label: "Custom" },
+];
+
+// -- Helpers --
+
+function toISODate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+function getPresetRange(key: PresetKey): DateRange {
+  const end = new Date();
+  const start = new Date();
+  switch (key) {
+    case "today":
+      start.setHours(0, 0, 0, 0);
+      break;
+    case "7d":
+      start.setDate(start.getDate() - 7);
+      break;
+    case "30d":
+      start.setDate(start.getDate() - 30);
+      break;
+    case "90d":
+      start.setDate(start.getDate() - 90);
+      break;
+    case "custom":
+      return { from: null, to: null };
+  }
+  return { from: toISODate(start), to: toISODate(end) };
+}
+
+function formatDisplayDate(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function detectPreset(range: DateRange): PresetKey {
+  if (!range.from || !range.to) return "custom";
+  const today = toISODate(new Date());
+  if (range.to !== today) return "custom";
+
+  for (const p of PRESETS) {
+    if (p.key === "custom") continue;
+    const pr = getPresetRange(p.key);
+    if (pr.from === range.from && pr.to === range.to) return p.key;
+  }
+  return "custom";
+}
+
+// -- Component --
+
+interface DateRangePickerProps {
+  value: DateRange;
+  onChange: (range: DateRange) => void;
+  className?: string;
+}
+
+export function DateRangePicker({
+  value,
+  onChange,
+  className,
+}: DateRangePickerProps) {
+  const [open, setOpen] = useState(false);
+  const activePreset = useMemo(() => detectPreset(value), [value]);
+
+  const displayLabel = useMemo(() => {
+    if (!value.from && !value.to) return "Select dates";
+    const preset = PRESETS.find((p) => p.key === activePreset);
+    if (activePreset !== "custom" && preset) return preset.label;
+    if (value.from && value.to) {
+      return `${formatDisplayDate(value.from)} - ${formatDisplayDate(value.to)}`;
+    }
+    if (value.from) return `From ${formatDisplayDate(value.from)}`;
+    if (value.to) return `To ${formatDisplayDate(value.to)}`;
+    return "Select dates";
+  }, [value, activePreset]);
+
+  const handlePresetClick = useCallback(
+    (key: PresetKey) => {
+      if (key === "custom") return; // just show custom inputs
+      const range = getPresetRange(key);
+      onChange(range);
+      setOpen(false);
+    },
+    [onChange]
+  );
+
+  const handleCustomFromChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      onChange({ ...value, from: e.target.value || null });
+    },
+    [onChange, value]
+  );
+
+  const handleCustomToChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      onChange({ ...value, to: e.target.value || null });
+    },
+    [onChange, value]
+  );
+
+  const [showCustom, setShowCustom] = useState(activePreset === "custom");
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          size="default"
+          className={cn(
+            "h-9 gap-2 text-sm font-normal",
+            !value.from && !value.to && "text-muted-foreground",
+            className
+          )}
+        >
+          <CalendarDays className="h-4 w-4 text-muted-foreground" />
+          {displayLabel}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-64 p-3">
+        <div className="space-y-2">
+          {/* Preset buttons */}
+          <div className="grid grid-cols-2 gap-1.5">
+            {PRESETS.filter((p) => p.key !== "custom").map((preset) => (
+              <button
+                key={preset.key}
+                type="button"
+                onClick={() => {
+                  handlePresetClick(preset.key);
+                  setShowCustom(false);
+                }}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-sm transition-colors text-left",
+                  activePreset === preset.key && !showCustom
+                    ? "bg-violet-500/15 text-violet-400 font-medium"
+                    : "hover:bg-muted text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Custom toggle */}
+          <button
+            type="button"
+            onClick={() => setShowCustom(true)}
+            className={cn(
+              "w-full rounded-md px-3 py-1.5 text-sm transition-colors text-left",
+              showCustom || activePreset === "custom"
+                ? "bg-violet-500/15 text-violet-400 font-medium"
+                : "hover:bg-muted text-muted-foreground hover:text-foreground"
+            )}
+          >
+            Custom Range
+          </button>
+
+          {/* Custom date inputs */}
+          {(showCustom || activePreset === "custom") && (
+            <div className="space-y-2 pt-2 border-t border-border">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  From
+                </label>
+                <input
+                  type="date"
+                  value={value.from || ""}
+                  onChange={handleCustomFromChange}
+                  max={value.to || toISODate(new Date())}
+                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-xs focus:outline-none focus:ring-2 focus:ring-ring/50"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  To
+                </label>
+                <input
+                  type="date"
+                  value={value.to || ""}
+                  onChange={handleCustomToChange}
+                  min={value.from || undefined}
+                  max={toISODate(new Date())}
+                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-xs focus:outline-none focus:ring-2 focus:ring-ring/50"
+                />
+              </div>
+              <Button
+                size="sm"
+                className="w-full bg-gradient-to-r from-violet-500 to-indigo-600 text-white hover:from-violet-600 hover:to-indigo-700"
+                onClick={() => setOpen(false)}
+                disabled={!value.from || !value.to}
+              >
+                Apply
+              </Button>
+            </div>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// -- Utility: Convert DateRange to start/end strings for API calls --
+// Returns { start: string; end: string } with defaults if null
+
+export function getDateRangeValues(
+  range: DateRange,
+  defaultDays: number = 30
+): { start: string; end: string } {
+  const end = range.to || toISODate(new Date());
+  let start = range.from;
+  if (!start) {
+    const d = new Date();
+    d.setDate(d.getDate() - defaultDays);
+    start = toISODate(d);
+  }
+  return { start, end };
+}
+
+// -- Utility: Create initial DateRange from preset --
+
+export function createDateRange(preset: "today" | "7d" | "30d" | "90d"): DateRange {
+  return getPresetRange(preset);
+}

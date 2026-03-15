@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, type FormEvent } from "react";
+import React, { useEffect, useState, useCallback, useMemo, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus,
@@ -10,8 +10,8 @@ import {
   Trash2,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Upload,
-  FileSpreadsheet,
   Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -48,12 +48,20 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   fetchLeads,
   createLead,
   updateLead,
   deleteLead,
   type Lead,
 } from "@/lib/api";
+import { LEAD_STATUS_COLORS, LEAD_QUALIFICATION_COLORS } from "@/lib/status-config";
+import { DateRangePicker, type DateRange } from "@/components/date-range-picker";
 
 const PAGE_SIZE = 50;
 
@@ -64,22 +72,6 @@ const STATUS_OPTIONS = [
   { value: "unqualified", label: "Unqualified" },
 ];
 
-const STATUS_COLORS: Record<string, string> = {
-  new: "bg-blue-500/15 text-blue-400 border-blue-500/25",
-  contacted: "bg-yellow-500/15 text-yellow-400 border-yellow-500/25",
-  qualified: "bg-green-500/15 text-green-400 border-green-500/25",
-  unqualified: "bg-red-500/15 text-red-400 border-red-500/25",
-};
-
-const QUALIFICATION_COLORS: Record<string, string> = {
-  hot: "bg-red-500/15 text-red-400 border-red-500/25",
-  warm: "bg-orange-500/15 text-orange-400 border-orange-500/25",
-  cold: "bg-blue-500/15 text-blue-400 border-blue-500/25",
-  high: "bg-green-500/15 text-green-400 border-green-500/25",
-  medium: "bg-yellow-500/15 text-yellow-400 border-yellow-500/25",
-  low: "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
-};
-
 export default function LeadsPage() {
   const router = useRouter();
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -88,7 +80,18 @@ export default function LeadsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [csvDialogOpen, setCsvDialogOpen] = useState(false);
+  const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null });
+
+  // Client-side date filtering
+  const filteredLeadsByDate = useMemo(() => {
+    if (!dateRange.from && !dateRange.to) return leads;
+    return leads.filter((l) => {
+      const d = l.created_at.slice(0, 10);
+      if (dateRange.from && d < dateRange.from) return false;
+      if (dateRange.to && d > dateRange.to) return false;
+      return true;
+    });
+  }, [leads, dateRange]);
 
   // Add dialog
   const [addOpen, setAddOpen] = useState(false);
@@ -117,6 +120,19 @@ export default function LeadsPage() {
   // Delete confirmation
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Mobile expanded rows
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+
+  function toggleRow(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   const loadLeads = useCallback(async () => {
     setLoading(true);
@@ -287,15 +303,24 @@ export default function LeadsPage() {
                   ))}
                 </SelectContent>
               </Select>
+              <DateRangePicker value={dateRange} onChange={setDateRange} />
             </div>
             <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={() => setCsvDialogOpen(true)}
-              >
-                <Upload className="h-4 w-4" />
-                Import CSV
-              </Button>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span tabIndex={0}>
+                      <Button variant="outline" disabled>
+                        <Upload className="h-4 w-4" />
+                        Import CSV
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Coming soon</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
               <Button
                 onClick={() => {
                   resetAddForm();
@@ -318,7 +343,7 @@ export default function LeadsPage() {
                     <Skeleton key={i} className="h-12 w-full" />
                   ))}
                 </div>
-              ) : leads.length === 0 ? (
+              ) : filteredLeadsByDate.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                   <Users className="mb-3 h-10 w-10 opacity-30" />
                   <p className="text-sm font-medium">No leads found</p>
@@ -370,14 +395,27 @@ export default function LeadsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {leads.map((lead) => (
+                    {filteredLeadsByDate.map((lead) => {
+                      const isExpanded = expandedRows.has(lead.id);
+                      return (
+                        <React.Fragment key={lead.id}>
                       <TableRow
-                        key={lead.id}
                         className="cursor-pointer hover:bg-muted/50"
                         onClick={() => router.push(`/leads/${lead.id}`)}
                       >
                         <TableCell className="font-medium">
-                          {lead.contact_name}
+                          <div className="flex items-center gap-1">
+                            <button
+                              className="md:hidden p-0.5 -ml-1 text-muted-foreground hover:text-foreground"
+                              onClick={(e) => toggleRow(lead.id, e)}
+                              aria-label="Expand row details"
+                            >
+                              <ChevronDown
+                                className={`h-4 w-4 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                              />
+                            </button>
+                            {lead.contact_name}
+                          </div>
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           {lead.phone_number}
@@ -392,7 +430,7 @@ export default function LeadsPage() {
                           <Badge
                             variant="outline"
                             className={
-                              STATUS_COLORS[lead.status] || "text-muted-foreground"
+                              LEAD_STATUS_COLORS[lead.status] || "text-muted-foreground"
                             }
                           >
                             {lead.status}
@@ -403,7 +441,7 @@ export default function LeadsPage() {
                             <Badge
                               variant="outline"
                               className={
-                                QUALIFICATION_COLORS[lead.qualification_level.toLowerCase()] ||
+                                LEAD_QUALIFICATION_COLORS[lead.qualification_level.toLowerCase()] ||
                                 "text-muted-foreground"
                               }
                             >
@@ -438,7 +476,46 @@ export default function LeadsPage() {
                           </Button>
                         </TableCell>
                       </TableRow>
-                    ))}
+                      {/* Mobile expanded detail row */}
+                      {isExpanded && (
+                        <TableRow className="md:hidden bg-muted/20">
+                          <TableCell colSpan={10} className="py-3 px-4">
+                            <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                              <div>
+                                <p className="text-xs text-muted-foreground">Email</p>
+                                <p className="truncate">{lead.email || "\u2014"}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-muted-foreground">Company</p>
+                                <p className="truncate">{lead.company || "\u2014"}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-muted-foreground">Qualification</p>
+                                <p>{lead.qualification_level || "\u2014"}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-muted-foreground">Last Call</p>
+                                <p>
+                                  {lead.last_call_date
+                                    ? format(new Date(lead.last_call_date), "MMM d, yyyy")
+                                    : "\u2014"}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-muted-foreground">Calls</p>
+                                <p>{lead.call_count}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-muted-foreground">Created</p>
+                                <p>{format(new Date(lead.created_at), "MMM d, yyyy")}</p>
+                              </div>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                        </React.Fragment>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               )}
@@ -757,34 +834,6 @@ export default function LeadsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* CSV Import Dialog */}
-      <Dialog open={csvDialogOpen} onOpenChange={setCsvDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Import Leads from CSV</DialogTitle>
-            <DialogDescription>
-              Upload a CSV file to bulk import leads into the system.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col items-center justify-center py-8 border-2 border-dashed rounded-lg border-muted-foreground/25">
-            <FileSpreadsheet className="h-12 w-12 text-muted-foreground/40 mb-3" />
-            <p className="text-sm font-medium text-muted-foreground">
-              CSV import coming soon
-            </p>
-            <p className="text-xs text-muted-foreground mt-1">
-              Expected format: name, phone, email, company, location
-            </p>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setCsvDialogOpen(false)}
-            >
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }

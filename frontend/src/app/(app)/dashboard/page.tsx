@@ -52,6 +52,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DateRangePicker,
+  createDateRange,
+  getDateRangeValues,
+  type DateRange as DateRangeType,
+} from "@/components/date-range-picker";
 import { useCallLogs } from "@/hooks/use-calls";
 import { useBots } from "@/hooks/use-bots";
 import {
@@ -59,7 +65,8 @@ import {
   useAnalyticsTrends,
   useAnalyticsRedFlags,
 } from "@/hooks/use-analytics";
-import { formatDuration, formatPhoneNumber, timeAgo } from "@/lib/utils";
+import { formatDuration, formatPhoneNumber } from "@/lib/utils";
+import { TimeDisplay } from "@/components/time-display";
 import type { CallLog, TrendPoint } from "@/types/api";
 
 // -- Colors --
@@ -86,31 +93,7 @@ const SENTIMENT_COLORS = {
   negative: ROSE,
 };
 
-// -- Date range helpers --
-type DateRange = "today" | "7d" | "30d" | "90d";
-
-function getDateRange(range: DateRange): { start: string; end: string } {
-  const end = new Date();
-  const start = new Date();
-  switch (range) {
-    case "today":
-      start.setHours(0, 0, 0, 0);
-      break;
-    case "7d":
-      start.setDate(start.getDate() - 7);
-      break;
-    case "30d":
-      start.setDate(start.getDate() - 30);
-      break;
-    case "90d":
-      start.setDate(start.getDate() - 90);
-      break;
-  }
-  return {
-    start: start.toISOString().slice(0, 10),
-    end: end.toISOString().slice(0, 10),
-  };
-}
+// -- Date range helpers (now using shared DateRangePicker) --
 
 // -- Build daily call volume from raw calls --
 function buildDailyVolume(calls: CallLog[], days: number) {
@@ -180,12 +163,19 @@ function buildFunnel(calls: CallLog[]) {
   ).length;
 
   return [
-    { stage: "Attempted", value: attempted, color: VIOLET },
-    { stage: "Connected", value: connected, color: INDIGO },
-    { stage: "Qualified", value: qualified, color: AMBER },
-    { stage: "Converted", value: converted, color: EMERALD },
+    { stage: "Attempted", value: attempted, color: VIOLET, tip: "Total calls initiated in this period" },
+    { stage: "Connected", value: connected, color: INDIGO, tip: "Calls with completed or in-progress status" },
+    { stage: "Qualified", value: qualified, color: AMBER, tip: "Calls where a goal outcome was determined" },
+    { stage: "Converted", value: converted, color: EMERALD, tip: "Calls where goal outcome was success" },
   ];
 }
+
+const FUNNEL_TIPS: Record<string, string> = {
+  Attempted: "Total calls initiated in this period",
+  Connected: "Calls with completed or in-progress status",
+  Qualified: "Calls where a goal outcome was determined",
+  Converted: "Calls where goal outcome was success",
+};
 
 // -- Tooltip for dark theme --
 function DarkTooltip({
@@ -282,14 +272,17 @@ function KPICard({
 function EmptyState({
   icon: Icon,
   message,
+  sub,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   message: string;
+  sub?: string;
 }) {
   return (
     <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
       <Icon className="mb-3 h-10 w-10 opacity-30" />
       <p className="text-sm">{message}</p>
+      {sub && <p className="text-xs mt-1 text-muted-foreground/60">{sub}</p>}
     </div>
   );
 }
@@ -299,10 +292,10 @@ function EmptyState({
 // ============================================================================
 
 export default function DashboardPage() {
-  const [dateRange, setDateRange] = useState<DateRange>("30d");
+  const [dateRange, setDateRange] = useState<DateRangeType>(() => createDateRange("30d"));
   const [selectedBotId, setSelectedBotId] = useState<string>("all");
 
-  const range = useMemo(() => getDateRange(dateRange), [dateRange]);
+  const range = useMemo(() => getDateRangeValues(dateRange, 30), [dateRange]);
 
   const { data: bots = [], isLoading: botsLoading } = useBots();
   const { data: allCalls = [], isLoading: callsLoading } = useCallLogs(
@@ -317,8 +310,9 @@ export default function DashboardPage() {
     });
   }, [allCalls, range]);
 
-  // Analytics for the selected bot (if specific bot selected)
-  const analyticsBotId = selectedBotId !== "all" ? selectedBotId : (bots[0]?.id ?? "");
+  // Analytics for the selected bot — skip analytics queries when "All Bots" is selected
+  // since analytics endpoints require a specific bot ID
+  const analyticsBotId = selectedBotId !== "all" ? selectedBotId : "";
   const { data: summary } = useAnalyticsSummary(analyticsBotId, {
     start_date: range.start,
     end_date: range.end,
@@ -354,14 +348,9 @@ export default function DashboardPage() {
       total > 0 ? Math.round((successCalls / total) * 100) : 0;
 
     // Compute trend vs previous period
-    const periodDays =
-      dateRange === "today"
-        ? 1
-        : dateRange === "7d"
-        ? 7
-        : dateRange === "30d"
-        ? 30
-        : 90;
+    const startDate = new Date(range.start + "T00:00:00");
+    const endDate = new Date(range.end + "T00:00:00");
+    const periodDays = Math.max(1, Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
     const prevStart = new Date(range.start);
     prevStart.setDate(prevStart.getDate() - periodDays);
     const prevStartStr = prevStart.toISOString().slice(0, 10);
@@ -381,22 +370,18 @@ export default function DashboardPage() {
       callTrend,
       successCalls,
     };
-  }, [calls, allCalls, dateRange, range]);
+  }, [calls, allCalls, range]);
 
   // -- Chart data --
+  const dailyVolumeDays = useMemo(() => {
+    const startDate = new Date(range.start + "T00:00:00");
+    const endDate = new Date(range.end + "T00:00:00");
+    return Math.max(1, Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
+  }, [range]);
+
   const dailyVolume = useMemo(
-    () =>
-      buildDailyVolume(
-        calls,
-        dateRange === "today"
-          ? 1
-          : dateRange === "7d"
-          ? 7
-          : dateRange === "30d"
-          ? 30
-          : 90
-      ),
-    [calls, dateRange]
+    () => buildDailyVolume(calls, dailyVolumeDays),
+    [calls, dailyVolumeDays]
   );
 
   const outcomeDistribution = useMemo(
@@ -408,13 +393,27 @@ export default function DashboardPage() {
 
   const funnel = useMemo(() => buildFunnel(calls), [calls]);
 
-  // Sentiment from analytics
+  // Sentiment extracted from call captured_data
   const sentimentData = useMemo(() => {
-    if (!summary?.outcomes) return [];
-    // Map outcomes to sentiment categories as a proxy
-    // In absence of dedicated sentiment data, show placeholder
-    return [];
-  }, [summary]);
+    const counts: Record<string, number> = {};
+    for (const c of calls) {
+      const captured = c.analytics?.captured_data;
+      const raw =
+        (captured && typeof captured.sentiment === "string" && captured.sentiment) ||
+        (captured && typeof captured.overall_sentiment === "string" && captured.overall_sentiment) ||
+        null;
+      if (!raw) continue;
+      const key = raw.toLowerCase();
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    return Object.entries(counts)
+      .map(([name, value]) => ({
+        name: name.charAt(0).toUpperCase() + name.slice(1),
+        value,
+        color: SENTIMENT_COLORS[name as keyof typeof SENTIMENT_COLORS] || SLATE,
+      }))
+      .sort((a, b) => b.value - a.value);
+  }, [calls]);
 
   // Top objections from red flags
   const objectionData = useMemo(() => {
@@ -447,20 +446,7 @@ export default function DashboardPage() {
         <div className="space-y-6 p-6">
           {/* Filters Row */}
           <div className="flex flex-wrap items-center gap-3">
-            <Select
-              value={dateRange}
-              onValueChange={(v) => setDateRange(v as DateRange)}
-            >
-              <SelectTrigger className="w-[140px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="today">Today</SelectItem>
-                <SelectItem value="7d">Last 7 days</SelectItem>
-                <SelectItem value="30d">Last 30 days</SelectItem>
-                <SelectItem value="90d">Last 90 days</SelectItem>
-              </SelectContent>
-            </Select>
+            <DateRangePicker value={dateRange} onChange={setDateRange} />
             <Select value={selectedBotId} onValueChange={setSelectedBotId}>
               <SelectTrigger className="w-[240px]">
                 <SelectValue placeholder="All Bots" />
@@ -544,7 +530,7 @@ export default function DashboardPage() {
                 {loading ? (
                   <Skeleton className="h-64 w-full" />
                 ) : dailyVolume.length === 0 ? (
-                  <EmptyState icon={BarChart3} message="No call data yet" />
+                  <EmptyState icon={BarChart3} message="No call data yet" sub="Trigger your first call to see volume trends here" />
                 ) : (
                   <ResponsiveContainer width="100%" height={260}>
                     <AreaChart data={dailyVolume}>
@@ -610,7 +596,7 @@ export default function DashboardPage() {
                 {loading ? (
                   <Skeleton className="h-64 w-full" />
                 ) : outcomeDistribution.length === 0 ? (
-                  <EmptyState icon={BarChart3} message="No call data yet" />
+                  <EmptyState icon={BarChart3} message="No call data yet" sub="Outcome breakdown will appear once calls complete" />
                 ) : (
                   <div className="flex items-center gap-4">
                     <ResponsiveContainer width="50%" height={240}>
@@ -668,7 +654,7 @@ export default function DashboardPage() {
                 {loading ? (
                   <Skeleton className="h-48 w-full" />
                 ) : calls.length === 0 ? (
-                  <EmptyState icon={BarChart3} message="No call data yet" />
+                  <EmptyState icon={BarChart3} message="No call data yet" sub="Heatmap shows your best calling times by day and hour" />
                 ) : (
                   <div className="overflow-x-auto">
                     <div className="min-w-[600px]">
@@ -727,38 +713,36 @@ export default function DashboardPage() {
                 {loading ? (
                   <Skeleton className="h-48 w-full" />
                 ) : calls.length === 0 ? (
-                  <EmptyState icon={Target} message="No call data yet" />
+                  <EmptyState icon={Target} message="No call data yet" sub="Funnel tracks your calls from attempt to conversion" />
                 ) : (
-                  <ResponsiveContainer width="100%" height={240}>
-                    <BarChart data={funnel} layout="vertical">
-                      <CartesianGrid
-                        strokeDasharray="3 3"
-                        stroke="rgba(255,255,255,0.06)"
-                        horizontal={false}
-                      />
-                      <XAxis
-                        type="number"
-                        tick={{ fill: "#94a3b8", fontSize: 11 }}
-                        axisLine={false}
-                        tickLine={false}
-                        allowDecimals={false}
-                      />
-                      <YAxis
-                        type="category"
-                        dataKey="stage"
-                        tick={{ fill: "#94a3b8", fontSize: 12 }}
-                        axisLine={false}
-                        tickLine={false}
-                        width={90}
-                      />
-                      <Tooltip content={<DarkTooltip />} />
-                      <Bar dataKey="value" name="Count" radius={[0, 4, 4, 0]}>
-                        {funnel.map((entry, i) => (
-                          <Cell key={i} fill={entry.color} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
+                  <div className="space-y-3">
+                    {funnel.map((stage) => {
+                      const maxVal = funnel[0]?.value || 1;
+                      const pct = maxVal > 0 ? (stage.value / maxVal) * 100 : 0;
+                      return (
+                        <div key={stage.stage} className="space-y-1">
+                          <div className="flex items-center justify-between text-sm">
+                            <span
+                              className="text-muted-foreground cursor-help border-b border-dashed border-muted-foreground/40"
+                              title={FUNNEL_TIPS[stage.stage]}
+                            >
+                              {stage.stage}
+                            </span>
+                            <span className="font-medium tabular-nums">{stage.value}</span>
+                          </div>
+                          <div className="h-6 w-full rounded bg-muted/30 overflow-hidden">
+                            <div
+                              className="h-full rounded transition-all duration-500"
+                              style={{
+                                width: `${Math.max(pct, 2)}%`,
+                                backgroundColor: stage.color,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -775,17 +759,61 @@ export default function DashboardPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                  <div className="flex gap-3 mb-3 opacity-30">
-                    <Smile className="h-8 w-8" />
-                    <Meh className="h-8 w-8" />
-                    <Frown className="h-8 w-8" />
+                {loading ? (
+                  <Skeleton className="h-48 w-full" />
+                ) : sentimentData.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                    <div className="flex gap-3 mb-3 opacity-30">
+                      <Smile className="h-8 w-8" />
+                      <Meh className="h-8 w-8" />
+                      <Frown className="h-8 w-8" />
+                    </div>
+                    <p className="text-sm">No sentiment data yet</p>
+                    <p className="text-xs mt-1 text-muted-foreground/60">
+                      Sentiment will appear once calls are analyzed
+                    </p>
                   </div>
-                  <p className="text-sm">
-                    Sentiment analysis data will appear here once calls are
-                    processed
-                  </p>
-                </div>
+                ) : (
+                  <div className="flex items-center gap-4">
+                    <ResponsiveContainer width="50%" height={200}>
+                      <PieChart>
+                        <Pie
+                          data={sentimentData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={45}
+                          outerRadius={75}
+                          paddingAngle={2}
+                          dataKey="value"
+                        >
+                          {sentimentData.map((entry, i) => (
+                            <Cell key={i} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip content={<DarkTooltip />} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="flex-1 space-y-2">
+                      {sentimentData.map((item) => (
+                        <div
+                          key={item.name}
+                          className="flex items-center justify-between text-sm"
+                        >
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="h-3 w-3 rounded-full"
+                              style={{ backgroundColor: item.color }}
+                            />
+                            <span className="text-muted-foreground">
+                              {item.name}
+                            </span>
+                          </div>
+                          <span className="font-medium">{item.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -840,6 +868,16 @@ export default function DashboardPage() {
             </Card>
           </div>
 
+          {/* View Detailed Analytics Link */}
+          <div className="flex justify-center">
+            <Button variant="outline" asChild className="gap-2">
+              <Link href="/analytics">
+                View Detailed Analytics
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </Button>
+          </div>
+
           {/* Recent Calls Table */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
@@ -862,7 +900,7 @@ export default function DashboardPage() {
                   ))}
                 </div>
               ) : recentCalls.length === 0 ? (
-                <EmptyState icon={Phone} message="No calls yet" />
+                <EmptyState icon={Phone} message="No calls yet" sub="Your recent call activity will appear here" />
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -886,7 +924,7 @@ export default function DashboardPage() {
                           className="border-b border-border/50 hover:bg-muted/30 transition-colors"
                         >
                           <td className="py-2.5 whitespace-nowrap text-muted-foreground">
-                            {timeAgo(call.created_at)}
+                            <TimeDisplay date={call.created_at} />
                           </td>
                           <td className="py-2.5">
                             <div>

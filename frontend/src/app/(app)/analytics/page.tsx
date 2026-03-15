@@ -68,6 +68,12 @@ import {
   TabsTrigger,
   TabsContent,
 } from "@/components/ui/tabs";
+import {
+  DateRangePicker,
+  createDateRange,
+  getDateRangeValues,
+  type DateRange as DateRangeType,
+} from "@/components/date-range-picker";
 
 import { useBots } from "@/hooks/use-bots";
 import {
@@ -99,28 +105,7 @@ const SEVERITY_COLORS: Record<string, string> = {
   low: "bg-blue-500/10 text-blue-500 border-blue-500/20",
 };
 
-// -- Date range --
-type DateRange = "7d" | "30d" | "90d";
-
-function getDateRange(range: DateRange): { start: string; end: string } {
-  const end = new Date();
-  const start = new Date();
-  switch (range) {
-    case "7d":
-      start.setDate(start.getDate() - 7);
-      break;
-    case "30d":
-      start.setDate(start.getDate() - 30);
-      break;
-    case "90d":
-      start.setDate(start.getDate() - 90);
-      break;
-  }
-  return {
-    start: start.toISOString().slice(0, 10),
-    end: end.toISOString().slice(0, 10),
-  };
-}
+// -- Date range (now using shared DateRangePicker) --
 
 // -- Tooltip for dark theme --
 function DarkTooltip({
@@ -224,9 +209,9 @@ function PlaceholderState({ message }: { message: string }) {
 export default function AnalyticsPage() {
   const router = useRouter();
   const [selectedBotId, setSelectedBotId] = useState<string>("");
-  const [dateRange, setDateRange] = useState<DateRange>("30d");
+  const [dateRange, setDateRange] = useState<DateRangeType>(() => createDateRange("30d"));
 
-  const range = useMemo(() => getDateRange(dateRange), [dateRange]);
+  const range = useMemo(() => getDateRangeValues(dateRange, 30), [dateRange]);
 
   // Bots
   const { data: bots = [], isLoading: botsLoading } = useBots();
@@ -438,19 +423,7 @@ export default function AnalyticsPage() {
                 ))}
               </SelectContent>
             </Select>
-            <Select
-              value={dateRange}
-              onValueChange={(v) => setDateRange(v as DateRange)}
-            >
-              <SelectTrigger className="w-[140px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="7d">Last 7 days</SelectItem>
-                <SelectItem value="30d">Last 30 days</SelectItem>
-                <SelectItem value="90d">Last 90 days</SelectItem>
-              </SelectContent>
-            </Select>
+            <DateRangePicker value={dateRange} onChange={setDateRange} />
             {loading && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-violet-500 border-t-transparent" />

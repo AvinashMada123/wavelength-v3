@@ -13,7 +13,7 @@ import {
   Search,
   Download,
   X,
-  Calendar,
+
   ChevronLeft,
   ChevronRight,
   RefreshCw,
@@ -69,31 +69,15 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { fetchBots, fetchCallLogs, fetchCallDetail, getRecordingUrl, exportCallLogs } from "@/lib/api";
 import { exportCallsCSV } from "@/lib/call-logs-export";
 import { formatDate, formatDuration, formatPhoneNumber, timeAgo, cn } from "@/lib/utils";
+import { TimeDisplay } from "@/components/time-display";
+import { CALL_STATUS_CONFIG, INTEREST_CONFIG, SEVERITY_COLORS } from "@/lib/status-config";
+import { DateRangePicker, type DateRange } from "@/components/date-range-picker";
 import type { BotConfig, CallLog, CallAnalyticsData } from "@/types/api";
 
-// ---------- Status config ----------
-
-const STATUS_CONFIG: Record<
-  string,
-  {
-    variant: "default" | "secondary" | "destructive" | "outline";
-    icon: typeof Clock;
-    color: string;
-  }
-> = {
-  initiated: { variant: "outline", icon: Clock, color: "text-muted-foreground" },
-  ringing: { variant: "outline", icon: PhoneCall, color: "text-blue-400" },
-  "in-progress": { variant: "default", icon: Activity, color: "text-green-400" },
-  completed: { variant: "secondary", icon: CheckCircle2, color: "text-emerald-400" },
-  failed: { variant: "destructive", icon: XCircle, color: "text-red-400" },
-  error: { variant: "destructive", icon: XCircle, color: "text-red-400" },
-  "no-answer": { variant: "secondary", icon: Phone, color: "text-amber-400" },
-  busy: { variant: "secondary", icon: Phone, color: "text-amber-400" },
-  voicemail: { variant: "secondary", icon: Phone, color: "text-amber-400" },
-};
+// ---------- Status badge ----------
 
 function StatusBadge({ status }: { status: string }) {
-  const config = STATUS_CONFIG[status] || {
+  const config = CALL_STATUS_CONFIG[status] || {
     variant: "outline" as const,
     icon: Clock,
     color: "text-muted-foreground",
@@ -112,12 +96,6 @@ function StatusBadge({ status }: { status: string }) {
     </Badge>
   );
 }
-
-const INTEREST_CONFIG: Record<string, { color: string; label: string }> = {
-  high: { color: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20", label: "High" },
-  medium: { color: "bg-amber-500/10 text-amber-500 border-amber-500/20", label: "Medium" },
-  low: { color: "bg-red-500/10 text-red-500 border-red-500/20", label: "Low" },
-};
 
 function InterestBadge({ level }: { level: string }) {
   const config = INTEREST_CONFIG[level];
@@ -165,15 +143,6 @@ function SentimentBadge({ sentiment }: { sentiment: string | null | undefined })
   );
 }
 
-// ---------- Severity config ----------
-
-const SEVERITY_COLORS: Record<string, string> = {
-  critical: "bg-red-500/10 text-red-500 border-red-500/20",
-  high: "bg-orange-500/10 text-orange-500 border-orange-500/20",
-  medium: "bg-amber-500/10 text-amber-500 border-amber-500/20",
-  low: "bg-blue-500/10 text-blue-500 border-blue-500/20",
-};
-
 // ---------- Page ----------
 
 const PAGE_SIZE = 25;
@@ -200,8 +169,7 @@ function CallLogsPageInner() {
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterGoalOutcome, setFilterGoalOutcome] = useState(searchParams.get("goal_outcome") || "all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null });
   const [page, setPage] = useState(0);
 
   // Selection
@@ -330,14 +298,14 @@ function CallLogsPageInner() {
       );
     }
 
-    if (dateFrom) {
-      const from = new Date(dateFrom);
+    if (dateRange.from) {
+      const from = new Date(dateRange.from);
       from.setHours(0, 0, 0, 0);
       result = result.filter((c) => new Date(c.created_at) >= from);
     }
 
-    if (dateTo) {
-      const to = new Date(dateTo);
+    if (dateRange.to) {
+      const to = new Date(dateRange.to);
       to.setHours(23, 59, 59, 999);
       result = result.filter((c) => new Date(c.created_at) <= to);
     }
@@ -353,7 +321,7 @@ function CallLogsPageInner() {
     }
 
     return result;
-  }, [calls, filterStatus, searchQuery, dateFrom, dateTo, transcriptSearch]);
+  }, [calls, filterStatus, searchQuery, dateRange, transcriptSearch]);
 
   const totalPages = Math.ceil(filteredCalls.length / PAGE_SIZE);
   const paginatedCalls = filteredCalls.slice(
@@ -365,7 +333,7 @@ function CallLogsPageInner() {
   useEffect(() => {
     setPage(0);
     setSelectedIds(new Set());
-  }, [filterBotId, filterStatus, filterGoalOutcome, searchQuery, dateFrom, dateTo, transcriptSearch]);
+  }, [filterBotId, filterStatus, filterGoalOutcome, searchQuery, dateRange, transcriptSearch]);
 
   // ---------- Selection ----------
 
@@ -417,13 +385,13 @@ function CallLogsPageInner() {
             (c.summary && c.summary.toLowerCase().includes(q))
         );
       }
-      if (dateFrom) {
-        const from = new Date(dateFrom);
+      if (dateRange.from) {
+        const from = new Date(dateRange.from);
         from.setHours(0, 0, 0, 0);
         toExport = toExport.filter((c) => new Date(c.created_at) >= from);
       }
-      if (dateTo) {
-        const to = new Date(dateTo);
+      if (dateRange.to) {
+        const to = new Date(dateRange.to);
         to.setHours(23, 59, 59, 999);
         toExport = toExport.filter((c) => new Date(c.created_at) <= to);
       }
@@ -445,8 +413,8 @@ function CallLogsPageInner() {
     filterStatus !== "all" ||
     filterBotId !== "all" ||
     filterGoalOutcome !== "all" ||
-    dateFrom ||
-    dateTo;
+    dateRange.from ||
+    dateRange.to;
 
   function clearFilters() {
     setSearchQuery("");
@@ -454,8 +422,7 @@ function CallLogsPageInner() {
     setFilterStatus("all");
     setFilterBotId("all");
     setFilterGoalOutcome("all");
-    setDateFrom("");
-    setDateTo("");
+    setDateRange({ from: null, to: null });
   }
 
   function toggleSummaryExpand(id: string) {
@@ -562,7 +529,7 @@ function CallLogsPageInner() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All statuses</SelectItem>
-                      {Object.keys(STATUS_CONFIG).map((s) => (
+                      {Object.keys(CALL_STATUS_CONFIG).map((s) => (
                         <SelectItem key={s} value={s}>
                           {s}
                         </SelectItem>
@@ -600,29 +567,12 @@ function CallLogsPageInner() {
                     </SelectContent>
                   </Select>
 
-                  {/* Date from */}
-                  <div className="relative">
-                    <Calendar className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                    <Input
-                      type="date"
-                      value={dateFrom}
-                      onChange={(e) => setDateFrom(e.target.value)}
-                      className="pl-8 h-9 w-[150px] text-xs"
-                      title="From date"
-                    />
-                  </div>
-
-                  {/* Date to */}
-                  <div className="relative">
-                    <Calendar className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                    <Input
-                      type="date"
-                      value={dateTo}
-                      onChange={(e) => setDateTo(e.target.value)}
-                      className="pl-8 h-9 w-[150px] text-xs"
-                      title="To date"
-                    />
-                  </div>
+                  {/* Date range */}
+                  <DateRangePicker
+                    value={dateRange}
+                    onChange={setDateRange}
+                    className="h-9"
+                  />
 
                   {/* Transcript search */}
                   <div className="relative min-w-[180px]">
@@ -864,7 +814,7 @@ function CallLogsPageInner() {
                             )}
                           </TableCell>
                           <TableCell className="text-muted-foreground whitespace-nowrap text-sm">
-                            {timeAgo(call.created_at)}
+                            <TimeDisplay date={call.created_at} />
                           </TableCell>
                           <TableCell>
                             <Button
