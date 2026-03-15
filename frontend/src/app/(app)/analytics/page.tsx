@@ -451,12 +451,12 @@ export default function AnalyticsPage() {
                   });
                   if (result.succeeded > 0) {
                     toast.success(
-                      `Reanalyzed ${result.succeeded} calls. ${result.failed > 0 ? `${result.failed} failed.` : ""} Refresh to see updated data.`
+                      `Reanalyzed ${result.succeeded} calls.${result.failed > 0 ? ` ${result.failed} failed.` : ""} Refresh to see updated data.`
                     );
-                  } else if (result.total_eligible === 0) {
-                    toast.info("All calls are already analyzed. Use force=true to re-run.");
-                  } else {
+                  } else if (result.failed > 0) {
                     toast.error(`Reanalysis failed for ${result.failed} calls.`);
+                  } else {
+                    toast.info("All calls are already analyzed.");
                   }
                 } catch (e: any) {
                   toast.error(e.message || "Reanalysis failed");
