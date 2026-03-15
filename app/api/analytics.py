@@ -693,7 +693,6 @@ class ReanalysisJobStatus(BaseModel):
 
 @router.post("/reanalyze-start", response_model=ReanalysisJobStatus)
 async def start_reanalysis(
-    request: Request,
     bot_id: uuid.UUID | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
     force: bool = Query(True),
