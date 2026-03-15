@@ -353,12 +353,16 @@ async def get_cost_breakdown(
     """Cost breakdown: total, per-call, per-conversion, by type, and daily trend."""
     since = datetime.now(timezone.utc) - timedelta(days=days)
 
-    # Total calls (for per-call cost)
-    cl_filters = [CallLog.org_id == org_id, CallLog.created_at >= since]
+    # Connected calls only (for per-call cost — only completed calls are billed)
+    cl_filters = [
+        CallLog.org_id == org_id,
+        CallLog.created_at >= since,
+        CallLog.status == "completed",
+    ]
     if bot_id:
         cl_filters.append(CallLog.bot_id == bot_id)
 
-    total_calls = (await db.execute(
+    connected_calls = (await db.execute(
         select(func.count()).select_from(CallLog).where(*cl_filters)
     )).scalar_one()
 
@@ -384,7 +388,7 @@ async def get_cost_breakdown(
     )
     total_cost = float((await db.execute(cost_query)).scalar_one())
 
-    cost_per_call = round(total_cost / total_calls, 2) if total_calls else None
+    cost_per_call = round(total_cost / connected_calls, 2) if connected_calls else None
     cost_per_conversion = round(total_cost / conversions, 2) if conversions else None
 
     # Cost by type -- estimated split based on typical AI calling cost distribution.

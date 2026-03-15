@@ -708,7 +708,7 @@ export interface CostBreakdown {
   cost_per_call: number;
   cost_per_conversion: number;
   cost_by_type: Record<string, number>;
-  daily_costs: Array<{ date: string; amount: number }>;
+  daily_costs: Array<{ date: string; cost: number }>;
 }
 
 export function fetchCostBreakdown(params?: {

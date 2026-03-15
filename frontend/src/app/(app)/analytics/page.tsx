@@ -1280,7 +1280,7 @@ export default function AnalyticsPage() {
               {/* Cost summary cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <StatCard
-                  title="Credits Used"
+                  title="Total Spend"
                   value={`₹${costData?.total_cost?.toFixed(1) ?? "0"}`}
                   icon={DollarSign}
                   gradient="from-violet-500 to-indigo-500"
@@ -1288,7 +1288,7 @@ export default function AnalyticsPage() {
                   delay={0}
                 />
                 <StatCard
-                  title="Credits / Call"
+                  title="Cost per Connected Call"
                   value={costData?.cost_per_call ? `₹${costData.cost_per_call.toFixed(2)}` : "—"}
                   icon={DollarSign}
                   gradient="from-emerald-500 to-green-500"
@@ -1296,7 +1296,7 @@ export default function AnalyticsPage() {
                   delay={0.08}
                 />
                 <StatCard
-                  title="Credits / Conversion"
+                  title="Cost per Conversion"
                   value={costData?.cost_per_conversion ? `₹${costData.cost_per_conversion.toFixed(2)}` : "—"}
                   icon={DollarSign}
                   gradient="from-amber-500 to-orange-500"
@@ -1305,69 +1305,32 @@ export default function AnalyticsPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Cost per call trend */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">
-                      Cost per Call Trend
-                    </CardTitle>
-                    <CardDescription>
-                      Daily cost per call over time
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {!costData || costData.daily_costs.length === 0 ? (
-                      <PlaceholderState message="No billing data yet" />
-                    ) : (
-                      <ResponsiveContainer width="100%" height={200}>
-                        <AreaChart data={costData.daily_costs.map(d => ({ date: new Date(d.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }), cost: d.amount }))}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                          <XAxis dataKey="date" tick={{ fill: "#888", fontSize: 11 }} />
-                          <YAxis tick={{ fill: "#888", fontSize: 11 }} />
-                          <Tooltip contentStyle={{ background: "#1a1a2e", border: "1px solid #333", borderRadius: 8 }} />
-                          <Area type="monotone" dataKey="cost" stroke={VIOLET} fill={VIOLET} fillOpacity={0.2} name="Credits" />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    )}
-                  </CardContent>
-                </Card>
-
-                {/* Cost breakdown by type */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">
-                      Cost Breakdown
-                    </CardTitle>
-                    <CardDescription>
-                      Estimated split by service type
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {!costData || costData.total_cost === 0 ? (
-                      <PlaceholderState message="No cost data yet" />
-                    ) : (
-                      <div className="space-y-3">
-                        {Object.entries(costData.cost_by_type).map(([type, amount]) => {
-                          const pct = costData.total_cost > 0 ? Math.round((amount / costData.total_cost) * 100) : 0;
-                          const colors: Record<string, string> = { telephony: INDIGO, llm: VIOLET, tts: EMERALD, stt: AMBER };
-                          return (
-                            <div key={type} className="space-y-1">
-                              <div className="flex justify-between text-sm">
-                                <span className="uppercase text-xs font-medium">{type}</span>
-                                <span className="text-muted-foreground">{amount.toFixed(1)} credits ({pct}%)</span>
-                              </div>
-                              <div className="h-2 w-full rounded bg-muted/30 overflow-hidden">
-                                <div className="h-full rounded" style={{ width: `${pct}%`, backgroundColor: colors[type] || SLATE }} />
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
+              {/* Cost per call trend */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    Cost per Call Trend
+                  </CardTitle>
+                  <CardDescription>
+                    Daily credit usage over time
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {!costData || costData.daily_costs.length === 0 ? (
+                    <PlaceholderState message="No billing data yet" />
+                  ) : (
+                    <ResponsiveContainer width="100%" height={250}>
+                      <AreaChart data={costData.daily_costs.map(d => ({ date: new Date(d.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }), cost: d.cost }))}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                        <XAxis dataKey="date" tick={{ fill: "#888", fontSize: 11 }} />
+                        <YAxis tick={{ fill: "#888", fontSize: 11 }} />
+                        <Tooltip contentStyle={{ background: "#1a1a2e", border: "1px solid #333", borderRadius: 8 }} />
+                        <Area type="monotone" dataKey="cost" stroke={VIOLET} fill={VIOLET} fillOpacity={0.2} name="Credits" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  )}
+                </CardContent>
+              </Card>
 
             </TabsContent>
           </Tabs>
