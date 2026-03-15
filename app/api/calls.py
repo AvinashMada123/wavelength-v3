@@ -38,6 +38,7 @@ async def list_calls(
     bot_id: uuid.UUID | None = None,
     status: str | None = None,
     goal_outcome: str | None = None,
+    contact_phone: str | None = None,
     limit: int = 10000,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
@@ -57,6 +58,8 @@ async def list_calls(
         query = query.where(CallLog.bot_id == bot_id)
     if status:
         query = query.where(CallLog.status == status)
+    if contact_phone:
+        query = query.where(CallLog.contact_phone == contact_phone)
     query = query.offset(offset).limit(limit)
     result = await db.execute(query)
     return result.scalars().all()

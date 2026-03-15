@@ -151,6 +151,8 @@ class CallAnalyzer:
             lead_temperature=lead_temperature,
             objections=objections,
             buying_signals=buying_signals,
+            input_tokens=total_input or None,
+            output_tokens=total_output or None,
         )
 
     async def _analyze_outcome(
@@ -271,18 +273,19 @@ class CallAnalyzer:
         result["input_tokens"] = token_info["input_tokens"]
         result["output_tokens"] = token_info["output_tokens"]
 
-        # Validate enum field values
+        # Validate enum field values — set invalid values to None
         for f in goal_config.data_capture_fields:
             if f.type == "enum" and f.enum_values:
                 value = result.get("captured_data", {}).get(f.id)
                 if value is not None and value not in f.enum_values:
                     logger.warning(
-                        "invalid_enum_value",
+                        "invalid_enum_value_nullified",
                         call_sid=call_sid,
                         field=f.id,
                         got=value,
                         valid=f.enum_values,
                     )
+                    result.setdefault("captured_data", {})[f.id] = None
 
         return result
 
@@ -418,6 +421,9 @@ class CallAnalyzer:
 
     def _parse_json_response(self, text: str) -> dict:
         """Parse JSON from Gemini response, handling markdown code blocks and truncation."""
+        if not text:
+            logger.error("json_parse_failed_empty_response")
+            return {}
         text = text.strip()
         # Strip markdown code fences if present
         if text.startswith("```"):
@@ -426,11 +432,11 @@ class CallAnalyzer:
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            # Try to extract JSON object from the text
-            match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
-            if match:
+            # Use balanced brace counting to extract the outermost {...} block
+            extracted = self._extract_outermost_json(text)
+            if extracted:
                 try:
-                    return json.loads(match.group())
+                    return json.loads(extracted)
                 except json.JSONDecodeError:
                     pass
             # Try to repair truncated JSON by closing open strings/braces
@@ -443,8 +449,39 @@ class CallAnalyzer:
             try:
                 return json.loads(repaired)
             except json.JSONDecodeError:
-                logger.warning("json_parse_failed", preview=text[:500])
+                logger.error("json_parse_failed", preview=text[:500])
                 return {}
+
+    @staticmethod
+    def _extract_outermost_json(text: str) -> str | None:
+        """Extract the outermost {...} block using balanced brace counting."""
+        start = text.find("{")
+        if start == -1:
+            return None
+        depth = 0
+        in_string = False
+        escape_next = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == "\\":
+                escape_next = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+        # Unbalanced — return from start to end (let caller try to repair)
+        return None
 
     def _extract_token_usage(self, response) -> dict:
         """Extract input/output token counts from Gemini response."""
@@ -464,13 +501,21 @@ class CallAnalyzer:
         realtime_flags: list[dict],
         postcard_flags: list[dict],
     ) -> list[dict]:
-        """Deduplicate by flag_id. Prefer real-time (has actual turn_index)."""
-        seen_ids: set[str] = set()
+        """Deduplicate by flag_id. Prefer real-time (has actual turn_index).
+        When same flag detected in both, keep realtime but append post-call evidence."""
+        seen_ids: dict[str, int] = {}  # flag_id -> index in merged list
         merged: list[dict] = []
         for rf in realtime_flags:
-            seen_ids.add(rf["id"])
+            seen_ids[rf["id"]] = len(merged)
             merged.append(rf)
         for rf in postcard_flags:
-            if rf.get("id") not in seen_ids:
+            flag_id = rf.get("id")
+            if flag_id in seen_ids:
+                # Same flag in both — append post-call evidence to realtime entry
+                idx = seen_ids[flag_id]
+                post_evidence = rf.get("evidence")
+                if post_evidence:
+                    merged[idx]["additional_evidence"] = post_evidence
+            else:
                 merged.append(rf)
         return merged

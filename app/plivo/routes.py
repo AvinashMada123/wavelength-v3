@@ -101,8 +101,10 @@ async def _post_ghl_outcome(
     error: str | None = None,
     metadata: dict | None = None,
 ):
-    # Webhook URL posting disabled — GHL integration uses tag-based workflows now
-    return
+    # Only fire webhook if the bot has a ghl_webhook_url configured
+    webhook_url = ctx.ghl_webhook_url
+    if not webhook_url:
+        return
 
     outcome_data = {
         "call_sid": ctx.call_sid,
@@ -118,13 +120,20 @@ async def _post_ghl_outcome(
     if metadata:
         outcome_data["interest_level"] = metadata.get("interest_level")
         outcome_data["call_metrics"] = metadata.get("call_metrics")
+        outcome_data["goal_outcome"] = metadata.get("goal_outcome")
+        outcome_data["captured_data"] = metadata.get("captured_data")
+        outcome_data["sentiment"] = metadata.get("sentiment")
+        outcome_data["lead_temperature"] = metadata.get("lead_temperature")
         # Transcript excluded from webhook (payload size risk) — available via API
         if metadata.get("recording_url"):
             outcome_data["recording_url"] = (
                 f"{settings.PUBLIC_BASE_URL}/api/calls/{ctx.call_sid}/recording"
             )
 
-    await ghl_client.post_call_outcome(ctx.ghl_webhook_url, outcome_data)
+    try:
+        await ghl_client.post_call_outcome(webhook_url, outcome_data)
+    except Exception as e:
+        logger.error("ghl_webhook_post_error", call_sid=ctx.call_sid, error=str(e))
 
 
 async def _run_ghl_workflows(ctx: CallContext, bot_config, timing: str) -> None:
@@ -218,8 +227,7 @@ async def _save_call_analytics(
     has_flags = len(red_flags_dicts) > 0
     max_severity = _get_max_severity(red_flags_dicts) if has_flags else None
 
-    row = CallAnalytics(
-        call_log_id=call_log_id,
+    analytics_data = dict(
         org_id=org_id,
         bot_id=bot_id,
         goal_type=goal_type,
@@ -236,10 +244,27 @@ async def _save_call_analytics(
         turn_count=turn_count,
         call_duration_secs=call_duration,
         agent_word_share=_compute_agent_word_share(transcript),
+        analysis_input_tokens=analysis.input_tokens,
+        analysis_output_tokens=analysis.output_tokens,
     )
 
     async with get_db_session() as db:
-        db.add(row)
+        # Upsert: update existing row if analysis runs twice for the same call
+        existing = None
+        if call_log_id:
+            result = await db.execute(
+                select(CallAnalytics).where(CallAnalytics.call_log_id == call_log_id)
+            )
+            existing = result.scalar_one_or_none()
+
+        if existing:
+            for key, value in analytics_data.items():
+                setattr(existing, key, value)
+            logger.info("call_analytics_updated", call_sid=call_sid, analytics_id=str(existing.id))
+        else:
+            row = CallAnalytics(call_log_id=call_log_id, **analytics_data)
+            db.add(row)
+
         await db.commit()
 
     logger.info(

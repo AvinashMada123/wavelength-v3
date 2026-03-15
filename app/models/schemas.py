@@ -107,6 +107,8 @@ class CallAnalysis(BaseModel):
     lead_temperature: str | None = None  # "hot", "warm", "cold", "dead"
     objections: list[dict] | None = None  # [{category, text, resolved}]
     buying_signals: list[str] | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 # --- Request schemas ---

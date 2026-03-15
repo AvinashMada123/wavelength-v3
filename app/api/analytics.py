@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import get_current_user, get_current_org
 from app.database import get_db
 from app.models.billing import CreditTransaction
+from app.models.bot_config import BotConfig
 from app.models.call_analytics import CallAnalytics
 from app.models.call_log import CallLog
 
@@ -205,11 +206,28 @@ async def get_dashboard(
     objection_counts: dict[str, int] = {}
     conversions = 0
 
+    # Load primary success criteria IDs from bot's goal_config (if bot_id specified)
+    primary_criteria_ids: set[str] | None = None
+    if bot_id:
+        bot_result = await db.execute(
+            select(BotConfig.goal_config).where(BotConfig.id == bot_id, BotConfig.org_id == org_id)
+        )
+        goal_cfg_raw = bot_result.scalar_one_or_none()
+        if goal_cfg_raw and isinstance(goal_cfg_raw, dict):
+            criteria = goal_cfg_raw.get("success_criteria", [])
+            primaries = {c["id"] for c in criteria if isinstance(c, dict) and c.get("is_primary")}
+            if primaries:
+                primary_criteria_ids = primaries
+
     for row in analytics_rows:
         outcome = row.goal_outcome or "unknown"
         outcome_dist[outcome] = outcome_dist.get(outcome, 0) + 1
-        # Count primary success outcomes as conversions (exclude "none" and "unknown")
-        if outcome not in ("none", "unknown"):
+        # Count conversions: if primary criteria defined, only those count;
+        # otherwise fall back to any outcome that isn't "none"/"unknown"
+        if primary_criteria_ids is not None:
+            if outcome in primary_criteria_ids:
+                conversions += 1
+        elif outcome not in ("none", "unknown"):
             conversions += 1
 
         # Extract sentiment from captured_data if available
@@ -261,10 +279,12 @@ async def get_dashboard(
     ]
 
     # --- Calling heatmap (hour x day_of_week) ---
+    # TODO: Timezone should be org-configurable. Hardcoded to IST for now (all users are Indian).
+    ist_created_at = func.timezone('Asia/Kolkata', CallLog.created_at)
     heatmap_query = (
         select(
-            extract("hour", CallLog.created_at).label("hour"),
-            extract("dow", CallLog.created_at).label("dow"),  # 0=Sunday in PG
+            extract("hour", ist_created_at).label("hour"),
+            extract("dow", ist_created_at).label("dow"),  # 0=Sunday in PG
             func.count().label("cnt"),
         )
         .where(*cl_filters)
