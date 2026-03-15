@@ -228,6 +228,11 @@ async def _save_call_analytics(
         red_flag_max_severity=max_severity,
         red_flags=red_flags_dicts if has_flags else None,
         captured_data=analysis.captured_data or None,
+        sentiment=analysis.sentiment,
+        sentiment_score=analysis.sentiment_score,
+        lead_temperature=analysis.lead_temperature,
+        objections=analysis.objections,
+        buying_signals=analysis.buying_signals,
         turn_count=turn_count,
         call_duration_secs=call_duration,
         agent_word_share=_compute_agent_word_share(transcript),
@@ -536,11 +541,24 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         if llm_end_reason:
             existing_meta["llm_end_reason"] = llm_end_reason
 
-        # Add goal-based analytics to metadata if available
-        if analysis and analysis.goal_outcome:
-            existing_meta["goal_outcome"] = analysis.goal_outcome
-            existing_meta["red_flags"] = [rf.model_dump() for rf in analysis.red_flags]
-            existing_meta["captured_data"] = analysis.captured_data
+        # Add analysis data to metadata if available
+        if analysis:
+            if analysis.goal_outcome:
+                existing_meta["goal_outcome"] = analysis.goal_outcome
+            if analysis.red_flags:
+                existing_meta["red_flags"] = [rf.model_dump() for rf in analysis.red_flags]
+            if analysis.captured_data:
+                existing_meta["captured_data"] = analysis.captured_data
+            if analysis.sentiment:
+                existing_meta["sentiment"] = analysis.sentiment
+            if analysis.sentiment_score is not None:
+                existing_meta["sentiment_score"] = analysis.sentiment_score
+            if analysis.lead_temperature:
+                existing_meta["lead_temperature"] = analysis.lead_temperature
+            if analysis.objections:
+                existing_meta["objections"] = analysis.objections
+            if analysis.buying_signals:
+                existing_meta["buying_signals"] = analysis.buying_signals
 
         # Update call log with outcome + metadata
         await _update_call_status(
@@ -548,15 +566,20 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         )
         logger.info("post_call_metadata_saved", call_sid=call_sid, turns=turn_count)
 
-        # Write to call_analytics table if goal-based analysis was performed
-        if analysis and analysis.goal_outcome is not None and goal_cfg:
+        # Write to call_analytics table for any analyzed call
+        if analysis:
             try:
+                # Determine goal_type: from goal_cfg if available, otherwise None
+                if goal_cfg:
+                    goal_type = goal_cfg.get("goal_type") if isinstance(goal_cfg, dict) else goal_cfg.goal_type
+                else:
+                    goal_type = None
                 await _save_call_analytics(
                     call_sid=call_sid,
                     bot_id=bot_config.id,
                     call_log_id=existing_log.id if existing_log else None,
                     analysis=analysis,
-                    goal_type=goal_cfg.get("goal_type") if isinstance(goal_cfg, dict) else goal_cfg.goal_type,
+                    goal_type=goal_type,
                     turn_count=turn_count,
                     call_duration=existing_log.call_duration if existing_log else None,
                     transcript=transcript_entries,

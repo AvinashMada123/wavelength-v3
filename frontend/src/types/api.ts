@@ -310,6 +310,15 @@ export interface CallAnalyticsData {
   captured_data: Record<string, unknown> | null;
   turn_count: number | null;
   agent_word_share: number | null;
+  sentiment: string | null;
+  sentiment_score: number | null;
+  lead_temperature: string | null;
+  objections: Array<{
+    category: string;
+    text: string;
+    resolved: boolean;
+  }> | null;
+  buying_signals: string[] | null;
 }
 
 export interface CallLog {

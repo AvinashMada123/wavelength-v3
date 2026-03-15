@@ -49,6 +49,13 @@ class CallAnalytics(Base):
     # Captured data
     captured_data: Mapped[dict | None] = mapped_column(JSONB)
 
+    # Enriched analysis fields
+    sentiment: Mapped[str | None] = mapped_column(String, nullable=True)
+    sentiment_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lead_temperature: Mapped[str | None] = mapped_column(String, nullable=True)
+    objections: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    buying_signals: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     # Conversation quality metrics
     turn_count: Mapped[int | None] = mapped_column(Integer)
     call_duration_secs: Mapped[int | None] = mapped_column(Integer)

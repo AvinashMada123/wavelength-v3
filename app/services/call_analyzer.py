@@ -75,10 +75,12 @@ class CallAnalyzer:
         if isinstance(outcome_result, Exception):
             logger.error("analyze_outcome_failed", call_sid=call_sid, error=str(outcome_result))
             outcome_result = {"goal_outcome": None, "summary": None, "interest_level": None,
+                              "sentiment": None, "sentiment_score": None,
+                              "lead_temperature": None, "buying_signals": None,
                               "input_tokens": 0, "output_tokens": 0}
         if isinstance(extraction_result, Exception):
             logger.error("extract_structured_failed", call_sid=call_sid, error=str(extraction_result))
-            extraction_result = {"red_flags": [], "captured_data": {},
+            extraction_result = {"red_flags": [], "captured_data": {}, "objections": None,
                                  "input_tokens": 0, "output_tokens": 0}
 
         # Merge real-time + post-call red flags (dedupe by flag_id)
@@ -101,12 +103,54 @@ class CallAnalyzer:
             total_output_tokens=total_output,
         )
 
+        # Validate sentiment
+        sentiment = outcome_result.get("sentiment")
+        if sentiment not in ("positive", "neutral", "negative"):
+            sentiment = None
+
+        # Validate sentiment_score
+        sentiment_score = outcome_result.get("sentiment_score")
+        if isinstance(sentiment_score, (int, float)):
+            sentiment_score = max(1, min(10, int(sentiment_score)))
+        else:
+            sentiment_score = None
+
+        # Validate lead_temperature
+        lead_temperature = outcome_result.get("lead_temperature")
+        if lead_temperature not in ("hot", "warm", "cold", "dead"):
+            lead_temperature = None
+
+        # Parse buying_signals
+        buying_signals = outcome_result.get("buying_signals")
+        if isinstance(buying_signals, list):
+            buying_signals = [str(s) for s in buying_signals if s]
+        else:
+            buying_signals = None
+
+        # Parse objections from extraction call
+        raw_objections = extraction_result.get("objections")
+        objections = None
+        if isinstance(raw_objections, list):
+            objections = []
+            for obj in raw_objections:
+                if isinstance(obj, dict) and obj.get("text"):
+                    objections.append({
+                        "category": obj.get("category", "other"),
+                        "text": obj["text"],
+                        "resolved": bool(obj.get("resolved", False)),
+                    })
+
         return CallAnalysis(
             goal_outcome=outcome_result.get("goal_outcome"),
             summary=outcome_result.get("summary"),
             interest_level=outcome_result.get("interest_level"),
             red_flags=[RedFlagDetection(**rf) for rf in merged_flags],
             captured_data=extraction_result.get("captured_data", {}),
+            sentiment=sentiment,
+            sentiment_score=sentiment_score,
+            lead_temperature=lead_temperature,
+            objections=objections,
+            buying_signals=buying_signals,
         )
 
     async def _analyze_outcome(
@@ -134,7 +178,11 @@ class CallAnalyzer:
             f"Analyze the conversation and respond with ONLY valid JSON (no markdown):\n"
             f'{{"goal_outcome": "<id from the list above, or \\"none\\" if no outcome was reached>",'
             f' "summary": "<2-3 sentence summary contextualized to the goal>",'
-            f' "interest_level": "<high|medium|low>"}}'
+            f' "interest_level": "<high|medium|low>",'
+            f' "sentiment": "<positive|neutral|negative>",'
+            f' "sentiment_score": <1-10 where 1=very negative 10=very positive>,'
+            f' "lead_temperature": "<hot|warm|cold|dead>",'
+            f' "buying_signals": ["<specific buying signal quotes or phrases from the lead>"]}}'
         )
 
         response = await self._gemini_call(prompt, temperature=0.3, call_sid=call_sid)
@@ -210,7 +258,9 @@ class CallAnalyzer:
             f"**Transcript:**\n{conv_text}\n\n"
             f"Respond with ONLY valid JSON (no markdown):\n"
             f'{{"red_flags": [{{"id": "...", "severity": "...", "evidence": "..."}}], '
-            f'"captured_data": {{"field_id": "value_or_null"}}}}'
+            f'"captured_data": {{"field_id": "value_or_null"}}, '
+            f'"objections": [{{"category": "<price|timing|competition|authority|need|other>", '
+            f'"text": "<the objection raised>", "resolved": <true|false>}}]}}'
         )
 
         response = await self._gemini_call(prompt, temperature=0.1, call_sid=call_sid)
@@ -239,52 +289,90 @@ class CallAnalyzer:
     async def _fallback_generic(
         self, transcript: list[dict], call_sid: str | None
     ) -> CallAnalysis:
-        """Generic summary + interest level when no goal_config is set."""
+        """Generic summary + interest + sentiment + signals when no goal_config is set."""
         conv_text = "\n".join(
             f"{t['role'].upper()}: {t['content']}" for t in transcript
         )
 
         prompt = (
-            "Analyze this phone conversation and provide:\n"
-            "1. SUMMARY: A 2-3 sentence summary including the key outcome "
-            "(e.g., confirmed attendance, requested callback, declined, no clear outcome). "
-            "Be factual and concise.\n"
-            "2. INTEREST: Classify the lead's interest level as high, medium, or low "
-            "based on their actual engagement and intent expressed in the conversation.\n\n"
-            "Format your response exactly as:\n"
-            "SUMMARY: <your summary>\n"
-            "INTEREST: <high|medium|low>\n\n"
-            f"{conv_text}"
+            "Analyze this phone conversation and respond with ONLY valid JSON (no markdown):\n"
+            "{\n"
+            '  "summary": "<2-3 sentence summary including key outcome>",\n'
+            '  "interest_level": "<high|medium|low>",\n'
+            '  "sentiment": "<positive|neutral|negative>",\n'
+            '  "sentiment_score": <1-10 where 1=very negative 10=very positive>,\n'
+            '  "lead_temperature": "<hot|warm|cold|dead>",\n'
+            '  "objections": [{"category": "<price|timing|competition|authority|need|other>", '
+            '"text": "<the objection raised>", "resolved": <true|false>}],\n'
+            '  "buying_signals": ["<specific buying signal quotes or phrases>"]\n'
+            "}\n\n"
+            f"**Transcript:**\n{conv_text}"
         )
 
         async with _ANALYSIS_SEMAPHORE:
             response = await self._gemini_call(prompt, temperature=0.3, call_sid=call_sid)
 
-        raw = response.text.strip()
+        result = self._parse_json_response(response.text)
 
-        # Parse interest level
-        interest_match = _INTEREST_RE.search(raw)
-        interest_level = interest_match.group(1).lower() if interest_match else None
+        summary = result.get("summary")
+        interest_level = result.get("interest_level")
+        if interest_level not in ("high", "medium", "low"):
+            interest_level = None
 
-        # Parse summary
-        summary = raw
-        if "SUMMARY:" in raw.upper():
-            after_summary = raw[raw.upper().index("SUMMARY:") + 8:]
-            if "INTEREST:" in after_summary.upper():
-                summary = after_summary[: after_summary.upper().index("INTEREST:")].strip()
-            else:
-                summary = after_summary.strip()
+        # Validate sentiment
+        sentiment = result.get("sentiment")
+        if sentiment not in ("positive", "neutral", "negative"):
+            sentiment = None
+
+        # Validate sentiment_score
+        sentiment_score = result.get("sentiment_score")
+        if isinstance(sentiment_score, (int, float)):
+            sentiment_score = max(1, min(10, int(sentiment_score)))
+        else:
+            sentiment_score = None
+
+        # Validate lead_temperature
+        lead_temperature = result.get("lead_temperature")
+        if lead_temperature not in ("hot", "warm", "cold", "dead"):
+            lead_temperature = None
+
+        # Parse buying_signals
+        buying_signals = result.get("buying_signals")
+        if isinstance(buying_signals, list):
+            buying_signals = [str(s) for s in buying_signals if s]
+        else:
+            buying_signals = None
+
+        # Parse objections
+        raw_objections = result.get("objections")
+        objections = None
+        if isinstance(raw_objections, list):
+            objections = []
+            for obj in raw_objections:
+                if isinstance(obj, dict) and obj.get("text"):
+                    objections.append({
+                        "category": obj.get("category", "other"),
+                        "text": obj["text"],
+                        "resolved": bool(obj.get("resolved", False)),
+                    })
 
         logger.info(
-            "fallback_summary_generated",
+            "fallback_analysis_generated",
             call_sid=call_sid,
-            summary_length=len(summary),
+            summary_length=len(summary) if summary else 0,
             interest_level=interest_level,
+            sentiment=sentiment,
+            lead_temperature=lead_temperature,
         )
 
         return CallAnalysis(
             summary=summary,
             interest_level=interest_level,
+            sentiment=sentiment,
+            sentiment_score=sentiment_score,
+            lead_temperature=lead_temperature,
+            objections=objections,
+            buying_signals=buying_signals,
         )
 
     async def _gemini_call(self, prompt: str, temperature: float, call_sid: str | None, max_retries: int = 3):

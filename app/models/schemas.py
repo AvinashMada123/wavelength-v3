@@ -102,6 +102,11 @@ class CallAnalysis(BaseModel):
     interest_level: str | None = None
     red_flags: list[RedFlagDetection] = []
     captured_data: dict[str, Any] = {}
+    sentiment: str | None = None  # "positive", "neutral", "negative"
+    sentiment_score: int | None = None  # 1-10
+    lead_temperature: str | None = None  # "hot", "warm", "cold", "dead"
+    objections: list[dict] | None = None  # [{category, text, resolved}]
+    buying_signals: list[str] | None = None
 
 
 # --- Request schemas ---
