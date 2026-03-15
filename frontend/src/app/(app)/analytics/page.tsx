@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   BarChart3,
@@ -87,7 +87,7 @@ import {
 } from "@/hooks/use-analytics";
 import { useCallLogs } from "@/hooks/use-calls";
 import { formatDuration, timeAgo } from "@/lib/utils";
-import { acknowledgeAlert, snoozeAlert, reanalyzeCalls } from "@/lib/api";
+import { acknowledgeAlert, snoozeAlert } from "@/lib/api";
 import { toast } from "sonner";
 import type { TrendPoint } from "@/types/api";
 
@@ -236,6 +236,17 @@ export default function AnalyticsPage() {
       // Will be picked up on next render through effectiveBotId
     }
   }, [selectedBotId, effectiveBotId]);
+
+  // Reanalysis progress state
+  const [reanalysis, setReanalysis] = useState<{
+    running: boolean;
+    total: number;
+    current: number;
+    succeeded: number;
+    failed: number;
+    callName: string;
+  } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const selectedBot = useMemo(
     () => bots.find((b) => b.id === effectiveBotId),
@@ -442,29 +453,83 @@ export default function AnalyticsPage() {
             <Button
               variant="outline"
               size="sm"
+              disabled={!!reanalysis?.running}
               onClick={async () => {
-                toast.info("Reanalyzing calls... This may take a few minutes.");
+                const abort = new AbortController();
+                abortRef.current = abort;
+                setReanalysis({ running: true, total: 0, current: 0, succeeded: 0, failed: 0, callName: "" });
+
                 try {
-                  const result = await reanalyzeCalls({
-                    bot_id: effectiveBotId || undefined,
-                    limit: 200,
-                    force: true,
+                  const token = localStorage.getItem("access_token");
+                  const params = new URLSearchParams();
+                  if (effectiveBotId) params.set("bot_id", effectiveBotId);
+                  params.set("limit", "500");
+                  params.set("force", "true");
+
+                  const res = await fetch(`/api/analytics/reanalyze-stream?${params}`, {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${token}` },
+                    signal: abort.signal,
                   });
-                  if (result.succeeded > 0) {
-                    toast.success(
-                      `Reanalyzed ${result.succeeded} calls.${result.failed > 0 ? ` ${result.failed} failed.` : ""} Refresh to see updated data.`
-                    );
-                  } else if (result.failed > 0) {
-                    toast.error(`Reanalysis failed for ${result.failed} calls.`);
-                  } else {
-                    toast.info("All calls are already analyzed.");
+
+                  if (!res.ok || !res.body) {
+                    toast.error("Failed to start reanalysis");
+                    setReanalysis(null);
+                    return;
                   }
+
+                  const reader = res.body.getReader();
+                  const decoder = new TextDecoder();
+                  let buffer = "";
+
+                  while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split("\n");
+                    buffer = lines.pop() || "";
+                    for (const line of lines) {
+                      if (!line.startsWith("data: ")) continue;
+                      try {
+                        const evt = JSON.parse(line.slice(6));
+                        if (evt.type === "started") {
+                          setReanalysis(prev => prev ? { ...prev, total: evt.total } : prev);
+                        } else if (evt.type === "progress") {
+                          setReanalysis(prev => prev ? {
+                            ...prev,
+                            current: evt.current,
+                            total: evt.total,
+                            succeeded: evt.succeeded,
+                            failed: evt.failed,
+                            callName: evt.call_name || "",
+                          } : prev);
+                        } else if (evt.type === "done") {
+                          if (evt.succeeded > 0) {
+                            toast.success(`Reanalyzed ${evt.succeeded} calls.${evt.failed > 0 ? ` ${evt.failed} failed.` : ""}`);
+                          } else if (evt.total === 0) {
+                            toast.info("All calls are already analyzed.");
+                          } else {
+                            toast.error(`Reanalysis failed for ${evt.failed} calls.`);
+                          }
+                          setReanalysis(null);
+                        }
+                      } catch {}
+                    }
+                  }
+                  // Stream ended without done event
+                  setReanalysis(prev => {
+                    if (prev?.running) return null;
+                    return prev;
+                  });
                 } catch (e: any) {
-                  toast.error(e.message || "Reanalysis failed");
+                  if (e.name !== "AbortError") {
+                    toast.error(e.message || "Reanalysis failed");
+                  }
+                  setReanalysis(null);
                 }
               }}
             >
-              Reanalyze Calls
+              {reanalysis?.running ? "Analyzing..." : "Reanalyze Calls"}
             </Button>
             {loading && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -473,6 +538,30 @@ export default function AnalyticsPage() {
               </div>
             )}
           </div>
+
+          {/* Reanalysis progress bar */}
+          {reanalysis?.running && reanalysis.total > 0 && (
+            <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 p-4 space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">
+                  Analyzing <span className="text-foreground font-medium">{reanalysis.callName}</span>
+                </span>
+                <span className="text-muted-foreground tabular-nums">
+                  {reanalysis.current} / {reanalysis.total}
+                </span>
+              </div>
+              <div className="h-2 w-full rounded-full bg-muted/30 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-violet-500 transition-all duration-300"
+                  style={{ width: `${Math.round((reanalysis.current / reanalysis.total) * 100)}%` }}
+                />
+              </div>
+              <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                <span className="text-emerald-500">{reanalysis.succeeded} succeeded</span>
+                {reanalysis.failed > 0 && <span className="text-red-500">{reanalysis.failed} failed</span>}
+              </div>
+            </div>
+          )}
 
           {/* No goal config warning */}
           {selectedBot && !selectedBot.goal_config && (

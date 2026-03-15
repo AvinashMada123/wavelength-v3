@@ -7,7 +7,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import and_, case, extract, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -672,6 +673,159 @@ async def reanalyze_calls(
         failed=failed,
         errors=errors[:20],  # cap error messages
     )
+
+
+@router.post("/reanalyze-stream")
+async def reanalyze_calls_stream(
+    request: Request,
+    bot_id: uuid.UUID | None = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    force: bool = Query(True),
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
+    """Streaming reanalysis — sends SSE progress events as each call completes."""
+    import json
+
+    filters = [
+        CallLog.org_id == org_id,
+        CallLog.status == "completed",
+        CallLog.metadata_.isnot(None),
+    ]
+    if bot_id:
+        filters.append(CallLog.bot_id == bot_id)
+
+    if not force:
+        subq = select(CallAnalytics.call_log_id).where(
+            CallAnalytics.call_log_id.isnot(None)
+        ).correlate(CallLog)
+        filters.append(~CallLog.id.in_(subq))
+
+    result = await db.execute(
+        select(CallLog)
+        .where(*filters)
+        .order_by(CallLog.created_at.desc())
+        .limit(limit)
+    )
+    calls = result.scalars().all()
+    total = len(calls)
+
+    if total == 0:
+        async def empty_stream():
+            yield f"data: {json.dumps({'type': 'done', 'total': 0, 'succeeded': 0, 'failed': 0})}\n\n"
+        return StreamingResponse(empty_stream(), media_type="text/event-stream")
+
+    bot_ids_set = list({c.bot_id for c in calls})
+    bot_result = await db.execute(
+        select(BotConfig).where(BotConfig.id.in_(bot_ids_set))
+    )
+    bots_by_id = {b.id: b for b in bot_result.scalars().all()}
+
+    async def event_stream():
+        yield f"data: {json.dumps({'type': 'started', 'total': total})}\n\n"
+
+        analyzer = CallAnalyzer()
+        succeeded = 0
+        failed = 0
+
+        for i, call in enumerate(calls):
+            if await request.is_disconnected():
+                break
+            try:
+                meta = call.metadata_ or {}
+                transcript = meta.get("transcript", [])
+                if not transcript or len(transcript) < 2:
+                    continue
+
+                bot_cfg = bots_by_id.get(call.bot_id)
+                goal_cfg = None
+                system_prompt = ""
+                if bot_cfg:
+                    goal_cfg = bot_cfg.goal_config
+                    system_prompt = bot_cfg.system_prompt_template or ""
+
+                analysis = await analyzer.analyze(
+                    transcript=transcript,
+                    goal_config=goal_cfg,
+                    system_prompt=system_prompt,
+                    realtime_red_flags=[],
+                    call_sid=call.call_sid,
+                )
+
+                if not analysis:
+                    failed += 1
+                    yield f"data: {json.dumps({'type': 'progress', 'current': i + 1, 'total': total, 'succeeded': succeeded, 'failed': failed, 'call_name': call.contact_name or 'Unknown'})}\n\n"
+                    continue
+
+                red_flags_dicts = [rf.model_dump() for rf in analysis.red_flags]
+                has_flags = len(red_flags_dicts) > 0
+                max_severity = _get_max_severity(red_flags_dicts) if has_flags else None
+
+                goal_type = None
+                if goal_cfg:
+                    goal_type = goal_cfg.get("goal_type") if isinstance(goal_cfg, dict) else getattr(goal_cfg, "goal_type", None)
+
+                analytics_data = dict(
+                    org_id=call.org_id,
+                    bot_id=call.bot_id,
+                    goal_type=goal_type,
+                    goal_outcome=analysis.goal_outcome,
+                    has_red_flags=has_flags,
+                    red_flag_max_severity=max_severity,
+                    red_flags=red_flags_dicts if has_flags else None,
+                    captured_data=analysis.captured_data or None,
+                    sentiment=analysis.sentiment,
+                    sentiment_score=analysis.sentiment_score,
+                    lead_temperature=analysis.lead_temperature,
+                    objections=analysis.objections,
+                    buying_signals=analysis.buying_signals,
+                    turn_count=len([t for t in transcript if t.get("role") == "user"]),
+                    call_duration_secs=call.call_duration,
+                    agent_word_share=_compute_agent_word_share(transcript),
+                    analysis_input_tokens=analysis.input_tokens,
+                    analysis_output_tokens=analysis.output_tokens,
+                )
+
+                existing = await db.execute(
+                    select(CallAnalytics).where(CallAnalytics.call_log_id == call.id)
+                )
+                existing_row = existing.scalar_one_or_none()
+
+                if existing_row:
+                    for key, value in analytics_data.items():
+                        setattr(existing_row, key, value)
+                else:
+                    row = CallAnalytics(call_log_id=call.id, **analytics_data)
+                    db.add(row)
+
+                updated_meta = dict(meta)
+                if analysis.summary:
+                    updated_meta["interest_level"] = analysis.interest_level
+                if analysis.sentiment:
+                    updated_meta["sentiment"] = analysis.sentiment
+                    updated_meta["sentiment_score"] = analysis.sentiment_score
+                if analysis.lead_temperature:
+                    updated_meta["lead_temperature"] = analysis.lead_temperature
+                if analysis.goal_outcome:
+                    updated_meta["goal_outcome"] = analysis.goal_outcome
+                call.metadata_ = updated_meta
+
+                if analysis.summary and not call.summary:
+                    call.summary = analysis.summary
+
+                await db.commit()
+                succeeded += 1
+
+            except Exception as e:
+                failed += 1
+                logger.error("reanalysis_stream_failed", call_sid=call.call_sid, error=str(e))
+                await db.rollback()
+
+            yield f"data: {json.dumps({'type': 'progress', 'current': i + 1, 'total': total, 'succeeded': succeeded, 'failed': failed, 'call_name': call.contact_name or 'Unknown'})}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done', 'total': total, 'succeeded': succeeded, 'failed': failed})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 # --- Bot-specific endpoints ---
