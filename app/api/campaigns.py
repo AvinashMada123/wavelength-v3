@@ -16,8 +16,10 @@ from app.auth.dependencies import get_current_org, get_current_user
 from app.database import get_db
 from app.models.bot_config import BotConfig
 from app.models.campaign import Campaign, CampaignLead
+from app.models.call_queue import QueuedCall
 from app.models.lead import Lead
 from app.models.user import User
+from app.utils import normalize_phone_india
 
 logger = structlog.get_logger(__name__)
 
@@ -117,6 +119,100 @@ async def _lead_status_breakdown(campaign_id: uuid.UUID, db: AsyncSession) -> di
         .group_by(CampaignLead.status)
     )
     return {status: count for status, count in rows.all()}
+
+
+async def _enqueue_campaign_leads(
+    db: AsyncSession,
+    campaign: Campaign,
+    limit: int | None = None,
+) -> int:
+    """Enqueue the next batch of queued CampaignLeads into call_queue.
+
+    Args:
+        db: Active database session (caller must commit).
+        campaign: The campaign to enqueue leads for.
+        limit: Max leads to enqueue. Defaults to campaign.concurrency_limit
+               minus currently-processing leads.
+
+    Returns:
+        Number of leads enqueued.
+    """
+    if limit is None:
+        # Count how many campaign leads are already processing
+        processing_count_result = await db.execute(
+            select(func.count())
+            .select_from(CampaignLead)
+            .where(
+                CampaignLead.campaign_id == campaign.id,
+                CampaignLead.status == "processing",
+            )
+        )
+        currently_processing = processing_count_result.scalar_one()
+        limit = max(0, campaign.concurrency_limit - currently_processing)
+
+    if limit <= 0:
+        return 0
+
+    # Fetch next queued leads ordered by position
+    result = await db.execute(
+        select(CampaignLead)
+        .where(
+            CampaignLead.campaign_id == campaign.id,
+            CampaignLead.status == "queued",
+        )
+        .order_by(CampaignLead.position.asc())
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    leads_to_enqueue = result.scalars().all()
+
+    if not leads_to_enqueue:
+        return 0
+
+    # Batch-fetch lead details (phone, name)
+    lead_ids = [cl.lead_id for cl in leads_to_enqueue]
+    lead_result = await db.execute(
+        select(Lead).where(Lead.id.in_(lead_ids))
+    )
+    lead_map = {lead.id: lead for lead in lead_result.scalars().all()}
+
+    enqueued = 0
+    for cl in leads_to_enqueue:
+        lead = lead_map.get(cl.lead_id)
+        if not lead:
+            # Lead was deleted -- mark as failed
+            cl.status = "failed"
+            cl.processed_at = datetime.now(timezone.utc)
+            campaign.failed_leads += 1
+            logger.warning(
+                "campaign_lead_missing",
+                campaign_id=str(campaign.id),
+                lead_id=str(cl.lead_id),
+            )
+            continue
+
+        normalized_phone = normalize_phone_india(lead.phone_number)
+        queued_call = QueuedCall(
+            org_id=campaign.org_id,
+            bot_id=campaign.bot_config_id,
+            contact_name=lead.contact_name,
+            contact_phone=normalized_phone,
+            source="campaign",
+            status="queued",
+            priority=0,
+            campaign_id=campaign.id,
+            campaign_lead_id=cl.id,
+            extra_vars={
+                "campaign_id": str(campaign.id),
+                "campaign_lead_id": str(cl.id),
+            },
+        )
+        db.add(queued_call)
+
+        cl.status = "processing"
+        enqueued += 1
+
+    return enqueued
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +329,12 @@ async def start_campaign(
     org_id: uuid.UUID = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
-    """Start a campaign. Only allowed from 'draft' or 'paused' status."""
+    """Start a campaign. Only allowed from 'draft' or 'paused' status.
+
+    Sets status to 'running' and enqueues the first batch of calls
+    (up to concurrency_limit) into the call_queue for the background
+    queue processor to pick up.
+    """
     campaign = await _get_campaign_or_404(campaign_id, org_id, db)
 
     if campaign.status not in ("draft", "paused"):
@@ -243,11 +344,20 @@ async def start_campaign(
         )
 
     campaign.status = "running"
-    campaign.started_at = datetime.now(timezone.utc)
+    campaign.started_at = campaign.started_at or datetime.now(timezone.utc)
+
+    # Enqueue first batch of leads into call_queue
+    enqueued = await _enqueue_campaign_leads(db, campaign)
+
     await db.commit()
     await db.refresh(campaign)
 
-    logger.info("campaign_started", campaign_id=str(campaign_id))
+    logger.info(
+        "campaign_started",
+        campaign_id=str(campaign_id),
+        enqueued=enqueued,
+        concurrency_limit=campaign.concurrency_limit,
+    )
     return campaign
 
 
@@ -291,10 +401,23 @@ async def cancel_campaign(
 
     campaign.status = "cancelled"
 
-    # Cancel all queued campaign_leads
+    # Cancel all queued campaign_leads (both "queued" and "processing" that haven't started)
     await db.execute(
         update(CampaignLead)
-        .where(CampaignLead.campaign_id == campaign_id, CampaignLead.status == "queued")
+        .where(
+            CampaignLead.campaign_id == campaign_id,
+            CampaignLead.status.in_(["queued", "processing"]),
+        )
+        .values(status="cancelled")
+    )
+
+    # Cancel any pending call_queue entries for this campaign
+    await db.execute(
+        update(QueuedCall)
+        .where(
+            QueuedCall.campaign_id == campaign_id,
+            QueuedCall.status == "queued",
+        )
         .values(status="cancelled")
     )
 

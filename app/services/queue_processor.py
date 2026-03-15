@@ -23,12 +23,15 @@ from app.config import settings
 from app.database import get_db_session
 from app.models.call_log import CallLog
 from app.models.call_queue import QueuedCall
+from app.models.campaign import Campaign, CampaignLead
+from app.models.lead import Lead
 from app.models.organization import Organization
 from app.models.phone_number import PhoneNumber
 from app.plivo.client import make_outbound_call as plivo_make_call
 from app.services import circuit_breaker
 from app.services.billing import check_org_credits
 from app.twilio.client import make_outbound_call as twilio_make_call
+from app.utils import normalize_phone_india
 
 logger = structlog.get_logger(__name__)
 
@@ -326,6 +329,11 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
                 await db.commit()
                 await circuit_breaker.record_failure(db, bot_id, "Bot config not found")
                 await db.commit()
+                if queued_call.campaign_id and queued_call.campaign_lead_id:
+                    await _handle_campaign_call_result(
+                        db, queued_call.campaign_id, queued_call.campaign_lead_id,
+                        call_log_id=None, success=False,
+                    )
                 return
 
             # Check org has enough credits before dialing
@@ -342,6 +350,11 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
                 queued_call.error_message = "Insufficient credits"
                 queued_call.processed_at = datetime.now(timezone.utc)
                 await db.commit()
+                if queued_call.campaign_id and queued_call.campaign_lead_id:
+                    await _handle_campaign_call_result(
+                        db, queued_call.campaign_id, queued_call.campaign_lead_id,
+                        call_log_id=None, success=False,
+                    )
                 return
 
             # Fill prompt template — copy context_variables to avoid mutating cached bot_config
@@ -440,6 +453,11 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
                     db, bot_id, f"{provider} call initiation failed"
                 )
                 await db.commit()
+                if queued_call.campaign_id and queued_call.campaign_lead_id:
+                    await _handle_campaign_call_result(
+                        db, queued_call.campaign_id, queued_call.campaign_lead_id,
+                        call_log_id=call_log.id, success=False,
+                    )
                 if tripped:
                     logger.warning("circuit_breaker_tripped_from_queue", bot_id=str(bot_id))
                 return
@@ -454,6 +472,16 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
 
             await circuit_breaker.record_success(db, bot_id)
             await db.commit()
+
+            # Handle campaign lead progression
+            if queued_call.campaign_id and queued_call.campaign_lead_id:
+                await _handle_campaign_call_result(
+                    db,
+                    campaign_id=queued_call.campaign_id,
+                    campaign_lead_id=queued_call.campaign_lead_id,
+                    call_log_id=call_log.id,
+                    success=True,
+                )
 
             logger.info(
                 "queue_call_processed",
@@ -470,5 +498,180 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
             queued_call.processed_at = datetime.now(timezone.utc)
             await db.commit()
 
+            # Handle campaign lead failure
+            if queued_call.campaign_id and queued_call.campaign_lead_id:
+                await _handle_campaign_call_result(
+                    db,
+                    campaign_id=queued_call.campaign_id,
+                    campaign_lead_id=queued_call.campaign_lead_id,
+                    call_log_id=None,
+                    success=False,
+                )
+
             tripped = await circuit_breaker.record_failure(db, bot_id, str(e)[:200])
             await db.commit()
+
+
+async def _handle_campaign_call_result(
+    db: AsyncSession,
+    campaign_id,
+    campaign_lead_id,
+    call_log_id,
+    success: bool,
+):
+    """Update CampaignLead and Campaign after a campaign call completes or fails.
+
+    Also enqueues the next batch of leads if there are available slots.
+    """
+    try:
+        # Update the CampaignLead record
+        cl_result = await db.execute(
+            select(CampaignLead)
+            .where(CampaignLead.id == campaign_lead_id)
+            .with_for_update()
+        )
+        campaign_lead = cl_result.scalar_one_or_none()
+        if not campaign_lead:
+            logger.warning(
+                "campaign_lead_not_found",
+                campaign_lead_id=str(campaign_lead_id),
+            )
+            return
+
+        campaign_lead.status = "completed" if success else "failed"
+        campaign_lead.call_log_id = call_log_id
+        campaign_lead.processed_at = datetime.now(timezone.utc)
+
+        # Update Campaign counters with row lock
+        camp_result = await db.execute(
+            select(Campaign)
+            .where(Campaign.id == campaign_id)
+            .with_for_update()
+        )
+        campaign = camp_result.scalar_one_or_none()
+        if not campaign:
+            logger.warning("campaign_not_found", campaign_id=str(campaign_id))
+            await db.commit()
+            return
+
+        if success:
+            campaign.completed_leads += 1
+        else:
+            campaign.failed_leads += 1
+
+        # Check if campaign is still running (could have been paused/cancelled)
+        if campaign.status != "running":
+            await db.commit()
+            logger.info(
+                "campaign_not_running_skip_enqueue",
+                campaign_id=str(campaign_id),
+                status=campaign.status,
+            )
+            return
+
+        # Check if all leads are done
+        remaining_result = await db.execute(
+            select(func.count())
+            .select_from(CampaignLead)
+            .where(
+                CampaignLead.campaign_id == campaign_id,
+                CampaignLead.status.in_(["queued", "processing"]),
+            )
+        )
+        remaining = remaining_result.scalar_one()
+
+        if remaining == 0:
+            campaign.status = "completed"
+            campaign.completed_at = datetime.now(timezone.utc)
+            await db.commit()
+            logger.info(
+                "campaign_completed",
+                campaign_id=str(campaign_id),
+                completed=campaign.completed_leads,
+                failed=campaign.failed_leads,
+            )
+            return
+
+        # Enqueue next batch of leads to fill available concurrency slots
+        processing_result = await db.execute(
+            select(func.count())
+            .select_from(CampaignLead)
+            .where(
+                CampaignLead.campaign_id == campaign_id,
+                CampaignLead.status == "processing",
+            )
+        )
+        currently_processing = processing_result.scalar_one()
+        slots = max(0, campaign.concurrency_limit - currently_processing)
+
+        if slots > 0:
+            # Fetch next queued leads
+            next_leads_result = await db.execute(
+                select(CampaignLead)
+                .where(
+                    CampaignLead.campaign_id == campaign_id,
+                    CampaignLead.status == "queued",
+                )
+                .order_by(CampaignLead.position.asc())
+                .limit(slots)
+                .with_for_update(skip_locked=True)
+            )
+            next_leads = next_leads_result.scalars().all()
+
+            if next_leads:
+                # Batch-fetch lead details
+                lead_ids = [cl.lead_id for cl in next_leads]
+                lead_result = await db.execute(
+                    select(Lead).where(Lead.id.in_(lead_ids))
+                )
+                lead_map = {ld.id: ld for ld in lead_result.scalars().all()}
+
+                enqueued = 0
+                for cl in next_leads:
+                    lead = lead_map.get(cl.lead_id)
+                    if not lead:
+                        cl.status = "failed"
+                        cl.processed_at = datetime.now(timezone.utc)
+                        campaign.failed_leads += 1
+                        continue
+
+                    normalized_phone = normalize_phone_india(lead.phone_number)
+                    queued_call = QueuedCall(
+                        org_id=campaign.org_id,
+                        bot_id=campaign.bot_config_id,
+                        contact_name=lead.contact_name,
+                        contact_phone=normalized_phone,
+                        source="campaign",
+                        status="queued",
+                        priority=0,
+                        campaign_id=campaign.id,
+                        campaign_lead_id=cl.id,
+                        extra_vars={
+                            "campaign_id": str(campaign.id),
+                            "campaign_lead_id": str(cl.id),
+                        },
+                    )
+                    db.add(queued_call)
+                    cl.status = "processing"
+                    enqueued += 1
+
+                if enqueued:
+                    logger.info(
+                        "campaign_next_batch_enqueued",
+                        campaign_id=str(campaign_id),
+                        enqueued=enqueued,
+                    )
+
+        await db.commit()
+
+    except Exception:
+        logger.exception(
+            "campaign_result_handler_error",
+            campaign_id=str(campaign_id),
+            campaign_lead_id=str(campaign_lead_id),
+        )
+        # Don't let campaign tracking errors crash the processor
+        try:
+            await db.rollback()
+        except Exception:
+            pass
