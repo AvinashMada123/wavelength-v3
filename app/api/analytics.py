@@ -677,8 +677,28 @@ async def reanalyze_calls(
 
 # --- Background reanalysis with polling ---
 
-# In-memory job tracker (single-process safe)
-_reanalysis_jobs: dict[str, dict] = {}
+import json as _json
+import os as _os
+
+_REANALYSIS_DIR = "/tmp/wavelength_reanalysis"
+_os.makedirs(_REANALYSIS_DIR, exist_ok=True)
+
+
+def _job_path(job_id: str) -> str:
+    return f"{_REANALYSIS_DIR}/{job_id}.json"
+
+
+def _save_job(job_id: str, data: dict):
+    with open(_job_path(job_id), "w") as f:
+        _json.dump(data, f)
+
+
+def _load_job(job_id: str) -> dict | None:
+    path = _job_path(job_id)
+    if not _os.path.exists(path):
+        return None
+    with open(path) as f:
+        return _json.load(f)
 
 
 class ReanalysisJobStatus(BaseModel):
@@ -734,7 +754,7 @@ async def start_reanalysis(
         "failed": 0,
         "call_name": "",
     }
-    _reanalysis_jobs[job_id] = job
+    _save_job(job_id, job)
 
     if total == 0:
         return ReanalysisJobStatus(job_id=job_id, **job)
@@ -743,8 +763,10 @@ async def start_reanalysis(
     call_names = {r.id: r.contact_name or "Unknown" for r in call_refs}
 
     async def run_reanalysis():
+        succeeded = 0
+        failed = 0
+
         async with async_session_factory() as session:
-            # Load full call objects
             res = await session.execute(
                 select(CallLog).where(CallLog.id.in_(call_ids))
             )
@@ -759,12 +781,12 @@ async def start_reanalysis(
             analyzer = CallAnalyzer()
 
             for i, call in enumerate(calls):
-                job["call_name"] = call_names.get(call.id, "Unknown")
+                call_name = call_names.get(call.id, "Unknown")
                 try:
                     meta = call.metadata_ or {}
                     transcript = meta.get("transcript", [])
                     if not transcript or len(transcript) < 2:
-                        job["current"] = i + 1
+                        _save_job(job_id, {"status": "running", "total": total, "current": i + 1, "succeeded": succeeded, "failed": failed, "call_name": call_name})
                         continue
 
                     bot_cfg = bots_by_id.get(call.bot_id)
@@ -783,8 +805,8 @@ async def start_reanalysis(
                     )
 
                     if not analysis:
-                        job["failed"] += 1
-                        job["current"] = i + 1
+                        failed += 1
+                        _save_job(job_id, {"status": "running", "total": total, "current": i + 1, "succeeded": succeeded, "failed": failed, "call_name": call_name})
                         continue
 
                     red_flags_dicts = [rf.model_dump() for rf in analysis.red_flags]
@@ -844,16 +866,16 @@ async def start_reanalysis(
                         call.summary = analysis.summary
 
                     await session.commit()
-                    job["succeeded"] += 1
+                    succeeded += 1
 
                 except Exception as e:
-                    job["failed"] += 1
+                    failed += 1
                     logger.error("reanalysis_bg_failed", call_sid=call.call_sid, error=str(e))
                     await session.rollback()
 
-                job["current"] = i + 1
+                _save_job(job_id, {"status": "running", "total": total, "current": i + 1, "succeeded": succeeded, "failed": failed, "call_name": call_name})
 
-            job["status"] = "done"
+            _save_job(job_id, {"status": "done", "total": total, "current": total, "succeeded": succeeded, "failed": failed, "call_name": ""})
 
     asyncio.create_task(run_reanalysis())
 
@@ -863,7 +885,7 @@ async def start_reanalysis(
 @router.get("/reanalyze-status/{job_id}", response_model=ReanalysisJobStatus)
 async def get_reanalysis_status(job_id: str):
     """Poll reanalysis job progress."""
-    job = _reanalysis_jobs.get(job_id)
+    job = _load_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return ReanalysisJobStatus(job_id=job_id, **job)
