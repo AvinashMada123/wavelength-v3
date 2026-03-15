@@ -1,15 +1,15 @@
 """Add campaign_id and campaign_lead_id to call_queue
 
-Revision ID: 021
-Revises: 020
+Revision ID: 022
+Revises: 021
 """
 
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
 
-revision = "021"
-down_revision = "020"
+revision = "022"
+down_revision = "021"
 branch_labels = None
 depends_on = None
 
