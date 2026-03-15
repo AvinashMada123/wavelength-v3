@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     # Sarvam AI TTS
     SARVAM_API_KEY: str = ""
 
+    # ElevenLabs TTS
+    ELEVENLABS_API_KEY: str = ""
+
     # Groq (OpenAI-compatible LLM)
     GROQ_API_KEY: str = ""
 

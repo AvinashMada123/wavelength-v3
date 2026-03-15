@@ -96,6 +96,34 @@ export const SARVAM_VOICE_GROUPS: VoiceGroup[] = [
   },
 ];
 
+export const ELEVENLABS_VOICE_GROUPS: VoiceGroup[] = [
+  {
+    label: "Female",
+    voices: [
+      { value: "XyEeR27UzfaUps3yGyx0", label: "Aditi" },
+      { value: "g19dpkfwlJXgbfszAJu4", label: "Apsara" },
+      { value: "TmPeb2hSxdVrThJLywkg", label: "Vanishree" },
+      { value: "Si3AERW3lxJK0niSUBOH", label: "Tara" },
+      { value: "mmSZflZFDoe6qEecRgIO", label: "India" },
+      { value: "XYfWcxd0jJece96Z98eV", label: "Kritika" },
+    ],
+  },
+  {
+    label: "Male",
+    voices: [
+      { value: "txk8uOzZ0iCh0B9mFSRG", label: "Rahul" },
+      { value: "wJ5MX7uuKXZwFqGdWM4N", label: "Raj" },
+      { value: "wX8msIkhz9iDOTSSJWNZ", label: "Dev" },
+      { value: "eUKPwd15VeaPJ9bDZ6iM", label: "Adarsh" },
+      { value: "SXuKWBhKoIoAHKlf6Gt3", label: "Gaurav" },
+      { value: "EtEf6yOMlronn3UoIDrF", label: "Ankit" },
+      { value: "6AbnF0VuurKuJlnO8FuS", label: "Rohan" },
+      { value: "2muwBbTynA0XWNaXklBY", label: "Arjun" },
+      { value: "D7yWiCK9WwbeU9IwYjLU", label: "Vivaan" },
+    ],
+  },
+];
+
 // Backward compat: default VOICE_GROUPS = Gemini
 export const VOICE_GROUPS = GEMINI_VOICE_GROUPS;
 
@@ -115,6 +143,7 @@ export const STT_PROVIDER_OPTIONS_CLIENT = [
 export const TTS_PROVIDER_OPTIONS = [
   { value: "gemini", label: "Gemini" },
   { value: "sarvam", label: "Sarvam AI" },
+  { value: "elevenlabs", label: "ElevenLabs" },
 ] as const;
 
 export const LLM_PROVIDER_OPTIONS = [

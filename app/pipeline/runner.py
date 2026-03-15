@@ -98,6 +98,21 @@ async def _synthesize_greeting(
                     temperature=0.4,
                 ),
             )
+        elif tts_provider == "elevenlabs":
+            from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+
+            tts = ElevenLabsTTSService(
+                api_key=settings.ELEVENLABS_API_KEY,
+                voice_id=call_context.tts_voice,
+                model="eleven_flash_v2_5",
+                sample_rate=16000,
+                params=ElevenLabsTTSService.InputParams(
+                    stability=0.5,
+                    similarity_boost=0.75,
+                    use_speaker_boost=False,
+                    style=0.0,
+                ),
+            )
         else:
             # Google Cloud TTS — not easily usable standalone, fall back
             return None

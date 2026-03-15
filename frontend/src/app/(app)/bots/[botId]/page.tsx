@@ -50,7 +50,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 import { useAuth } from "@/contexts/auth-context";
 import { fetchBot, createBot, updateBot } from "@/lib/api";
-import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, SARVAM_LANGUAGE_OPTIONS, DEEPGRAM_LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS_CLIENT, LLM_PROVIDER_OPTIONS, LLM_MODEL_OPTIONS } from "@/lib/constants";
+import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, ELEVENLABS_VOICE_GROUPS, SARVAM_LANGUAGE_OPTIONS, DEEPGRAM_LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS_CLIENT, LLM_PROVIDER_OPTIONS, LLM_MODEL_OPTIONS } from "@/lib/constants";
 import type { BotConfig, GHLWorkflow, GoalConfig, SuccessCriterion, RedFlagConfig, DataCaptureField } from "@/types/api";
 
 // ---------------------------------------------------------------------------
@@ -66,7 +66,7 @@ interface BotForm {
   event_time: string;
   greeting_template: string;
   stt_provider: "deepgram" | "sarvam";
-  tts_provider: "gemini" | "sarvam";
+  tts_provider: "gemini" | "sarvam" | "elevenlabs";
   tts_voice: string;
   tts_style_prompt: string;
   llm_provider: "google" | "groq";
@@ -743,9 +743,9 @@ export default function BotEditorPage() {
                                 <Select
                                   value={form.tts_provider}
                                   onValueChange={(v) => {
-                                    setField("tts_provider", v as "gemini" | "sarvam");
+                                    setField("tts_provider", v as "gemini" | "sarvam" | "elevenlabs");
                                     // Reset voice to provider default
-                                    setField("tts_voice", v === "sarvam" ? "priya" : "Kore");
+                                    setField("tts_voice", v === "sarvam" ? "priya" : v === "elevenlabs" ? "txk8uOzZ0iCh0B9mFSRG" : "Kore");
                                   }}
                                 >
                                   <SelectTrigger>
@@ -773,7 +773,7 @@ export default function BotEditorPage() {
                                   <SelectValue placeholder="Select voice..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {SARVAM_VOICE_GROUPS.map((group) => (
+                                  {(form.tts_provider === "elevenlabs" ? ELEVENLABS_VOICE_GROUPS : form.tts_provider === "gemini" ? GEMINI_VOICE_GROUPS : SARVAM_VOICE_GROUPS).map((group) => (
                                     <SelectGroup key={group.label}>
                                       <SelectLabel>{group.label}</SelectLabel>
                                       {group.voices.map((v) => (

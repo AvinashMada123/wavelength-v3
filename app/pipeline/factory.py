@@ -1377,6 +1377,27 @@ async def build_pipeline(
                 language=tts_language,
             ),
         )
+    elif tts_provider == "elevenlabs":
+        from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+
+        tts = ElevenLabsTTSService(
+            api_key=settings.ELEVENLABS_API_KEY,
+            voice_id=call_context.tts_voice,
+            model="eleven_flash_v2_5",
+            sample_rate=16000,
+            text_aggregator=PhraseTextAggregator(
+                min_phrase_chars=10,
+                subsequent_phrase_chars=25,
+                adaptive=settings.ADAPTIVE_PHRASE_CHARS,
+            ),
+            params=ElevenLabsTTSService.InputParams(
+                stability=0.5,
+                similarity_boost=0.75,
+                use_speaker_boost=False,
+                style=0.0,
+            ),
+        )
+        logger.info("tts_elevenlabs_init", voice=call_context.tts_voice, model="eleven_flash_v2_5")
     else:
         from app.services.google_cloud_tts import GoogleCloudGRPCTTSService
 
