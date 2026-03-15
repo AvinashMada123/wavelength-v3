@@ -364,7 +364,7 @@ export default function DashboardPage() {
         totalCost: dashData.total_cost,
         costPerConversion: dashData.cost_per_conversion,
         callTrend,
-        successCalls: dashData.conversion_funnel.converted,
+        successCalls: dashData.conversion_funnel?.find(s => s.stage === "Converted")?.count ?? 0,
       };
     }
 
@@ -415,14 +415,20 @@ export default function DashboardPage() {
 
   const funnel = useMemo(() => {
     // Prefer backend funnel data when available
-    if (dashData?.conversion_funnel) {
-      const f = dashData.conversion_funnel;
-      return [
-        { stage: "Attempted", value: f.initiated, color: VIOLET, tip: "Total calls initiated in this period" },
-        { stage: "Connected", value: f.connected, color: INDIGO, tip: "Calls lasting > 10 seconds (real human connection)" },
-        { stage: "Qualified", value: f.analyzed, color: AMBER, tip: "Calls with goal analysis completed" },
-        { stage: "Converted", value: f.converted, color: EMERALD, tip: "Calls matching primary success criteria" },
-      ];
+    if (dashData?.conversion_funnel?.length) {
+      const colors = [VIOLET, INDIGO, AMBER, EMERALD];
+      const tips: Record<string, string> = {
+        Initiated: "Total calls initiated in this period",
+        Connected: "Calls lasting > 10 seconds (real human connection)",
+        Analyzed: "Calls with goal analysis completed",
+        Converted: "Calls matching primary success criteria",
+      };
+      return dashData.conversion_funnel.map((step, i) => ({
+        stage: step.stage,
+        value: step.count,
+        color: colors[i] || VIOLET,
+        tip: tips[step.stage] || step.stage,
+      }));
     }
     return buildFunnel(calls);
   }, [dashData, calls]);

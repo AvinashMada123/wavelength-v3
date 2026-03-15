@@ -689,7 +689,7 @@ export interface DashboardAnalytics {
   sentiment_distribution: Record<string, number>;
   top_objections: Array<{ label: string; count: number }>;
   calling_heatmap: Array<{ hour: number; day: number; count: number }>;
-  conversion_funnel: { initiated: number; connected: number; analyzed: number; converted: number };
+  conversion_funnel: Array<{ stage: string; count: number; percentage: number }>;
 }
 
 export function fetchDashboardAnalytics(params?: {
