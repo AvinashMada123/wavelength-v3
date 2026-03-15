@@ -145,7 +145,7 @@ function botToForm(bot: BotConfig): BotForm {
     event_time: bot.event_time || "",
     greeting_template: bot.greeting_template || "",
     stt_provider: bot.stt_provider || "deepgram",
-    tts_provider: "sarvam",
+    tts_provider: (bot.tts_provider as "gemini" | "sarvam" | "elevenlabs") || "sarvam",
     tts_voice: bot.tts_voice,
     tts_style_prompt: bot.tts_style_prompt || "",
     llm_provider: bot.llm_provider || "google",
