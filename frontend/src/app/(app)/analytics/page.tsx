@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   BarChart3,
@@ -16,18 +15,46 @@ import {
   Bell,
   BellOff,
   Eye,
-  ChevronDown,
   Database,
   ArrowRight,
+  DollarSign,
+  Thermometer,
+  Zap,
+  MessageSquare,
+  Frown,
+  Meh,
+  Smile,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import {
+  AreaChart,
+  Area,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 
 import { Header } from "@/components/layout/header";
 import { PageTransition } from "@/components/layout/page-transition";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Separator } from "@/components/ui/separator";
 import {
   Select,
   SelectContent,
@@ -35,35 +62,35 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { toast } from "sonner";
-
 import {
-  fetchBots,
-  fetchAnalyticsSummary,
-  fetchAnalyticsOutcomes,
-  fetchAnalyticsRedFlags,
-  fetchAnalyticsAlerts,
-  fetchAnalyticsTrends,
-  fetchAnalyticsCapturedData,
-  acknowledgeAlert,
-  snoozeAlert,
-} from "@/lib/api";
-import { formatDuration, formatDate, timeAgo } from "@/lib/utils";
-import type {
-  BotConfig,
-  AnalyticsSummaryResponse,
-  AnalyticsOutcomeItem,
-  RedFlagGroupItem,
-  AlertsResponse,
-  TrendPoint,
-  CapturedDataFieldSummary,
-} from "@/types/api";
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/components/ui/tabs";
 
-// ---------------------------------------------------------------------------
-// Severity helpers
-// ---------------------------------------------------------------------------
+import { useBots } from "@/hooks/use-bots";
+import {
+  useAnalyticsSummary,
+  useAnalyticsOutcomes,
+  useAnalyticsRedFlags,
+  useAnalyticsAlerts,
+  useAnalyticsTrends,
+} from "@/hooks/use-analytics";
+import { useCallLogs } from "@/hooks/use-calls";
+import { formatDuration, timeAgo } from "@/lib/utils";
+import { acknowledgeAlert, snoozeAlert } from "@/lib/api";
+import { toast } from "sonner";
+import type { TrendPoint } from "@/types/api";
+
+// -- Colors --
+const VIOLET = "#8b5cf6";
+const INDIGO = "#6366f1";
+const EMERALD = "#10b981";
+const AMBER = "#f59e0b";
+const ROSE = "#f43f5e";
+const CYAN = "#06b6d4";
+const SLATE = "#64748b";
 
 const SEVERITY_COLORS: Record<string, string> = {
   critical: "bg-red-500/10 text-red-500 border-red-500/20",
@@ -72,122 +99,293 @@ const SEVERITY_COLORS: Record<string, string> = {
   low: "bg-blue-500/10 text-blue-500 border-blue-500/20",
 };
 
-const OUTCOME_COLORS = [
-  "from-emerald-500 to-green-500",
-  "from-violet-500 to-indigo-500",
-  "from-amber-500 to-orange-500",
-  "from-rose-500 to-pink-500",
-  "from-cyan-500 to-blue-500",
-  "from-fuchsia-500 to-purple-500",
-];
+// -- Date range --
+type DateRange = "7d" | "30d" | "90d";
 
-function getSeverityIcon(severity: string) {
-  if (severity === "critical" || severity === "high") return AlertTriangle;
-  return Shield;
+function getDateRange(range: DateRange): { start: string; end: string } {
+  const end = new Date();
+  const start = new Date();
+  switch (range) {
+    case "7d":
+      start.setDate(start.getDate() - 7);
+      break;
+    case "30d":
+      start.setDate(start.getDate() - 30);
+      break;
+    case "90d":
+      start.setDate(start.getDate() - 90);
+      break;
+  }
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
+  };
 }
 
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
+// -- Tooltip for dark theme --
+function DarkTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: Array<{ name: string; value: number; color: string }>;
+  label?: string;
+}) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-lg border bg-card px-3 py-2 shadow-xl">
+      <p className="text-xs text-muted-foreground mb-1">{label}</p>
+      {payload.map((p, i) => (
+        <p key={i} className="text-sm font-medium" style={{ color: p.color }}>
+          {p.name}: {p.value}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+// -- KPI Card --
+function StatCard({
+  title,
+  value,
+  icon: Icon,
+  gradient,
+  loading,
+  delay = 0,
+}: {
+  title: string;
+  value: string | number;
+  icon: React.ComponentType<{ className?: string }>;
+  gradient: string;
+  loading: boolean;
+  delay?: number;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay }}
+    >
+      <Card>
+        <CardContent className="flex items-center gap-4 pt-6">
+          <div
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${gradient} text-white shadow-lg`}
+          >
+            <Icon className="h-5 w-5" />
+          </div>
+          <div>
+            {loading ? (
+              <Skeleton className="h-7 w-16" />
+            ) : (
+              <p className="text-2xl font-bold">{value}</p>
+            )}
+            <p className="text-sm text-muted-foreground">{title}</p>
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
+// -- Empty state --
+function EmptyState({
+  icon: Icon,
+  message,
+  sub,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  message: string;
+  sub?: string;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+      <Icon className="mb-3 h-10 w-10 opacity-30" />
+      <p className="text-sm">{message}</p>
+      {sub && <p className="text-xs mt-1">{sub}</p>}
+    </div>
+  );
+}
+
+// -- Placeholder empty state --
+function PlaceholderState({ message }: { message: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+      <BarChart3 className="mb-3 h-10 w-10 opacity-30" />
+      <p className="text-sm text-center max-w-xs">{message}</p>
+    </div>
+  );
+}
+
+// ============================================================================
+// Main Analytics Page
+// ============================================================================
 
 export default function AnalyticsPage() {
   const router = useRouter();
-  const [bots, setBots] = useState<BotConfig[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string>("");
-  const [loading, setLoading] = useState(true);
-  const [dataLoading, setDataLoading] = useState(false);
+  const [dateRange, setDateRange] = useState<DateRange>("30d");
 
-  // Analytics data
-  const [summary, setSummary] = useState<AnalyticsSummaryResponse | null>(null);
-  const [outcomes, setOutcomes] = useState<AnalyticsOutcomeItem[]>([]);
-  const [redFlags, setRedFlags] = useState<RedFlagGroupItem[]>([]);
-  const [alerts, setAlerts] = useState<AlertsResponse | null>(null);
-  const [trends, setTrends] = useState<TrendPoint[]>([]);
-  const [capturedData, setCapturedData] = useState<CapturedDataFieldSummary[]>([]);
+  const range = useMemo(() => getDateRange(dateRange), [dateRange]);
 
-  // Load bots
-  useEffect(() => {
-    fetchBots()
-      .then((b) => {
-        setBots(b);
-        // Auto-select first bot with goal_config
-        const goalBot = b.find((bot) => bot.goal_config);
-        if (goalBot) setSelectedBotId(goalBot.id);
-        else if (b.length > 0) setSelectedBotId(b[0].id);
-      })
-      .catch(() => toast.error("Failed to load bots"))
-      .finally(() => setLoading(false));
-  }, []);
+  // Bots
+  const { data: bots = [], isLoading: botsLoading } = useBots();
 
-  // Load analytics when bot changes
-  const loadAnalytics = useCallback(async (botId: string) => {
-    if (!botId) return;
-    setDataLoading(true);
-    try {
-      const [s, o, rf, al, tr, cd] = await Promise.all([
-        fetchAnalyticsSummary(botId),
-        fetchAnalyticsOutcomes(botId, { page_size: 20 }),
-        fetchAnalyticsRedFlags(botId),
-        fetchAnalyticsAlerts(botId),
-        fetchAnalyticsTrends(botId, { interval: "daily" }),
-        fetchAnalyticsCapturedData(botId),
-      ]);
-      setSummary(s);
-      setOutcomes(o);
-      setRedFlags(rf);
-      setAlerts(al);
-      setTrends(tr);
-      setCapturedData(cd);
-    } catch {
-      toast.error("Failed to load analytics");
-    } finally {
-      setDataLoading(false);
+  // Auto-select first bot with goal_config
+  const effectiveBotId = useMemo(() => {
+    if (selectedBotId) return selectedBotId;
+    const goalBot = bots.find((b) => b.goal_config);
+    return goalBot?.id || bots[0]?.id || "";
+  }, [selectedBotId, bots]);
+
+  // Set initial bot
+  useMemo(() => {
+    if (!selectedBotId && effectiveBotId) {
+      // Will be picked up on next render through effectiveBotId
     }
-  }, []);
-
-  useEffect(() => {
-    if (selectedBotId) loadAnalytics(selectedBotId);
-  }, [selectedBotId, loadAnalytics]);
+  }, [selectedBotId, effectiveBotId]);
 
   const selectedBot = useMemo(
-    () => bots.find((b) => b.id === selectedBotId),
-    [bots, selectedBotId]
+    () => bots.find((b) => b.id === effectiveBotId),
+    [bots, effectiveBotId]
   );
 
-  const hasGoalConfig = selectedBot?.goal_config != null;
+  // Analytics hooks
+  const { data: summary, isLoading: summaryLoading } = useAnalyticsSummary(
+    effectiveBotId,
+    { start_date: range.start, end_date: range.end }
+  );
+  const { data: outcomes = [], isLoading: outcomesLoading } =
+    useAnalyticsOutcomes(effectiveBotId, { page_size: 20 });
+  const { data: redFlags = [], isLoading: redFlagsLoading } =
+    useAnalyticsRedFlags(effectiveBotId);
+  const { data: alerts } = useAnalyticsAlerts(effectiveBotId);
+  const { data: trends = [], isLoading: trendsLoading } = useAnalyticsTrends(
+    effectiveBotId,
+    { interval: "daily", start_date: range.start, end_date: range.end }
+  );
+  const { data: calls = [] } = useCallLogs(
+    effectiveBotId ? { botId: effectiveBotId } : undefined
+  );
 
-  // Alert actions
+  const loading = botsLoading || summaryLoading;
+
+  // -- Trend chart data --
+  const trendChartData = useMemo(() => {
+    return trends.map((t) => ({
+      date: new Date(t.date + "T00:00:00").toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+      }),
+      total: t.total,
+      red_flags: t.red_flag_count,
+      ...t.outcomes,
+    }));
+  }, [trends]);
+
+  // Outcome keys for line chart
+  const outcomeKeys = useMemo(() => {
+    const keys = new Set<string>();
+    trends.forEach((t) =>
+      Object.keys(t.outcomes).forEach((k) => keys.add(k))
+    );
+    return Array.from(keys);
+  }, [trends]);
+
+  const OUTCOME_LINE_COLORS = [EMERALD, VIOLET, AMBER, ROSE, CYAN, INDIGO];
+
+  // -- Score distribution (from outcomes data) --
+  const scoreDistribution = useMemo(() => {
+    // agent_word_share as a proxy for "score" since we don't have a score field
+    const ranges = [
+      { label: "0-20%", min: 0, max: 0.2, count: 0 },
+      { label: "20-40%", min: 0.2, max: 0.4, count: 0 },
+      { label: "40-60%", min: 0.4, max: 0.6, count: 0 },
+      { label: "60-80%", min: 0.6, max: 0.8, count: 0 },
+      { label: "80-100%", min: 0.8, max: 1.01, count: 0 },
+    ];
+    for (const o of outcomes) {
+      if (o.agent_word_share != null) {
+        const r = ranges.find(
+          (r) => o.agent_word_share! >= r.min && o.agent_word_share! < r.max
+        );
+        if (r) r.count++;
+      }
+    }
+    return ranges;
+  }, [outcomes]);
+
+  // -- Objections from red flags --
+  const objectionData = useMemo(() => {
+    return redFlags
+      .map((rf) => ({
+        name: rf.flag_id
+          .replace(/_/g, " ")
+          .replace(/\b\w/g, (l) => l.toUpperCase()),
+        count: rf.count,
+        severity: rf.severity,
+        color:
+          rf.severity === "critical"
+            ? ROSE
+            : rf.severity === "high"
+            ? AMBER
+            : rf.severity === "medium"
+            ? "#f97316"
+            : CYAN,
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+  }, [redFlags]);
+
+  // Severity breakdown
+  const severityBreakdown = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const rf of redFlags) {
+      map[rf.severity] = (map[rf.severity] || 0) + rf.count;
+    }
+    return Object.entries(map).map(([severity, count]) => ({
+      name: severity.charAt(0).toUpperCase() + severity.slice(1),
+      value: count,
+      color:
+        severity === "critical"
+          ? ROSE
+          : severity === "high"
+          ? AMBER
+          : severity === "medium"
+          ? "#f97316"
+          : CYAN,
+    }));
+  }, [redFlags]);
+
+  // -- Alert actions --
   const handleAcknowledge = async (analyticsId: string) => {
     try {
-      await acknowledgeAlert(selectedBotId, analyticsId, "dashboard_user");
+      await acknowledgeAlert(effectiveBotId, analyticsId, "dashboard_user");
       toast.success("Alert acknowledged");
-      loadAnalytics(selectedBotId);
     } catch {
       toast.error("Failed to acknowledge alert");
     }
   };
 
   const handleSnooze = async (analyticsId: string) => {
-    const snoozeUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const snoozeUntil = new Date(
+      Date.now() + 24 * 60 * 60 * 1000
+    ).toISOString();
     try {
-      await snoozeAlert(selectedBotId, analyticsId, snoozeUntil);
+      await snoozeAlert(effectiveBotId, analyticsId, snoozeUntil);
       toast.success("Alert snoozed for 24 hours");
-      loadAnalytics(selectedBotId);
     } catch {
       toast.error("Failed to snooze alert");
     }
   };
 
-  // Navigate to call log detail
   const openCallLog = (callLogId: string | null) => {
     if (!callLogId) return;
     router.push(`/call-logs?call_id=${callLogId}`);
   };
 
-  // Trends chart
-  const maxTrendTotal = Math.max(...trends.map((t) => t.total), 1);
-
-  if (loading) {
+  // -- Bot loading skeleton --
+  if (botsLoading) {
     return (
       <>
         <Header title="Analytics" />
@@ -210,9 +408,12 @@ export default function AnalyticsPage() {
       <Header title="Analytics" />
       <PageTransition>
         <div className="space-y-6 p-6">
-          {/* Bot Selector */}
-          <div className="flex items-center gap-4">
-            <Select value={selectedBotId} onValueChange={setSelectedBotId}>
+          {/* Filters */}
+          <div className="flex flex-wrap items-center gap-3">
+            <Select
+              value={effectiveBotId}
+              onValueChange={setSelectedBotId}
+            >
               <SelectTrigger className="w-[320px]">
                 <SelectValue placeholder="Select a bot" />
               </SelectTrigger>
@@ -221,9 +422,14 @@ export default function AnalyticsPage() {
                   <SelectItem key={bot.id} value={bot.id}>
                     <div className="flex items-center gap-2">
                       <span>{bot.agent_name}</span>
-                      <span className="text-muted-foreground">({bot.company_name})</span>
+                      <span className="text-muted-foreground">
+                        ({bot.company_name})
+                      </span>
                       {bot.goal_config && (
-                        <Badge variant="outline" className="text-[10px] py-0 px-1.5">
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] py-0 px-1.5"
+                        >
                           Goals
                         </Badge>
                       )}
@@ -232,7 +438,20 @@ export default function AnalyticsPage() {
                 ))}
               </SelectContent>
             </Select>
-            {dataLoading && (
+            <Select
+              value={dateRange}
+              onValueChange={(v) => setDateRange(v as DateRange)}
+            >
+              <SelectTrigger className="w-[140px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="7d">Last 7 days</SelectItem>
+                <SelectItem value="30d">Last 30 days</SelectItem>
+                <SelectItem value="90d">Last 90 days</SelectItem>
+              </SelectContent>
+            </Select>
+            {loading && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-violet-500 border-t-transparent" />
                 Loading...
@@ -240,590 +459,838 @@ export default function AnalyticsPage() {
             )}
           </div>
 
-          {!hasGoalConfig && selectedBot && (
+          {/* No goal config warning */}
+          {selectedBot && !selectedBot.goal_config && (
             <Card className="border-amber-500/30 bg-amber-500/5">
               <CardContent className="flex items-center gap-3 pt-6">
                 <Target className="h-5 w-5 text-amber-500 shrink-0" />
                 <div>
-                  <p className="text-sm font-medium">No Goal Configuration</p>
+                  <p className="text-sm font-medium">
+                    No Goal Configuration
+                  </p>
                   <p className="text-xs text-muted-foreground">
-                    This bot doesn&apos;t have goal-based analytics configured. Edit the bot and add a Goal Configuration to enable outcome tracking, red flag detection, and data capture.
+                    This bot doesn&apos;t have goal-based analytics configured.
+                    Edit the bot and add a Goal Configuration to enable outcome
+                    tracking, red flag detection, and data capture.
                   </p>
                 </div>
               </CardContent>
             </Card>
           )}
 
-          {summary && (
-            <>
-              {/* Stats Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {[
-                  {
-                    title: "Total Analyzed",
-                    value: summary.total_analyzed,
-                    icon: BarChart3,
-                    gradient: "from-violet-500 to-indigo-500",
-                  },
-                  {
-                    title: "Avg Duration",
-                    value: summary.avg_duration_secs
-                      ? formatDuration(summary.avg_duration_secs)
-                      : "--",
-                    icon: Clock,
-                    gradient: "from-emerald-500 to-green-500",
-                  },
-                  {
-                    title: "Red Flag Rate",
-                    value: `${summary.red_flag_rate}%`,
-                    icon: AlertTriangle,
-                    gradient: summary.red_flag_rate > 10
-                      ? "from-red-500 to-rose-500"
-                      : "from-amber-500 to-orange-500",
-                  },
-                  {
-                    title: "Avg Word Share",
-                    value: summary.avg_agent_word_share
-                      ? `${Math.round(summary.avg_agent_word_share * 100)}%`
-                      : "--",
-                    icon: Users,
-                    gradient: "from-cyan-500 to-blue-500",
-                  },
-                ].map((stat, i) => (
-                  <motion.div
-                    key={stat.title}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.08 }}
+          {/* Main Tabs */}
+          <Tabs defaultValue="overview" className="space-y-4">
+            <TabsList>
+              <TabsTrigger value="overview" className="gap-1.5">
+                <TrendingUp className="h-4 w-4" />
+                Overview
+              </TabsTrigger>
+              <TabsTrigger value="call-quality" className="gap-1.5">
+                <BarChart3 className="h-4 w-4" />
+                Call Quality
+              </TabsTrigger>
+              <TabsTrigger value="objections" className="gap-1.5">
+                <AlertTriangle className="h-4 w-4" />
+                Objections
+                {redFlags.length > 0 && (
+                  <Badge
+                    variant="destructive"
+                    className="ml-1 h-5 min-w-5 px-1 text-[10px]"
                   >
-                    <Card>
-                      <CardContent className="flex items-center gap-4 pt-6">
-                        <div
-                          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${stat.gradient} text-white shadow-lg`}
-                        >
-                          <stat.icon className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <p className="text-2xl font-bold">{stat.value}</p>
-                          <p className="text-sm text-muted-foreground">{stat.title}</p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </motion.div>
-                ))}
+                    {redFlags.length}
+                  </Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="lead-intel" className="gap-1.5">
+                <Zap className="h-4 w-4" />
+                Lead Intelligence
+              </TabsTrigger>
+              <TabsTrigger value="costs" className="gap-1.5">
+                <DollarSign className="h-4 w-4" />
+                Costs
+              </TabsTrigger>
+            </TabsList>
+
+            {/* ============================================================ */}
+            {/* TAB 1: Overview */}
+            {/* ============================================================ */}
+            <TabsContent value="overview" className="space-y-6">
+              {/* Summary stats */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatCard
+                  title="Total Analyzed"
+                  value={summary?.total_analyzed ?? 0}
+                  icon={BarChart3}
+                  gradient="from-violet-500 to-indigo-500"
+                  loading={loading}
+                  delay={0}
+                />
+                <StatCard
+                  title="Success Rate"
+                  value={
+                    summary?.outcomes
+                      ? `${
+                          summary.outcomes.find(
+                            (o) => o.outcome === "success"
+                          )?.percentage ?? 0
+                        }%`
+                      : "0%"
+                  }
+                  icon={CheckCircle2}
+                  gradient="from-emerald-500 to-green-500"
+                  loading={loading}
+                  delay={0.08}
+                />
+                <StatCard
+                  title="Avg Duration"
+                  value={
+                    summary?.avg_duration_secs
+                      ? formatDuration(summary.avg_duration_secs)
+                      : "--"
+                  }
+                  icon={Clock}
+                  gradient="from-cyan-500 to-blue-500"
+                  loading={loading}
+                  delay={0.16}
+                />
+                <StatCard
+                  title="Red Flag Rate"
+                  value={`${summary?.red_flag_rate ?? 0}%`}
+                  icon={AlertTriangle}
+                  gradient={
+                    (summary?.red_flag_rate ?? 0) > 10
+                      ? "from-red-500 to-rose-500"
+                      : "from-amber-500 to-orange-500"
+                  }
+                  loading={loading}
+                  delay={0.24}
+                />
               </div>
 
-              {/* Tabs: Overview, Alerts, Red Flags, Captured Data */}
-              <Tabs defaultValue="overview" className="space-y-4">
-                <TabsList>
-                  <TabsTrigger value="overview" className="gap-1.5">
-                    <TrendingUp className="h-4 w-4" />
-                    Overview
-                  </TabsTrigger>
-                  <TabsTrigger value="alerts" className="gap-1.5">
-                    <Bell className="h-4 w-4" />
-                    Alerts
-                    {alerts && alerts.total_unacknowledged > 0 && (
-                      <Badge
-                        variant="destructive"
-                        className="ml-1 h-5 min-w-5 px-1 text-[10px]"
-                      >
-                        {alerts.total_unacknowledged}
-                      </Badge>
+              {/* Trend charts */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Outcomes over time */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">
+                      Outcomes Over Time
+                    </CardTitle>
+                    <CardDescription>
+                      Daily outcome distribution
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {trendsLoading ? (
+                      <Skeleton className="h-64 w-full" />
+                    ) : trendChartData.length === 0 ? (
+                      <EmptyState
+                        icon={BarChart3}
+                        message="No trend data yet"
+                      />
+                    ) : (
+                      <ResponsiveContainer width="100%" height={260}>
+                        <LineChart data={trendChartData}>
+                          <CartesianGrid
+                            strokeDasharray="3 3"
+                            stroke="rgba(255,255,255,0.06)"
+                          />
+                          <XAxis
+                            dataKey="date"
+                            tick={{ fill: "#94a3b8", fontSize: 11 }}
+                            axisLine={false}
+                            tickLine={false}
+                            interval="preserveStartEnd"
+                          />
+                          <YAxis
+                            tick={{ fill: "#94a3b8", fontSize: 11 }}
+                            axisLine={false}
+                            tickLine={false}
+                            allowDecimals={false}
+                          />
+                          <Tooltip content={<DarkTooltip />} />
+                          <Line
+                            type="monotone"
+                            dataKey="total"
+                            stroke={VIOLET}
+                            strokeWidth={2}
+                            dot={false}
+                            name="Total"
+                          />
+                          {outcomeKeys.map((key, i) => (
+                            <Line
+                              key={key}
+                              type="monotone"
+                              dataKey={key}
+                              stroke={
+                                OUTCOME_LINE_COLORS[
+                                  i % OUTCOME_LINE_COLORS.length
+                                ]
+                              }
+                              strokeWidth={1.5}
+                              dot={false}
+                              name={key
+                                .replace(/_/g, " ")
+                                .replace(/\b\w/g, (l) => l.toUpperCase())}
+                            />
+                          ))}
+                        </LineChart>
+                      </ResponsiveContainer>
                     )}
-                  </TabsTrigger>
-                  <TabsTrigger value="red-flags" className="gap-1.5">
-                    <AlertTriangle className="h-4 w-4" />
-                    Red Flags
-                  </TabsTrigger>
-                  <TabsTrigger value="captured-data" className="gap-1.5">
-                    <Database className="h-4 w-4" />
-                    Captured Data
-                  </TabsTrigger>
-                </TabsList>
+                  </CardContent>
+                </Card>
 
-                {/* --- Overview Tab --- */}
-                <TabsContent value="overview" className="space-y-6">
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* Outcome Breakdown */}
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="text-base">Goal Outcomes</CardTitle>
-                        <CardDescription>Distribution of call outcomes</CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        {summary.outcomes.length === 0 ? (
-                          <p className="text-sm text-muted-foreground py-8 text-center">
-                            No analyzed calls yet
-                          </p>
-                        ) : (
-                          <div className="space-y-3">
-                            {summary.outcomes.map((o, i) => (
-                              <div
-                                key={o.outcome}
-                                className="space-y-1.5 cursor-pointer group"
-                                onClick={() =>
-                                  router.push(
-                                    `/call-logs?bot_id=${selectedBotId}&goal_outcome=${encodeURIComponent(o.outcome)}`
-                                  )
+                {/* Red flags over time */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">
+                      Red Flags Over Time
+                    </CardTitle>
+                    <CardDescription>
+                      Daily red flag detections
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {trendsLoading ? (
+                      <Skeleton className="h-64 w-full" />
+                    ) : trendChartData.length === 0 ? (
+                      <EmptyState
+                        icon={AlertTriangle}
+                        message="No red flag data yet"
+                      />
+                    ) : (
+                      <ResponsiveContainer width="100%" height={260}>
+                        <AreaChart data={trendChartData}>
+                          <defs>
+                            <linearGradient
+                              id="rfGradient"
+                              x1="0"
+                              y1="0"
+                              x2="0"
+                              y2="1"
+                            >
+                              <stop
+                                offset="5%"
+                                stopColor={ROSE}
+                                stopOpacity={0.3}
+                              />
+                              <stop
+                                offset="95%"
+                                stopColor={ROSE}
+                                stopOpacity={0}
+                              />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid
+                            strokeDasharray="3 3"
+                            stroke="rgba(255,255,255,0.06)"
+                          />
+                          <XAxis
+                            dataKey="date"
+                            tick={{ fill: "#94a3b8", fontSize: 11 }}
+                            axisLine={false}
+                            tickLine={false}
+                            interval="preserveStartEnd"
+                          />
+                          <YAxis
+                            tick={{ fill: "#94a3b8", fontSize: 11 }}
+                            axisLine={false}
+                            tickLine={false}
+                            allowDecimals={false}
+                          />
+                          <Tooltip content={<DarkTooltip />} />
+                          <Area
+                            type="monotone"
+                            dataKey="red_flags"
+                            stroke={ROSE}
+                            strokeWidth={2}
+                            fill="url(#rfGradient)"
+                            name="Red Flags"
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Recent analyzed calls */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    Recent Analyzed Calls
+                  </CardTitle>
+                  <CardDescription>
+                    Latest calls with outcome analysis
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {outcomesLoading ? (
+                    <div className="space-y-3">
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <Skeleton key={i} className="h-12 w-full" />
+                      ))}
+                    </div>
+                  ) : outcomes.length === 0 ? (
+                    <EmptyState
+                      icon={BarChart3}
+                      message="No analyzed calls yet"
+                    />
+                  ) : (
+                    <div className="space-y-2">
+                      {outcomes.slice(0, 10).map((item, i) => (
+                        <motion.div
+                          key={item.id}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: i * 0.03 }}
+                          className="group flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-muted/50 cursor-pointer"
+                          onClick={() => openCallLog(item.call_log_id)}
+                        >
+                          <div className="flex items-center gap-3">
+                            {item.goal_outcome === "success" ? (
+                              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                            ) : (
+                              <XCircle className="h-4 w-4 text-muted-foreground" />
+                            )}
+                            <div>
+                              <p className="text-sm font-medium capitalize">
+                                {(item.goal_outcome || "unknown").replace(
+                                  /_/g,
+                                  " "
+                                )}
+                              </p>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                {item.turn_count != null && (
+                                  <span className="text-xs text-muted-foreground">
+                                    {item.turn_count} turns
+                                  </span>
+                                )}
+                                {item.call_duration_secs != null && (
+                                  <span className="text-xs text-muted-foreground">
+                                    {formatDuration(item.call_duration_secs)}
+                                  </span>
+                                )}
+                                {item.agent_word_share != null && (
+                                  <span className="text-xs text-muted-foreground">
+                                    {Math.round(item.agent_word_share * 100)}%
+                                    agent
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {item.has_red_flags && (
+                              <Badge
+                                className={
+                                  SEVERITY_COLORS[
+                                    item.red_flag_max_severity || "medium"
+                                  ]
                                 }
                               >
-                                <div className="flex items-center justify-between text-sm">
-                                  <span className="font-medium capitalize group-hover:text-violet-400 transition-colors">
-                                    {o.outcome.replace(/_/g, " ")}
-                                  </span>
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="text-muted-foreground">
-                                      {o.count} ({o.percentage}%)
-                                    </span>
-                                    <ArrowRight className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                                  </div>
-                                </div>
-                                <div className="h-2 rounded-full bg-muted overflow-hidden">
-                                  <motion.div
-                                    initial={{ width: 0 }}
-                                    animate={{ width: `${o.percentage}%` }}
-                                    transition={{ delay: i * 0.1, duration: 0.6 }}
-                                    className={`h-full rounded-full bg-gradient-to-r ${OUTCOME_COLORS[i % OUTCOME_COLORS.length]}`}
-                                  />
-                                </div>
-                              </div>
-                            ))}
+                                <AlertTriangle className="h-3 w-3 mr-1" />
+                                {item.red_flag_max_severity}
+                              </Badge>
+                            )}
+                            <span className="text-xs text-muted-foreground whitespace-nowrap">
+                              {timeAgo(item.created_at)}
+                            </span>
+                            {item.call_log_id && (
+                              <ArrowRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                            )}
                           </div>
-                        )}
-                      </CardContent>
-                    </Card>
-
-                    {/* Trends Chart */}
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="text-base">Daily Trends</CardTitle>
-                        <CardDescription>Calls analyzed per day</CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        {trends.length === 0 ? (
-                          <p className="text-sm text-muted-foreground py-8 text-center">
-                            No trend data yet
-                          </p>
-                        ) : (
-                          <div className="flex h-48 items-end justify-between gap-1.5">
-                            {trends.slice(-14).map((day, i) => {
-                              const barHeight = maxTrendTotal > 0
-                                ? Math.max((day.total / maxTrendTotal) * 148, day.total > 0 ? 8 : 4)
-                                : 4;
-                              const hasFlags = day.red_flag_count > 0;
-                              return (
-                                <div
-                                  key={day.date}
-                                  className="group flex flex-1 flex-col items-center gap-1"
-                                >
-                                  <span className="text-[10px] font-medium text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
-                                    {day.total > 0 ? day.total : ""}
-                                    {hasFlags && (
-                                      <span className="text-red-400 ml-0.5">
-                                        !{day.red_flag_count}
-                                      </span>
-                                    )}
-                                  </span>
-                                  <motion.div
-                                    initial={{ height: 0 }}
-                                    animate={{ height: barHeight }}
-                                    transition={{ delay: i * 0.04, duration: 0.6 }}
-                                    className={`w-full max-w-[32px] rounded-t-sm ${
-                                      hasFlags
-                                        ? "bg-gradient-to-t from-red-500 to-orange-400"
-                                        : day.total > 0
-                                        ? "bg-gradient-to-t from-violet-500 to-indigo-400"
-                                        : "bg-muted/40"
-                                    }`}
-                                  />
-                                  <span className="text-[9px] text-muted-foreground">
-                                    {new Date(day.date + "T00:00:00").toLocaleDateString("en-US", {
-                                      month: "short",
-                                      day: "numeric",
-                                    })}
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </div>
-
-                  {/* Recent Outcomes */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-base">Recent Calls</CardTitle>
-                      <CardDescription>Latest analyzed calls with outcomes</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      {outcomes.length === 0 ? (
-                        <p className="text-sm text-muted-foreground py-8 text-center">
-                          No analyzed calls yet
-                        </p>
-                      ) : (
-                        <div className="space-y-2">
-                          {outcomes.map((item, i) => (
-                            <motion.div
-                              key={item.id}
-                              initial={{ opacity: 0, x: -10 }}
-                              animate={{ opacity: 1, x: 0 }}
-                              transition={{ delay: i * 0.03 }}
-                              className="group flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-muted/50 cursor-pointer"
-                              onClick={() => openCallLog(item.call_log_id)}
-                            >
-                              <div className="flex items-center gap-3">
-                                {item.goal_outcome ? (
-                                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                                ) : (
-                                  <XCircle className="h-4 w-4 text-muted-foreground" />
-                                )}
-                                <div>
-                                  <p className="text-sm font-medium capitalize">
-                                    {(item.goal_outcome || "unknown").replace(/_/g, " ")}
-                                  </p>
-                                  <div className="flex items-center gap-2 mt-0.5">
-                                    {item.turn_count != null && (
-                                      <span className="text-xs text-muted-foreground">
-                                        {item.turn_count} turns
-                                      </span>
-                                    )}
-                                    {item.call_duration_secs != null && (
-                                      <span className="text-xs text-muted-foreground">
-                                        {formatDuration(item.call_duration_secs)}
-                                      </span>
-                                    )}
-                                    {item.agent_word_share != null && (
-                                      <span className="text-xs text-muted-foreground">
-                                        {Math.round(item.agent_word_share * 100)}% agent
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                {item.has_red_flags && (
-                                  <Badge className={SEVERITY_COLORS[item.red_flag_max_severity || "medium"]}>
-                                    <AlertTriangle className="h-3 w-3 mr-1" />
-                                    {item.red_flag_max_severity}
-                                  </Badge>
-                                )}
-                                <span className="text-xs text-muted-foreground whitespace-nowrap">
-                                  {timeAgo(item.created_at)}
-                                </span>
-                                {item.call_log_id && (
-                                  <ArrowRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                                )}
-                              </div>
-                            </motion.div>
-                          ))}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-
-                {/* --- Alerts Tab --- */}
-                <TabsContent value="alerts" className="space-y-4">
-                  {!alerts || alerts.alerts.length === 0 ? (
-                    <Card>
-                      <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                        <BellOff className="mb-3 h-10 w-10 opacity-30" />
-                        <p className="text-sm">No active alerts</p>
-                        <p className="text-xs mt-1">
-                          Red flag alerts will appear here when detected
-                        </p>
-                      </CardContent>
-                    </Card>
-                  ) : (
-                    <>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="destructive" className="gap-1">
-                          <Bell className="h-3 w-3" />
-                          {alerts.total_unacknowledged} unacknowledged
-                        </Badge>
-                      </div>
-                      <div className="space-y-3">
-                        {alerts.alerts.map((alert, i) => (
-                          <motion.div
-                            key={alert.id}
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: i * 0.05 }}
-                          >
-                            <Card className="border-red-500/20">
-                              <CardContent className="pt-4 space-y-3">
-                                <div className="flex items-start justify-between">
-                                  <div className="space-y-1">
-                                    <div className="flex items-center gap-2">
-                                      <AlertTriangle className="h-4 w-4 text-red-500" />
-                                      <span className="text-sm font-medium">
-                                        {alert.contact_name || "Unknown Contact"}
-                                      </span>
-                                      {alert.contact_phone && (
-                                        <span className="text-xs text-muted-foreground">
-                                          {alert.contact_phone}
-                                        </span>
-                                      )}
-                                    </div>
-                                    {alert.goal_outcome && (
-                                      <p className="text-xs text-muted-foreground capitalize">
-                                        Outcome: {alert.goal_outcome.replace(/_/g, " ")}
-                                      </p>
-                                    )}
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    {alert.red_flag_max_severity && (
-                                      <Badge
-                                        className={
-                                          SEVERITY_COLORS[alert.red_flag_max_severity]
-                                        }
-                                      >
-                                        {alert.red_flag_max_severity}
-                                      </Badge>
-                                    )}
-                                    <span className="text-xs text-muted-foreground">
-                                      {timeAgo(alert.created_at)}
-                                    </span>
-                                  </div>
-                                </div>
-
-                                {/* Red flag details */}
-                                {alert.red_flags && alert.red_flags.length > 0 && (
-                                  <div className="space-y-1.5 pl-6">
-                                    {alert.red_flags.map((rf, j) => (
-                                      <div
-                                        key={`${rf.id}-${j}`}
-                                        className="text-xs rounded bg-muted/50 p-2"
-                                      >
-                                        <div className="flex items-center gap-1.5 mb-0.5">
-                                          <Badge
-                                            variant="outline"
-                                            className={`text-[10px] py-0 ${SEVERITY_COLORS[rf.severity]}`}
-                                          >
-                                            {rf.severity}
-                                          </Badge>
-                                          <span className="font-medium">{rf.id}</span>
-                                        </div>
-                                        {rf.evidence && (
-                                          <p className="text-muted-foreground italic truncate">
-                                            &ldquo;{rf.evidence}&rdquo;
-                                          </p>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-
-                                <div className="flex gap-2 pl-6">
-                                  {alert.call_log_id && (
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className="h-7 text-xs"
-                                      onClick={() => openCallLog(alert.call_log_id)}
-                                    >
-                                      <Eye className="h-3 w-3 mr-1" />
-                                      View Call
-                                    </Button>
-                                  )}
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 text-xs"
-                                    onClick={() => handleAcknowledge(alert.id)}
-                                  >
-                                    <CheckCircle2 className="h-3 w-3 mr-1" />
-                                    Acknowledge
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="h-7 text-xs"
-                                    onClick={() => handleSnooze(alert.id)}
-                                  >
-                                    <Clock className="h-3 w-3 mr-1" />
-                                    Snooze 24h
-                                  </Button>
-                                </div>
-                              </CardContent>
-                            </Card>
-                          </motion.div>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </TabsContent>
-
-                {/* --- Red Flags Tab --- */}
-                <TabsContent value="red-flags" className="space-y-4">
-                  {redFlags.length === 0 ? (
-                    <Card>
-                      <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                        <Shield className="mb-3 h-10 w-10 opacity-30" />
-                        <p className="text-sm">No red flags detected</p>
-                      </CardContent>
-                    </Card>
-                  ) : (
-                    <div className="space-y-4">
-                      {redFlags.map((group, i) => {
-                        const Icon = getSeverityIcon(group.severity);
-                        return (
-                          <motion.div
-                            key={group.flag_id}
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: i * 0.05 }}
-                          >
-                            <Card>
-                              <CardHeader className="pb-3">
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-2">
-                                    <Icon className="h-4 w-4" />
-                                    <CardTitle className="text-sm">
-                                      {group.flag_id.replace(/_/g, " ")}
-                                    </CardTitle>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <Badge
-                                      className={SEVERITY_COLORS[group.severity]}
-                                    >
-                                      {group.severity}
-                                    </Badge>
-                                    <Badge variant="secondary">{group.count} occurrences</Badge>
-                                  </div>
-                                </div>
-                              </CardHeader>
-                              <CardContent>
-                                <div className="space-y-2">
-                                  {group.calls.slice(0, 5).map((call, j) => (
-                                    <div
-                                      key={call.analytics_id}
-                                      className={`flex items-start justify-between text-xs rounded bg-muted/50 p-2 ${call.call_log_id ? "cursor-pointer hover:bg-muted transition-colors" : ""}`}
-                                      onClick={() => call.call_log_id && openCallLog(call.call_log_id)}
-                                    >
-                                      <p className="text-muted-foreground italic flex-1 truncate mr-4">
-                                        {call.evidence ? `"${call.evidence}"` : "No evidence recorded"}
-                                      </p>
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-muted-foreground whitespace-nowrap">
-                                          {timeAgo(call.created_at)}
-                                        </span>
-                                        {call.call_log_id && (
-                                          <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                                        )}
-                                      </div>
-                                    </div>
-                                  ))}
-                                  {group.calls.length > 5 && (
-                                    <p className="text-xs text-muted-foreground text-center">
-                                      +{group.calls.length - 5} more
-                                    </p>
-                                  )}
-                                </div>
-                              </CardContent>
-                            </Card>
-                          </motion.div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </TabsContent>
-
-                {/* --- Captured Data Tab --- */}
-                <TabsContent value="captured-data" className="space-y-4">
-                  {capturedData.length === 0 ? (
-                    <Card>
-                      <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                        <Database className="mb-3 h-10 w-10 opacity-30" />
-                        <p className="text-sm">No captured data yet</p>
-                        <p className="text-xs mt-1">
-                          Data capture fields will populate as calls are analyzed
-                        </p>
-                      </CardContent>
-                    </Card>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {capturedData.map((field, i) => (
-                        <motion.div
-                          key={field.field_id}
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: i * 0.05 }}
-                        >
-                          <Card>
-                            <CardHeader className="pb-3">
-                              <div className="flex items-center justify-between">
-                                <CardTitle className="text-sm capitalize">
-                                  {field.field_id.replace(/_/g, " ")}
-                                </CardTitle>
-                                <Badge variant="secondary">
-                                  {field.total_captured} captured
-                                </Badge>
-                              </div>
-                            </CardHeader>
-                            <CardContent>
-                              <div className="space-y-1.5">
-                                {field.values.slice(0, 8).map((v, j) => (
-                                  <div
-                                    key={`${v.value}-${j}`}
-                                    className={`flex items-center justify-between text-sm rounded px-1.5 py-0.5 -mx-1.5 ${
-                                      v.call_log_ids?.length
-                                        ? "cursor-pointer hover:bg-muted/50 transition-colors group"
-                                        : ""
-                                    }`}
-                                    onClick={() => {
-                                      if (v.call_log_ids?.length) {
-                                        // Open the first call log for this value
-                                        openCallLog(v.call_log_ids[0]);
-                                      }
-                                    }}
-                                  >
-                                    <span className="truncate flex-1 mr-2 group-hover:text-violet-400 transition-colors">
-                                      {v.value}
-                                    </span>
-                                    <div className="flex items-center gap-1">
-                                      {v.count != null && (
-                                        <Badge variant="outline" className="text-xs">
-                                          {v.count}
-                                        </Badge>
-                                      )}
-                                      {v.call_log_ids?.length && (
-                                        <ArrowRight className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                                      )}
-                                    </div>
-                                  </div>
-                                ))}
-                                {field.values.length > 8 && (
-                                  <p className="text-xs text-muted-foreground text-center">
-                                    +{field.values.length - 8} more values
-                                  </p>
-                                )}
-                              </div>
-                            </CardContent>
-                          </Card>
                         </motion.div>
                       ))}
                     </div>
                   )}
-                </TabsContent>
-              </Tabs>
-            </>
-          )}
+                </CardContent>
+              </Card>
+            </TabsContent>
 
-          {!summary && !dataLoading && selectedBotId && (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                <BarChart3 className="mb-3 h-12 w-12 opacity-30" />
-                <p className="text-sm font-medium">No Analytics Data</p>
-                <p className="text-xs mt-1">
-                  Analytics will appear here after calls are completed and analyzed
-                </p>
-              </CardContent>
-            </Card>
-          )}
+            {/* ============================================================ */}
+            {/* TAB 2: Call Quality */}
+            {/* ============================================================ */}
+            <TabsContent value="call-quality" className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Score Distribution (agent word share as proxy) */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">
+                      Talk Ratio Distribution
+                    </CardTitle>
+                    <CardDescription>
+                      Agent word share across analyzed calls
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {outcomesLoading ? (
+                      <Skeleton className="h-64 w-full" />
+                    ) : outcomes.length === 0 ? (
+                      <PlaceholderState message="Analysis data will appear here once calls are processed" />
+                    ) : (
+                      <ResponsiveContainer width="100%" height={260}>
+                        <BarChart data={scoreDistribution}>
+                          <CartesianGrid
+                            strokeDasharray="3 3"
+                            stroke="rgba(255,255,255,0.06)"
+                          />
+                          <XAxis
+                            dataKey="label"
+                            tick={{ fill: "#94a3b8", fontSize: 11 }}
+                            axisLine={false}
+                            tickLine={false}
+                          />
+                          <YAxis
+                            tick={{ fill: "#94a3b8", fontSize: 11 }}
+                            axisLine={false}
+                            tickLine={false}
+                            allowDecimals={false}
+                          />
+                          <Tooltip content={<DarkTooltip />} />
+                          <Bar
+                            dataKey="count"
+                            name="Calls"
+                            fill={VIOLET}
+                            radius={[4, 4, 0, 0]}
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Sentiment Distribution */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">
+                      Sentiment Distribution
+                    </CardTitle>
+                    <CardDescription>
+                      Call sentiment analysis breakdown
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                      <div className="flex gap-3 mb-3 opacity-30">
+                        <Smile className="h-8 w-8" />
+                        <Meh className="h-8 w-8" />
+                        <Frown className="h-8 w-8" />
+                      </div>
+                      <p className="text-sm text-center max-w-xs">
+                        Sentiment analysis data will appear here once calls are
+                        processed
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Average word share over time */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">
+                      Avg Agent Word Share Over Time
+                    </CardTitle>
+                    <CardDescription>
+                      How much the bot talks vs the lead
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {trendsLoading ? (
+                      <Skeleton className="h-64 w-full" />
+                    ) : trendChartData.length === 0 ? (
+                      <PlaceholderState message="Analysis data will appear here once calls are processed" />
+                    ) : (
+                      <ResponsiveContainer width="100%" height={260}>
+                        <LineChart
+                          data={trendChartData.map((d, i) => ({
+                            ...d,
+                            avgWordShare:
+                              summary?.avg_agent_word_share != null
+                                ? Math.round(
+                                    summary.avg_agent_word_share * 100
+                                  )
+                                : null,
+                          }))}
+                        >
+                          <CartesianGrid
+                            strokeDasharray="3 3"
+                            stroke="rgba(255,255,255,0.06)"
+                          />
+                          <XAxis
+                            dataKey="date"
+                            tick={{ fill: "#94a3b8", fontSize: 11 }}
+                            axisLine={false}
+                            tickLine={false}
+                            interval="preserveStartEnd"
+                          />
+                          <YAxis
+                            tick={{ fill: "#94a3b8", fontSize: 11 }}
+                            axisLine={false}
+                            tickLine={false}
+                            domain={[0, 100]}
+                            unit="%"
+                          />
+                          <Tooltip content={<DarkTooltip />} />
+                          <Line
+                            type="monotone"
+                            dataKey="avgWordShare"
+                            stroke={CYAN}
+                            strokeWidth={2}
+                            dot={false}
+                            name="Agent Word Share"
+                            connectNulls
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Score Distribution placeholder */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">
+                      Call Score Distribution
+                    </CardTitle>
+                    <CardDescription>
+                      Distribution of call quality scores
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <PlaceholderState message="Call scoring data will appear here once scoring is enabled for this bot" />
+                  </CardContent>
+                </Card>
+              </div>
+            </TabsContent>
+
+            {/* ============================================================ */}
+            {/* TAB 3: Objections */}
+            {/* ============================================================ */}
+            <TabsContent value="objections" className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Top Objections bar chart */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">
+                      Top Objections
+                    </CardTitle>
+                    <CardDescription>
+                      Most frequently detected red flags
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {redFlagsLoading ? (
+                      <Skeleton className="h-64 w-full" />
+                    ) : objectionData.length === 0 ? (
+                      <EmptyState
+                        icon={Shield}
+                        message="No objections detected yet"
+                        sub="Red flags will appear here once calls are analyzed"
+                      />
+                    ) : (
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart
+                          data={objectionData}
+                          layout="vertical"
+                        >
+                          <CartesianGrid
+                            strokeDasharray="3 3"
+                            stroke="rgba(255,255,255,0.06)"
+                            horizontal={false}
+                          />
+                          <XAxis
+                            type="number"
+                            tick={{ fill: "#94a3b8", fontSize: 11 }}
+                            axisLine={false}
+                            tickLine={false}
+                            allowDecimals={false}
+                          />
+                          <YAxis
+                            type="category"
+                            dataKey="name"
+                            tick={{ fill: "#94a3b8", fontSize: 11 }}
+                            axisLine={false}
+                            tickLine={false}
+                            width={150}
+                          />
+                          <Tooltip content={<DarkTooltip />} />
+                          <Bar
+                            dataKey="count"
+                            name="Occurrences"
+                            radius={[0, 4, 4, 0]}
+                          >
+                            {objectionData.map((entry, i) => (
+                              <Cell key={i} fill={entry.color} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Severity breakdown */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">
+                      Severity Breakdown
+                    </CardTitle>
+                    <CardDescription>
+                      Objections by severity level
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {redFlagsLoading ? (
+                      <Skeleton className="h-64 w-full" />
+                    ) : severityBreakdown.length === 0 ? (
+                      <EmptyState
+                        icon={Shield}
+                        message="No severity data yet"
+                      />
+                    ) : (
+                      <div className="flex items-center gap-4">
+                        <ResponsiveContainer width="50%" height={240}>
+                          <PieChart>
+                            <Pie
+                              data={severityBreakdown}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={50}
+                              outerRadius={85}
+                              paddingAngle={2}
+                              dataKey="value"
+                            >
+                              {severityBreakdown.map((entry, i) => (
+                                <Cell key={i} fill={entry.color} />
+                              ))}
+                            </Pie>
+                            <Tooltip content={<DarkTooltip />} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div className="flex-1 space-y-3">
+                          {severityBreakdown.map((item) => (
+                            <div
+                              key={item.name}
+                              className="flex items-center justify-between text-sm"
+                            >
+                              <div className="flex items-center gap-2">
+                                <div
+                                  className="h-3 w-3 rounded-full"
+                                  style={{ backgroundColor: item.color }}
+                                />
+                                <span className="text-muted-foreground">
+                                  {item.name}
+                                </span>
+                              </div>
+                              <span className="font-medium">{item.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Resolution rate placeholder */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    Resolution Rate per Category
+                  </CardTitle>
+                  <CardDescription>
+                    How well each objection type gets resolved
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {redFlagsLoading ? (
+                    <Skeleton className="h-48 w-full" />
+                  ) : redFlags.length === 0 ? (
+                    <EmptyState
+                      icon={Shield}
+                      message="No objection data yet"
+                    />
+                  ) : (
+                    <div className="space-y-3">
+                      {redFlags.slice(0, 6).map((rf) => {
+                        // Resolution rate is not tracked - show count with progress bar
+                        const maxCount = Math.max(
+                          ...redFlags.map((r) => r.count),
+                          1
+                        );
+                        const pct = Math.round(
+                          (rf.count / maxCount) * 100
+                        );
+                        return (
+                          <div key={rf.flag_id} className="space-y-1.5">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="font-medium capitalize">
+                                {rf.flag_id.replace(/_/g, " ")}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <Badge
+                                  className={
+                                    SEVERITY_COLORS[rf.severity]
+                                  }
+                                >
+                                  {rf.severity}
+                                </Badge>
+                                <span className="text-muted-foreground">
+                                  {rf.count}x
+                                </span>
+                              </div>
+                            </div>
+                            <div className="h-2 rounded-full bg-muted overflow-hidden">
+                              <motion.div
+                                initial={{ width: 0 }}
+                                animate={{ width: `${pct}%` }}
+                                transition={{ duration: 0.6 }}
+                                className="h-full rounded-full bg-gradient-to-r from-violet-500 to-indigo-500"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* ============================================================ */}
+            {/* TAB 4: Lead Intelligence */}
+            {/* ============================================================ */}
+            <TabsContent value="lead-intel" className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Temperature Distribution */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">
+                      Lead Temperature Distribution
+                    </CardTitle>
+                    <CardDescription>
+                      Hot / Warm / Cold / Dead lead classification
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <PlaceholderState message="Lead temperature data will appear here once calls are processed and leads are scored" />
+                  </CardContent>
+                </Card>
+
+                {/* Qualification Rates */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">
+                      Qualification Rates Over Time
+                    </CardTitle>
+                    <CardDescription>
+                      Trends in lead qualification
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <PlaceholderState message="Qualification rate trends will appear here once leads are being qualified through calls" />
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Buying Signals */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    Buying Signals Frequency
+                  </CardTitle>
+                  <CardDescription>
+                    Most common buying signals detected in conversations
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <PlaceholderState message="Buying signal data will appear here once the AI starts detecting buying intent patterns in calls" />
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* ============================================================ */}
+            {/* TAB 5: Costs */}
+            {/* ============================================================ */}
+            <TabsContent value="costs" className="space-y-6">
+              {/* Cost summary cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <StatCard
+                  title="Total Spend"
+                  value="$0.00"
+                  icon={DollarSign}
+                  gradient="from-violet-500 to-indigo-500"
+                  loading={false}
+                  delay={0}
+                />
+                <StatCard
+                  title="Cost per Call"
+                  value="$0.00"
+                  icon={DollarSign}
+                  gradient="from-emerald-500 to-green-500"
+                  loading={false}
+                  delay={0.08}
+                />
+                <StatCard
+                  title="Cost per Conversion"
+                  value="$0.00"
+                  icon={DollarSign}
+                  gradient="from-amber-500 to-orange-500"
+                  loading={false}
+                  delay={0.16}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Cost per call trend */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">
+                      Cost per Call Trend
+                    </CardTitle>
+                    <CardDescription>
+                      Daily cost per call over time
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <PlaceholderState message="Cost tracking will appear here once billing data is integrated with call analytics" />
+                  </CardContent>
+                </Card>
+
+                {/* Cost per conversion trend */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">
+                      Cost per Conversion Trend
+                    </CardTitle>
+                    <CardDescription>
+                      Daily cost per successful conversion
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <PlaceholderState message="Conversion cost tracking will appear here once billing data is integrated" />
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Cost Breakdown */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    Cost Breakdown by Type
+                  </CardTitle>
+                  <CardDescription>
+                    LLM, TTS, STT, and Telephony costs
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <PlaceholderState message="Cost breakdown by service type (LLM, TTS, STT, Telephony) will appear here once per-call cost tracking is enabled" />
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </div>
       </PageTransition>
     </>

@@ -1,115 +1,434 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Phone,
-  Bot,
   Clock,
-  CheckCircle2,
-  Activity,
-  PhoneCall,
-  XCircle,
+  TrendingUp,
+  TrendingDown,
+  DollarSign,
+  Target,
+  Percent,
   ArrowRight,
+  BarChart3,
+  Frown,
+  Meh,
+  Smile,
 } from "lucide-react";
 import Link from "next/link";
+import {
+  AreaChart,
+  Area,
+  PieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from "recharts";
+
 import { Header } from "@/components/layout/header";
 import { PageTransition } from "@/components/layout/page-transition";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fetchBots, fetchCallLogs } from "@/lib/api";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useCallLogs } from "@/hooks/use-calls";
+import { useBots } from "@/hooks/use-bots";
+import {
+  useAnalyticsSummary,
+  useAnalyticsTrends,
+  useAnalyticsRedFlags,
+} from "@/hooks/use-analytics";
 import { formatDuration, formatPhoneNumber, timeAgo } from "@/lib/utils";
-import type { BotConfig, CallLog } from "@/types/api";
+import type { CallLog, TrendPoint } from "@/types/api";
 
-const STATUS_ICONS: Record<string, typeof Clock> = {
-  initiated: Clock,
-  ringing: PhoneCall,
-  "in-progress": Activity,
-  completed: CheckCircle2,
-  failed: XCircle,
-  "no-answer": Phone,
+// -- Colors --
+const VIOLET = "#8b5cf6";
+const INDIGO = "#6366f1";
+const EMERALD = "#10b981";
+const AMBER = "#f59e0b";
+const ROSE = "#f43f5e";
+const SLATE = "#64748b";
+
+const OUTCOME_COLORS: Record<string, string> = {
+  success: EMERALD,
+  failed: ROSE,
+  "no-answer": AMBER,
+  "no_answer": AMBER,
+  completed: VIOLET,
+  busy: SLATE,
+  cancelled: SLATE,
 };
 
-const STAT_GRADIENTS = [
-  "from-violet-500 to-indigo-500",
-  "from-emerald-500 to-green-500",
-  "from-amber-500 to-orange-500",
-  "from-rose-500 to-pink-500",
-];
+const SENTIMENT_COLORS = {
+  positive: EMERALD,
+  neutral: AMBER,
+  negative: ROSE,
+};
 
-function getCallsByDay(calls: CallLog[]) {
-  const days: { label: string; date: string; count: number }[] = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().slice(0, 10);
-    const label = d.toLocaleDateString("en-US", { weekday: "short" });
-    const count = calls.filter(
-      (c) => c.created_at.slice(0, 10) === dateStr
-    ).length;
-    days.push({ label, date: dateStr, count });
+// -- Date range helpers --
+type DateRange = "today" | "7d" | "30d" | "90d";
+
+function getDateRange(range: DateRange): { start: string; end: string } {
+  const end = new Date();
+  const start = new Date();
+  switch (range) {
+    case "today":
+      start.setHours(0, 0, 0, 0);
+      break;
+    case "7d":
+      start.setDate(start.getDate() - 7);
+      break;
+    case "30d":
+      start.setDate(start.getDate() - 30);
+      break;
+    case "90d":
+      start.setDate(start.getDate() - 90);
+      break;
   }
-  return days;
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
+  };
 }
 
+// -- Build daily call volume from raw calls --
+function buildDailyVolume(calls: CallLog[], days: number) {
+  const map = new Map<string, number>();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    map.set(d.toISOString().slice(0, 10), 0);
+  }
+  for (const c of calls) {
+    const key = c.created_at.slice(0, 10);
+    if (map.has(key)) map.set(key, (map.get(key) || 0) + 1);
+  }
+  return Array.from(map.entries()).map(([date, count]) => ({
+    date,
+    label: new Date(date + "T00:00:00").toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    }),
+    calls: count,
+  }));
+}
+
+// -- Build outcome distribution from raw calls --
+function buildOutcomeDistribution(calls: CallLog[]) {
+  const map = new Map<string, number>();
+  for (const c of calls) {
+    const key = c.status || "unknown";
+    map.set(key, (map.get(key) || 0) + 1);
+  }
+  return Array.from(map.entries())
+    .map(([name, value]) => ({
+      name: name.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
+      value,
+      color: OUTCOME_COLORS[name] || SLATE,
+    }))
+    .sort((a, b) => b.value - a.value);
+}
+
+// -- Build heatmap from calls --
+function buildHeatmap(calls: CallLog[]) {
+  const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const grid: number[][] = Array.from({ length: 7 }, () =>
+    Array(24).fill(0)
+  );
+  for (const c of calls) {
+    const d = new Date(c.created_at);
+    grid[d.getDay()][d.getHours()]++;
+  }
+  const max = Math.max(...grid.flat(), 1);
+  return { grid, max, days: DAYS };
+}
+
+// -- Build funnel from calls --
+function buildFunnel(calls: CallLog[]) {
+  const attempted = calls.length;
+  const connected = calls.filter((c) =>
+    ["completed", "in-progress"].includes(c.status)
+  ).length;
+  const qualified = calls.filter(
+    (c) =>
+      c.analytics?.goal_outcome &&
+      c.analytics.goal_outcome !== "unknown"
+  ).length;
+  const converted = calls.filter(
+    (c) => c.analytics?.goal_outcome === "success"
+  ).length;
+
+  return [
+    { stage: "Attempted", value: attempted, color: VIOLET },
+    { stage: "Connected", value: connected, color: INDIGO },
+    { stage: "Qualified", value: qualified, color: AMBER },
+    { stage: "Converted", value: converted, color: EMERALD },
+  ];
+}
+
+// -- Tooltip for dark theme --
+function DarkTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: Array<{ name: string; value: number; color: string }>;
+  label?: string;
+}) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-lg border bg-card px-3 py-2 shadow-xl">
+      <p className="text-xs text-muted-foreground mb-1">{label}</p>
+      {payload.map((p, i) => (
+        <p key={i} className="text-sm font-medium" style={{ color: p.color }}>
+          {p.name}: {p.value}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+// -- KPI Card --
+function KPICard({
+  title,
+  value,
+  icon: Icon,
+  trend,
+  trendLabel,
+  gradient,
+  loading,
+  delay = 0,
+}: {
+  title: string;
+  value: string | number;
+  icon: React.ComponentType<{ className?: string }>;
+  trend?: number;
+  trendLabel?: string;
+  gradient: string;
+  loading: boolean;
+  delay?: number;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay }}
+    >
+      <Card>
+        <CardContent className="flex items-center gap-4 pt-6">
+          <div
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${gradient} text-white shadow-lg`}
+          >
+            <Icon className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            {loading ? (
+              <Skeleton className="h-7 w-20" />
+            ) : (
+              <p className="text-2xl font-bold truncate">{value}</p>
+            )}
+            <div className="flex items-center gap-1.5">
+              <p className="text-sm text-muted-foreground">{title}</p>
+              {trend !== undefined && trend !== 0 && !loading && (
+                <span
+                  className={`flex items-center gap-0.5 text-xs font-medium ${
+                    trend > 0 ? "text-emerald-500" : "text-rose-500"
+                  }`}
+                >
+                  {trend > 0 ? (
+                    <TrendingUp className="h-3 w-3" />
+                  ) : (
+                    <TrendingDown className="h-3 w-3" />
+                  )}
+                  {Math.abs(trend)}%
+                  {trendLabel && (
+                    <span className="text-muted-foreground ml-0.5">
+                      {trendLabel}
+                    </span>
+                  )}
+                </span>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
+// -- Empty state --
+function EmptyState({
+  icon: Icon,
+  message,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  message: string;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+      <Icon className="mb-3 h-10 w-10 opacity-30" />
+      <p className="text-sm">{message}</p>
+    </div>
+  );
+}
+
+// ============================================================================
+// Main Dashboard Page
+// ============================================================================
+
 export default function DashboardPage() {
-  const [bots, setBots] = useState<BotConfig[]>([]);
-  const [calls, setCalls] = useState<CallLog[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [dateRange, setDateRange] = useState<DateRange>("30d");
+  const [selectedBotId, setSelectedBotId] = useState<string>("all");
 
-  const load = useCallback(async () => {
-    try {
-      const [b, c] = await Promise.all([fetchBots(), fetchCallLogs()]);
-      setBots(b);
-      setCalls(c);
-    } catch {
-      // silent
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const range = useMemo(() => getDateRange(dateRange), [dateRange]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  const { data: bots = [], isLoading: botsLoading } = useBots();
+  const { data: allCalls = [], isLoading: callsLoading } = useCallLogs(
+    selectedBotId !== "all" ? { botId: selectedBotId } : undefined
+  );
 
-  const stats = useMemo(() => {
-    const completed = calls.filter((c) => c.status === "completed");
-    const totalDuration = completed.reduce(
-      (sum, c) => sum + (c.call_duration || 0),
-      0
-    );
-    const activeCalls = calls.filter((c) =>
-      ["initiated", "ringing", "in-progress"].includes(c.status)
+  // Filtered calls by date range
+  const calls = useMemo(() => {
+    return allCalls.filter((c) => {
+      const d = c.created_at.slice(0, 10);
+      return d >= range.start && d <= range.end;
+    });
+  }, [allCalls, range]);
+
+  // Analytics for the selected bot (if specific bot selected)
+  const analyticsBotId = selectedBotId !== "all" ? selectedBotId : (bots[0]?.id ?? "");
+  const { data: summary } = useAnalyticsSummary(analyticsBotId, {
+    start_date: range.start,
+    end_date: range.end,
+  });
+  const { data: trends = [] } = useAnalyticsTrends(analyticsBotId, {
+    interval: "daily",
+    start_date: range.start,
+    end_date: range.end,
+  });
+  const { data: redFlags = [] } = useAnalyticsRedFlags(analyticsBotId);
+
+  const loading = botsLoading || callsLoading;
+
+  // -- KPI computations --
+  const kpis = useMemo(() => {
+    const total = calls.length;
+    const completed = calls.filter((c) => c.status === "completed").length;
+    const connected = completed;
+    const connectedPct = total > 0 ? Math.round((connected / total) * 100) : 0;
+
+    const durations = calls
+      .filter((c) => c.call_duration && c.call_duration > 0)
+      .map((c) => c.call_duration!);
+    const avgDuration =
+      durations.length > 0
+        ? durations.reduce((a, b) => a + b, 0) / durations.length
+        : 0;
+
+    const successCalls = calls.filter(
+      (c) => c.analytics?.goal_outcome === "success"
     ).length;
+    const conversionPct =
+      total > 0 ? Math.round((successCalls / total) * 100) : 0;
 
-    return [
-      {
-        title: "Active Bots",
-        value: bots.filter((b) => b.is_active).length,
-        icon: Bot,
-      },
-      {
-        title: "Total Calls",
-        value: calls.length,
-        icon: Phone,
-      },
-      {
-        title: "Completed",
-        value: completed.length,
-        icon: CheckCircle2,
-      },
-      {
-        title: "Total Duration",
-        value: formatDuration(totalDuration),
-        icon: Clock,
-        isString: true,
-      },
-    ];
-  }, [bots, calls]);
+    // Compute trend vs previous period
+    const periodDays =
+      dateRange === "today"
+        ? 1
+        : dateRange === "7d"
+        ? 7
+        : dateRange === "30d"
+        ? 30
+        : 90;
+    const prevStart = new Date(range.start);
+    prevStart.setDate(prevStart.getDate() - periodDays);
+    const prevStartStr = prevStart.toISOString().slice(0, 10);
+    const prevCalls = allCalls.filter((c) => {
+      const d = c.created_at.slice(0, 10);
+      return d >= prevStartStr && d < range.start;
+    });
+    const prevTotal = prevCalls.length;
+    const callTrend =
+      prevTotal > 0 ? Math.round(((total - prevTotal) / prevTotal) * 100) : 0;
 
+    return {
+      total,
+      connectedPct,
+      avgDuration,
+      conversionPct,
+      callTrend,
+      successCalls,
+    };
+  }, [calls, allCalls, dateRange, range]);
+
+  // -- Chart data --
+  const dailyVolume = useMemo(
+    () =>
+      buildDailyVolume(
+        calls,
+        dateRange === "today"
+          ? 1
+          : dateRange === "7d"
+          ? 7
+          : dateRange === "30d"
+          ? 30
+          : 90
+      ),
+    [calls, dateRange]
+  );
+
+  const outcomeDistribution = useMemo(
+    () => buildOutcomeDistribution(calls),
+    [calls]
+  );
+
+  const heatmap = useMemo(() => buildHeatmap(calls), [calls]);
+
+  const funnel = useMemo(() => buildFunnel(calls), [calls]);
+
+  // Sentiment from analytics
+  const sentimentData = useMemo(() => {
+    if (!summary?.outcomes) return [];
+    // Map outcomes to sentiment categories as a proxy
+    // In absence of dedicated sentiment data, show placeholder
+    return [];
+  }, [summary]);
+
+  // Top objections from red flags
+  const objectionData = useMemo(() => {
+    return redFlags
+      .map((rf) => ({
+        name: rf.flag_id.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
+        count: rf.count,
+        severity: rf.severity,
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8);
+  }, [redFlags]);
+
+  // Recent calls
   const recentCalls = useMemo(
     () =>
       [...calls]
@@ -117,252 +436,508 @@ export default function DashboardPage() {
           (a, b) =>
             new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         )
-        .slice(0, 8),
+        .slice(0, 5),
     [calls]
   );
-
-  const callsByDay = useMemo(() => getCallsByDay(calls), [calls]);
-  const maxCount = Math.max(...callsByDay.map((d) => d.count), 1);
 
   return (
     <>
       <Header title="Dashboard" />
       <PageTransition>
         <div className="space-y-6 p-6">
-          {/* Stats Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {stats.map((stat, i) => (
-              <motion.div
-                key={stat.title}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.08 }}
-              >
-                <Card>
-                  <CardContent className="flex items-center gap-4 pt-6">
-                    <div
-                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${STAT_GRADIENTS[i]} text-white shadow-lg`}
-                    >
-                      <stat.icon className="h-5 w-5" />
-                    </div>
-                    <div>
-                      {loading ? (
-                        <Skeleton className="h-7 w-16" />
-                      ) : (
-                        <p className="text-2xl font-bold">
-                          {stat.isString ? stat.value : stat.value}
-                        </p>
-                      )}
-                      <p className="text-sm text-muted-foreground">
-                        {stat.title}
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ))}
+          {/* Filters Row */}
+          <div className="flex flex-wrap items-center gap-3">
+            <Select
+              value={dateRange}
+              onValueChange={(v) => setDateRange(v as DateRange)}
+            >
+              <SelectTrigger className="w-[140px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="today">Today</SelectItem>
+                <SelectItem value="7d">Last 7 days</SelectItem>
+                <SelectItem value="30d">Last 30 days</SelectItem>
+                <SelectItem value="90d">Last 90 days</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={selectedBotId} onValueChange={setSelectedBotId}>
+              <SelectTrigger className="w-[240px]">
+                <SelectValue placeholder="All Bots" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Bots</SelectItem>
+                {bots.map((bot) => (
+                  <SelectItem key={bot.id} value={bot.id}>
+                    {bot.agent_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Recent Calls */}
-            <div className="lg:col-span-2">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <div>
-                    <CardTitle>Recent Calls</CardTitle>
-                    <CardDescription>Latest call activity</CardDescription>
-                  </div>
-                  <Button variant="ghost" size="sm" asChild>
-                    <Link href="/calls">
-                      View all
-                      <ArrowRight className="ml-1 h-4 w-4" />
-                    </Link>
-                  </Button>
-                </CardHeader>
-                <CardContent>
-                  {loading ? (
-                    <div className="space-y-3">
-                      {Array.from({ length: 4 }).map((_, i) => (
-                        <Skeleton key={i} className="h-14 w-full" />
-                      ))}
-                    </div>
-                  ) : recentCalls.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                      <Phone className="mb-3 h-10 w-10 opacity-30" />
-                      <p className="text-sm">No calls yet</p>
-                      <Button variant="link" size="sm" asChild>
-                        <Link href="/calls">Make your first call</Link>
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {recentCalls.map((call, i) => {
-                        const Icon =
-                          STATUS_ICONS[call.status] || Clock;
-                        return (
-                          <motion.div
-                            key={call.id}
-                            initial={{ opacity: 0, x: -10 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: i * 0.04 }}
-                            className="flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-muted/50"
-                          >
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm font-medium">
-                                {call.contact_name}
-                              </p>
-                              <div className="flex items-center gap-2 mt-0.5">
-                                <p className="text-xs text-muted-foreground">
-                                  {formatPhoneNumber(call.contact_phone)}
-                                </p>
-                                {call.call_duration ? (
-                                  <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
-                                    <Clock className="h-3 w-3" />
-                                    {formatDuration(call.call_duration)}
-                                  </span>
-                                ) : null}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Badge
-                                variant={
-                                  call.status === "completed"
-                                    ? "secondary"
-                                    : call.status === "failed"
-                                    ? "destructive"
-                                    : "outline"
-                                }
-                                className="gap-1"
-                              >
-                                <Icon className="h-3 w-3" />
-                                {call.status}
-                              </Badge>
-                              <span className="whitespace-nowrap text-xs text-muted-foreground">
-                                {timeAgo(call.created_at)}
-                              </span>
-                            </div>
-                          </motion.div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+          {/* KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <KPICard
+              title="Total Calls"
+              value={kpis.total}
+              icon={Phone}
+              trend={kpis.callTrend}
+              trendLabel="vs prev"
+              gradient="from-violet-500 to-indigo-500"
+              loading={loading}
+              delay={0}
+            />
+            <KPICard
+              title="Connected %"
+              value={`${kpis.connectedPct}%`}
+              icon={Percent}
+              gradient="from-emerald-500 to-green-500"
+              loading={loading}
+              delay={0.08}
+            />
+            <KPICard
+              title="Avg Duration"
+              value={formatDuration(kpis.avgDuration)}
+              icon={Clock}
+              gradient="from-cyan-500 to-blue-500"
+              loading={loading}
+              delay={0.16}
+            />
+            <KPICard
+              title="Conversion %"
+              value={`${kpis.conversionPct}%`}
+              icon={Target}
+              gradient="from-amber-500 to-orange-500"
+              loading={loading}
+              delay={0.24}
+            />
+            <KPICard
+              title="Total Cost"
+              value="$0.00"
+              icon={DollarSign}
+              gradient="from-rose-500 to-pink-500"
+              loading={loading}
+              delay={0.32}
+            />
+            <KPICard
+              title="Cost per Conversion"
+              value="$0.00"
+              icon={DollarSign}
+              gradient="from-fuchsia-500 to-purple-500"
+              loading={loading}
+              delay={0.4}
+            />
+          </div>
 
-            {/* Call Activity Chart */}
-            <div>
-              <Card className="h-full">
-                <CardHeader>
-                  <CardTitle>Call Activity</CardTitle>
-                  <CardDescription>Last 7 days</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {loading ? (
-                    <div className="flex h-48 items-end justify-between gap-2">
-                      {Array.from({ length: 7 }).map((_, i) => (
-                        <Skeleton key={i} className="h-20 flex-1" />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="flex h-48 items-end justify-between gap-2">
-                      {callsByDay.map((day, i) => {
-                        const barHeight =
-                          maxCount > 0
-                            ? Math.max(
-                                (day.count / maxCount) * 148,
-                                day.count > 0 ? 8 : 4
-                              )
-                            : 4;
-                        return (
-                          <div
-                            key={day.date}
-                            className="group flex flex-1 flex-col items-center gap-1"
-                          >
-                            <span className="text-xs font-medium text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
-                              {day.count > 0 ? day.count : ""}
-                            </span>
-                            <motion.div
-                              initial={{ height: 0 }}
-                              animate={{ height: barHeight }}
-                              transition={{
-                                delay: i * 0.08,
-                                duration: 0.6,
-                                ease: [0.21, 0.47, 0.32, 0.98],
-                              }}
-                              className={`w-full max-w-[40px] rounded-t-sm ${
-                                day.count > 0
-                                  ? "bg-gradient-to-t from-violet-500 to-indigo-400"
-                                  : "bg-muted/40"
-                              }`}
+          {/* Charts Row 1: Call Volume + Outcome Distribution */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Call Volume Over Time */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Call Volume Over Time</CardTitle>
+                <CardDescription>
+                  Calls per day for the selected period
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {loading ? (
+                  <Skeleton className="h-64 w-full" />
+                ) : dailyVolume.length === 0 ? (
+                  <EmptyState icon={BarChart3} message="No call data yet" />
+                ) : (
+                  <ResponsiveContainer width="100%" height={260}>
+                    <AreaChart data={dailyVolume}>
+                      <defs>
+                        <linearGradient
+                          id="callGradient"
+                          x1="0"
+                          y1="0"
+                          x2="0"
+                          y2="1"
+                        >
+                          <stop
+                            offset="5%"
+                            stopColor={VIOLET}
+                            stopOpacity={0.3}
+                          />
+                          <stop
+                            offset="95%"
+                            stopColor={VIOLET}
+                            stopOpacity={0}
+                          />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid
+                        strokeDasharray="3 3"
+                        stroke="rgba(255,255,255,0.06)"
+                      />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fill: "#94a3b8", fontSize: 11 }}
+                        axisLine={false}
+                        tickLine={false}
+                        interval="preserveStartEnd"
+                      />
+                      <YAxis
+                        tick={{ fill: "#94a3b8", fontSize: 11 }}
+                        axisLine={false}
+                        tickLine={false}
+                        allowDecimals={false}
+                      />
+                      <Tooltip content={<DarkTooltip />} />
+                      <Area
+                        type="monotone"
+                        dataKey="calls"
+                        stroke={VIOLET}
+                        strokeWidth={2}
+                        fill="url(#callGradient)"
+                        name="Calls"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Outcome Distribution */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Outcome Distribution</CardTitle>
+                <CardDescription>Breakdown by call status</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {loading ? (
+                  <Skeleton className="h-64 w-full" />
+                ) : outcomeDistribution.length === 0 ? (
+                  <EmptyState icon={BarChart3} message="No call data yet" />
+                ) : (
+                  <div className="flex items-center gap-4">
+                    <ResponsiveContainer width="50%" height={240}>
+                      <PieChart>
+                        <Pie
+                          data={outcomeDistribution}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={55}
+                          outerRadius={90}
+                          paddingAngle={2}
+                          dataKey="value"
+                        >
+                          {outcomeDistribution.map((entry, i) => (
+                            <Cell key={i} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip content={<DarkTooltip />} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="flex-1 space-y-2">
+                      {outcomeDistribution.map((item) => (
+                        <div
+                          key={item.name}
+                          className="flex items-center justify-between text-sm"
+                        >
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="h-3 w-3 rounded-full"
+                              style={{ backgroundColor: item.color }}
                             />
-                            <span className="text-[11px] text-muted-foreground">
-                              {day.label}
+                            <span className="text-muted-foreground">
+                              {item.name}
                             </span>
                           </div>
-                        );
-                      })}
+                          <span className="font-medium">{item.value}</span>
+                        </div>
+                      ))}
                     </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
 
-          {/* Quick Actions */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Link href="/calls">
-              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                <Card className="cursor-pointer transition-colors hover:border-violet-500/50">
-                  <CardContent className="flex items-center gap-3 pt-6">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 text-white">
-                      <PhoneCall className="h-5 w-5" />
+          {/* Charts Row 2: Heatmap + Conversion Funnel */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Calling Heatmap */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Calling Heatmap</CardTitle>
+                <CardDescription>Best call times (hour x day)</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {loading ? (
+                  <Skeleton className="h-48 w-full" />
+                ) : calls.length === 0 ? (
+                  <EmptyState icon={BarChart3} message="No call data yet" />
+                ) : (
+                  <div className="overflow-x-auto">
+                    <div className="min-w-[600px]">
+                      {/* Hour labels */}
+                      <div className="flex items-center gap-0.5 mb-1 ml-10">
+                        {Array.from({ length: 24 }, (_, h) => (
+                          <div
+                            key={h}
+                            className="flex-1 text-center text-[9px] text-muted-foreground"
+                          >
+                            {h % 3 === 0 ? `${h}` : ""}
+                          </div>
+                        ))}
+                      </div>
+                      {/* Grid rows */}
+                      {heatmap.days.map((day, dayIdx) => (
+                        <div key={day} className="flex items-center gap-0.5 mb-0.5">
+                          <span className="w-10 text-xs text-muted-foreground text-right pr-2 shrink-0">
+                            {day}
+                          </span>
+                          {heatmap.grid[dayIdx].map((count, hour) => {
+                            const intensity = count / heatmap.max;
+                            return (
+                              <div
+                                key={hour}
+                                className="flex-1 aspect-square rounded-[2px] transition-colors"
+                                style={{
+                                  backgroundColor:
+                                    count === 0
+                                      ? "rgba(255,255,255,0.03)"
+                                      : `rgba(139, 92, 246, ${
+                                          0.15 + intensity * 0.85
+                                        })`,
+                                }}
+                                title={`${day} ${hour}:00 - ${count} calls`}
+                              />
+                            );
+                          })}
+                        </div>
+                      ))}
                     </div>
-                    <div>
-                      <p className="font-medium">New Call</p>
-                      <p className="text-xs text-muted-foreground">
-                        Trigger an outbound call
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            </Link>
-            <Link href="/bots">
-              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                <Card className="cursor-pointer transition-colors hover:border-violet-500/50">
-                  <CardContent className="flex items-center gap-3 pt-6">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-green-500 text-white">
-                      <Bot className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <p className="font-medium">Manage Bots</p>
-                      <p className="text-xs text-muted-foreground">
-                        Configure voice agents
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            </Link>
-            <Link href="/calls">
-              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                <Card className="cursor-pointer transition-colors hover:border-violet-500/50">
-                  <CardContent className="flex items-center gap-3 pt-6">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 text-white">
-                      <Activity className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <p className="font-medium">Call History</p>
-                      <p className="text-xs text-muted-foreground">
-                        View logs and summaries
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            </Link>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Conversion Funnel */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Conversion Funnel</CardTitle>
+                <CardDescription>
+                  Attempted to Converted progression
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {loading ? (
+                  <Skeleton className="h-48 w-full" />
+                ) : calls.length === 0 ? (
+                  <EmptyState icon={Target} message="No call data yet" />
+                ) : (
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={funnel} layout="vertical">
+                      <CartesianGrid
+                        strokeDasharray="3 3"
+                        stroke="rgba(255,255,255,0.06)"
+                        horizontal={false}
+                      />
+                      <XAxis
+                        type="number"
+                        tick={{ fill: "#94a3b8", fontSize: 11 }}
+                        axisLine={false}
+                        tickLine={false}
+                        allowDecimals={false}
+                      />
+                      <YAxis
+                        type="category"
+                        dataKey="stage"
+                        tick={{ fill: "#94a3b8", fontSize: 12 }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={90}
+                      />
+                      <Tooltip content={<DarkTooltip />} />
+                      <Bar dataKey="value" name="Count" radius={[0, 4, 4, 0]}>
+                        {funnel.map((entry, i) => (
+                          <Cell key={i} fill={entry.color} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
           </div>
+
+          {/* Charts Row 3: Sentiment + Top Objections */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Sentiment Breakdown */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Sentiment Breakdown</CardTitle>
+                <CardDescription>
+                  Call sentiment analysis distribution
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                  <div className="flex gap-3 mb-3 opacity-30">
+                    <Smile className="h-8 w-8" />
+                    <Meh className="h-8 w-8" />
+                    <Frown className="h-8 w-8" />
+                  </div>
+                  <p className="text-sm">
+                    Sentiment analysis data will appear here once calls are
+                    processed
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Top Objections */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Top Objections</CardTitle>
+                <CardDescription>Most common red flags detected</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {loading ? (
+                  <Skeleton className="h-48 w-full" />
+                ) : objectionData.length === 0 ? (
+                  <EmptyState
+                    icon={BarChart3}
+                    message="No objection data yet. Red flags will appear here once calls are analyzed."
+                  />
+                ) : (
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={objectionData} layout="vertical">
+                      <CartesianGrid
+                        strokeDasharray="3 3"
+                        stroke="rgba(255,255,255,0.06)"
+                        horizontal={false}
+                      />
+                      <XAxis
+                        type="number"
+                        tick={{ fill: "#94a3b8", fontSize: 11 }}
+                        axisLine={false}
+                        tickLine={false}
+                        allowDecimals={false}
+                      />
+                      <YAxis
+                        type="category"
+                        dataKey="name"
+                        tick={{ fill: "#94a3b8", fontSize: 11 }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={140}
+                      />
+                      <Tooltip content={<DarkTooltip />} />
+                      <Bar
+                        dataKey="count"
+                        name="Occurrences"
+                        fill={ROSE}
+                        radius={[0, 4, 4, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Recent Calls Table */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-base">Recent Calls</CardTitle>
+                <CardDescription>Latest call activity</CardDescription>
+              </div>
+              <Button variant="ghost" size="sm" asChild>
+                <Link href="/calls">
+                  View all
+                  <ArrowRight className="ml-1 h-4 w-4" />
+                </Link>
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {loading ? (
+                <div className="space-y-3">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <Skeleton key={i} className="h-12 w-full" />
+                  ))}
+                </div>
+              ) : recentCalls.length === 0 ? (
+                <EmptyState icon={Phone} message="No calls yet" />
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-muted-foreground">
+                        <th className="py-2 text-left font-medium">Time</th>
+                        <th className="py-2 text-left font-medium">Contact</th>
+                        <th className="py-2 text-left font-medium">Duration</th>
+                        <th className="py-2 text-left font-medium">Outcome</th>
+                        <th className="py-2 text-left font-medium">Score</th>
+                        <th className="py-2 text-left font-medium">Summary</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentCalls.map((call, i) => (
+                        <motion.tr
+                          key={call.id}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: i * 0.04 }}
+                          className="border-b border-border/50 hover:bg-muted/30 transition-colors"
+                        >
+                          <td className="py-2.5 whitespace-nowrap text-muted-foreground">
+                            {timeAgo(call.created_at)}
+                          </td>
+                          <td className="py-2.5">
+                            <div>
+                              <p className="font-medium truncate max-w-[150px]">
+                                {call.contact_name}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {formatPhoneNumber(call.contact_phone)}
+                              </p>
+                            </div>
+                          </td>
+                          <td className="py-2.5 whitespace-nowrap">
+                            {call.call_duration
+                              ? formatDuration(call.call_duration)
+                              : "--"}
+                          </td>
+                          <td className="py-2.5">
+                            <Badge
+                              variant={
+                                call.status === "completed"
+                                  ? "secondary"
+                                  : call.status === "failed"
+                                  ? "destructive"
+                                  : "outline"
+                              }
+                              className="text-xs"
+                            >
+                              {call.analytics?.goal_outcome?.replace(/_/g, " ") ||
+                                call.status}
+                            </Badge>
+                          </td>
+                          <td className="py-2.5 text-muted-foreground">
+                            {call.analytics?.agent_word_share != null
+                              ? `${Math.round(
+                                  call.analytics.agent_word_share * 100
+                                )}%`
+                              : "--"}
+                          </td>
+                          <td className="py-2.5">
+                            <p className="text-xs text-muted-foreground truncate max-w-[200px]">
+                              {call.summary || "--"}
+                            </p>
+                          </td>
+                        </motion.tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </PageTransition>
     </>

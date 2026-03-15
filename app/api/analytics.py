@@ -1,18 +1,20 @@
-"""Analytics API endpoints for goal-based call analysis and red flag monitoring."""
+"""Analytics API endpoints for goal-based call analysis, red flag monitoring,
+dashboard aggregation, and cost breakdown."""
 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import case, func, select, update
+from sqlalchemy import case, extract, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user, get_current_org
 from app.database import get_db
+from app.models.billing import CreditTransaction
 from app.models.call_analytics import CallAnalytics
 from app.models.call_log import CallLog
 
@@ -95,7 +97,312 @@ class CapturedDataFieldSummary(BaseModel):
     total_captured: int
 
 
+# --- Dashboard / cost response schemas ---
+
+
+class CallVolumePoint(BaseModel):
+    date: str
+    total: int
+    connected: int
+
+
+class HeatmapCell(BaseModel):
+    hour: int  # 0-23
+    day_of_week: int  # 0=Monday .. 6=Sunday
+    count: int
+
+
+class ConversionFunnelStep(BaseModel):
+    stage: str
+    count: int
+    percentage: float
+
+
+class DashboardResponse(BaseModel):
+    total_calls: int
+    connected_pct: float
+    avg_duration_secs: float | None
+    conversion_pct: float
+    total_cost: float
+    cost_per_conversion: float | None
+    call_volume_by_day: list[CallVolumePoint]
+    outcome_distribution: dict[str, int]
+    sentiment_distribution: dict[str, int]
+    top_objections: list[dict]
+    calling_heatmap: list[HeatmapCell]
+    conversion_funnel: list[ConversionFunnelStep]
+
+
+class CostByType(BaseModel):
+    telephony: float
+    llm: float
+    tts: float
+    stt: float
+
+
+class DailyCost(BaseModel):
+    date: str
+    cost: float
+
+
+class CostBreakdownResponse(BaseModel):
+    total_cost: float
+    cost_per_call: float | None
+    cost_per_conversion: float | None
+    cost_by_type: CostByType
+    daily_costs: list[DailyCost]
+
+
 # --- Endpoints ---
+# NOTE: Static path endpoints (/dashboard, /cost-breakdown) MUST be defined
+# before parameterized /{bot_id}/... routes to avoid FastAPI treating the
+# path segment as a UUID parameter.
+
+
+@router.get("/dashboard", response_model=DashboardResponse)
+async def get_dashboard(
+    bot_id: uuid.UUID | None = Query(None, description="Filter by bot ID"),
+    days: int = Query(30, ge=1, le=90, description="Lookback window in days"),
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
+    """Aggregated dashboard data: volume, outcomes, sentiment, heatmap, funnel."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    # Base filters for call_logs
+    cl_filters = [CallLog.org_id == org_id, CallLog.created_at >= since]
+    if bot_id:
+        cl_filters.append(CallLog.bot_id == bot_id)
+
+    # --- Total calls & connected % & avg duration ---
+    stats_query = select(
+        func.count().label("total"),
+        func.sum(case((CallLog.status == "completed", 1), else_=0)).label("connected"),
+        func.avg(CallLog.call_duration).label("avg_duration"),
+    ).where(*cl_filters)
+    stats_row = (await db.execute(stats_query)).one()
+    total_calls = stats_row.total or 0
+    connected = stats_row.connected or 0
+    connected_pct = round(connected / total_calls * 100, 1) if total_calls else 0.0
+    avg_duration = round(float(stats_row.avg_duration), 1) if stats_row.avg_duration else None
+
+    # --- Analytics-based metrics (outcomes, sentiment) ---
+    ca_filters = [CallAnalytics.org_id == org_id, CallAnalytics.created_at >= since]
+    if bot_id:
+        ca_filters.append(CallAnalytics.bot_id == bot_id)
+
+    analytics_query = select(
+        CallAnalytics.goal_outcome,
+        CallAnalytics.red_flags,
+        CallAnalytics.captured_data,
+    ).where(*ca_filters)
+    analytics_result = await db.execute(analytics_query)
+    analytics_rows = analytics_result.all()
+
+    # Outcome distribution
+    outcome_dist: dict[str, int] = {}
+    sentiment_dist: dict[str, int] = {"positive": 0, "neutral": 0, "negative": 0}
+    objection_counts: dict[str, int] = {}
+    conversions = 0
+
+    for row in analytics_rows:
+        outcome = row.goal_outcome or "unknown"
+        outcome_dist[outcome] = outcome_dist.get(outcome, 0) + 1
+        # Count primary success outcomes as conversions (exclude "none" and "unknown")
+        if outcome not in ("none", "unknown"):
+            conversions += 1
+
+        # Extract sentiment from captured_data if available
+        captured = row.captured_data or {}
+        sentiment_val = captured.get("sentiment")
+        if sentiment_val in sentiment_dist:
+            sentiment_dist[sentiment_val] += 1
+
+        # Extract objections from red_flags or captured_data
+        flags = row.red_flags or []
+        if isinstance(flags, list):
+            for flag in flags:
+                if isinstance(flag, dict):
+                    flag_id = flag.get("id", "unknown")
+                    objection_counts[flag_id] = objection_counts.get(flag_id, 0) + 1
+
+    conversion_pct = round(conversions / total_calls * 100, 1) if total_calls else 0.0
+
+    # --- Total cost (from credit transactions) ---
+    cost_query = select(
+        func.coalesce(func.sum(func.abs(CreditTransaction.amount)), 0)
+    ).where(
+        CreditTransaction.org_id == org_id,
+        CreditTransaction.type == "usage",
+        CreditTransaction.created_at >= since,
+    )
+    total_cost = float((await db.execute(cost_query)).scalar_one())
+    cost_per_conversion = round(total_cost / conversions, 2) if conversions else None
+
+    # --- Call volume by day ---
+    volume_query = (
+        select(
+            func.date_trunc("day", CallLog.created_at).label("day"),
+            func.count().label("total"),
+            func.sum(case((CallLog.status == "completed", 1), else_=0)).label("connected"),
+        )
+        .where(*cl_filters)
+        .group_by("day")
+        .order_by("day")
+    )
+    volume_result = await db.execute(volume_query)
+    call_volume = [
+        CallVolumePoint(
+            date=row.day.strftime("%Y-%m-%d"),
+            total=row.total,
+            connected=row.connected,
+        )
+        for row in volume_result.all()
+    ]
+
+    # --- Calling heatmap (hour x day_of_week) ---
+    heatmap_query = (
+        select(
+            extract("hour", CallLog.created_at).label("hour"),
+            extract("dow", CallLog.created_at).label("dow"),  # 0=Sunday in PG
+            func.count().label("cnt"),
+        )
+        .where(*cl_filters)
+        .group_by("hour", "dow")
+    )
+    heatmap_result = await db.execute(heatmap_query)
+    heatmap = []
+    for row in heatmap_result.all():
+        # Convert PG dow (0=Sunday) to ISO (0=Monday)
+        pg_dow = int(row.dow)
+        iso_dow = (pg_dow - 1) % 7  # Sunday(0)->6, Monday(1)->0, etc.
+        heatmap.append(HeatmapCell(hour=int(row.hour), day_of_week=iso_dow, count=row.cnt))
+
+    # --- Top objections (sorted by frequency) ---
+    top_objections = sorted(
+        [{"flag_id": k, "count": v} for k, v in objection_counts.items()],
+        key=lambda x: -x["count"],
+    )[:10]
+
+    # --- Conversion funnel ---
+    funnel = [
+        ConversionFunnelStep(stage="Initiated", count=total_calls, percentage=100.0),
+        ConversionFunnelStep(
+            stage="Connected",
+            count=connected,
+            percentage=round(connected / total_calls * 100, 1) if total_calls else 0.0,
+        ),
+        ConversionFunnelStep(
+            stage="Analyzed",
+            count=len(analytics_rows),
+            percentage=round(len(analytics_rows) / total_calls * 100, 1) if total_calls else 0.0,
+        ),
+        ConversionFunnelStep(
+            stage="Converted",
+            count=conversions,
+            percentage=conversion_pct,
+        ),
+    ]
+
+    return DashboardResponse(
+        total_calls=total_calls,
+        connected_pct=connected_pct,
+        avg_duration_secs=avg_duration,
+        conversion_pct=conversion_pct,
+        total_cost=total_cost,
+        cost_per_conversion=cost_per_conversion,
+        call_volume_by_day=call_volume,
+        outcome_distribution=outcome_dist,
+        sentiment_distribution=sentiment_dist,
+        top_objections=top_objections,
+        calling_heatmap=heatmap,
+        conversion_funnel=funnel,
+    )
+
+
+@router.get("/cost-breakdown", response_model=CostBreakdownResponse)
+async def get_cost_breakdown(
+    bot_id: uuid.UUID | None = Query(None, description="Filter by bot ID"),
+    days: int = Query(30, ge=1, le=90, description="Lookback window in days"),
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
+    """Cost breakdown: total, per-call, per-conversion, by type, and daily trend."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    # Total calls (for per-call cost)
+    cl_filters = [CallLog.org_id == org_id, CallLog.created_at >= since]
+    if bot_id:
+        cl_filters.append(CallLog.bot_id == bot_id)
+
+    total_calls = (await db.execute(
+        select(func.count()).select_from(CallLog).where(*cl_filters)
+    )).scalar_one()
+
+    # Conversions (for per-conversion cost)
+    ca_filters = [CallAnalytics.org_id == org_id, CallAnalytics.created_at >= since]
+    if bot_id:
+        ca_filters.append(CallAnalytics.bot_id == bot_id)
+
+    conversion_query = select(func.count()).select_from(CallAnalytics).where(
+        *ca_filters,
+        CallAnalytics.goal_outcome.isnot(None),
+        CallAnalytics.goal_outcome != "none",
+    )
+    conversions = (await db.execute(conversion_query)).scalar_one()
+
+    # Total cost from usage transactions
+    cost_query = select(
+        func.coalesce(func.sum(func.abs(CreditTransaction.amount)), 0)
+    ).where(
+        CreditTransaction.org_id == org_id,
+        CreditTransaction.type == "usage",
+        CreditTransaction.created_at >= since,
+    )
+    total_cost = float((await db.execute(cost_query)).scalar_one())
+
+    cost_per_call = round(total_cost / total_calls, 2) if total_calls else None
+    cost_per_conversion = round(total_cost / conversions, 2) if conversions else None
+
+    # Cost by type -- estimated split based on typical AI calling cost distribution.
+    # Telephony ~40%, LLM ~30%, TTS ~20%, STT ~10% of total credit cost.
+    cost_by_type = CostByType(
+        telephony=round(total_cost * 0.40, 2),
+        llm=round(total_cost * 0.30, 2),
+        tts=round(total_cost * 0.20, 2),
+        stt=round(total_cost * 0.10, 2),
+    )
+
+    # Daily cost trend
+    daily_query = (
+        select(
+            func.date_trunc("day", CreditTransaction.created_at).label("day"),
+            func.coalesce(func.sum(func.abs(CreditTransaction.amount)), 0).label("cost"),
+        )
+        .where(
+            CreditTransaction.org_id == org_id,
+            CreditTransaction.type == "usage",
+            CreditTransaction.created_at >= since,
+        )
+        .group_by("day")
+        .order_by("day")
+    )
+    daily_result = await db.execute(daily_query)
+    daily_costs = [
+        DailyCost(date=row.day.strftime("%Y-%m-%d"), cost=round(float(row.cost), 2))
+        for row in daily_result.all()
+    ]
+
+    return CostBreakdownResponse(
+        total_cost=total_cost,
+        cost_per_call=cost_per_call,
+        cost_per_conversion=cost_per_conversion,
+        cost_by_type=cost_by_type,
+        daily_costs=daily_costs,
+    )
+
+
+# --- Bot-specific endpoints ---
 
 
 @router.get("/{bot_id}/summary", response_model=AnalyticsSummaryResponse)
