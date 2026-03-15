@@ -386,6 +386,10 @@ export function updateLead(id: string, data: Record<string, any>): Promise<Lead>
   });
 }
 
+export function fetchLead(id: string): Promise<Lead> {
+  return apiFetch(`/api/leads/${id}`);
+}
+
 export function deleteLead(id: string): Promise<void> {
   return apiFetch(`/api/leads/${id}`, { method: "DELETE" });
 }
@@ -669,4 +673,51 @@ export function updatePhoneNumber(id: string, data: { label?: string; is_default
 
 export function deletePhoneNumber(id: string): Promise<void> {
   return apiFetch(`/api/telephony/phone-numbers/${id}`, { method: "DELETE" });
+}
+
+// --- Dashboard Analytics ---
+
+export interface DashboardAnalytics {
+  total_calls: number;
+  connected_pct: number;
+  avg_duration_secs: number;
+  conversion_pct: number;
+  total_cost: number;
+  cost_per_conversion: number;
+  call_volume_by_day: Array<{ date: string; count: number }>;
+  outcome_distribution: Record<string, number>;
+  sentiment_distribution: Record<string, number>;
+  top_objections: Array<{ label: string; count: number }>;
+  calling_heatmap: Array<{ hour: number; day: number; count: number }>;
+  conversion_funnel: { initiated: number; connected: number; analyzed: number; converted: number };
+}
+
+export function fetchDashboardAnalytics(params?: {
+  bot_id?: string;
+  days?: number;
+}): Promise<DashboardAnalytics> {
+  const sp = new URLSearchParams();
+  if (params?.bot_id) sp.set("bot_id", params.bot_id);
+  if (params?.days) sp.set("days", String(params.days));
+  const qs = sp.toString();
+  return apiFetch(`/api/analytics/dashboard${qs ? `?${qs}` : ""}`);
+}
+
+export interface CostBreakdown {
+  total_cost: number;
+  cost_per_call: number;
+  cost_per_conversion: number;
+  cost_by_type: Record<string, number>;
+  daily_costs: Array<{ date: string; amount: number }>;
+}
+
+export function fetchCostBreakdown(params?: {
+  bot_id?: string;
+  days?: number;
+}): Promise<CostBreakdown> {
+  const sp = new URLSearchParams();
+  if (params?.bot_id) sp.set("bot_id", params.bot_id);
+  if (params?.days) sp.set("days", String(params.days));
+  const qs = sp.toString();
+  return apiFetch(`/api/analytics/cost-breakdown${qs ? `?${qs}` : ""}`);
 }
