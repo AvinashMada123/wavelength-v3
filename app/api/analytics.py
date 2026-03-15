@@ -907,7 +907,9 @@ async def get_analytics_summary(
     if start_date:
         query = query.where(CallAnalytics.created_at >= start_date)
     if end_date:
-        query = query.where(CallAnalytics.created_at <= end_date)
+        # end_date is a date string like "2026-03-15" parsed as midnight;
+        # add 1 day to include the full end day
+        query = query.where(CallAnalytics.created_at < end_date + timedelta(days=1))
 
     result = await db.execute(query)
     rows = result.scalars().all()
@@ -986,7 +988,7 @@ async def get_analytics_outcomes(
     if start_date:
         query = query.where(CallAnalytics.created_at >= start_date)
     if end_date:
-        query = query.where(CallAnalytics.created_at <= end_date)
+        query = query.where(CallAnalytics.created_at < end_date + timedelta(days=1))
 
     query = query.order_by(CallAnalytics.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
@@ -1016,7 +1018,7 @@ async def get_analytics_red_flags(
     if start_date:
         query = query.where(CallAnalytics.created_at >= start_date)
     if end_date:
-        query = query.where(CallAnalytics.created_at <= end_date)
+        query = query.where(CallAnalytics.created_at < end_date + timedelta(days=1))
 
     query = query.order_by(CallAnalytics.created_at.desc()).limit(500)
     result = await db.execute(query)
@@ -1212,7 +1214,7 @@ async def get_analytics_trends(
     if start_date:
         query = query.where(CallAnalytics.created_at >= start_date)
     if end_date:
-        query = query.where(CallAnalytics.created_at <= end_date)
+        query = query.where(CallAnalytics.created_at < end_date + timedelta(days=1))
 
     result = await db.execute(query)
     rows = result.all()
@@ -1250,7 +1252,7 @@ async def get_captured_data_summary(
     if start_date:
         query = query.where(CallAnalytics.created_at >= start_date)
     if end_date:
-        query = query.where(CallAnalytics.created_at <= end_date)
+        query = query.where(CallAnalytics.created_at < end_date + timedelta(days=1))
     query = query.limit(1000)
 
     result = await db.execute(query)
