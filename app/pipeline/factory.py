@@ -1391,7 +1391,7 @@ async def build_pipeline(
                 adaptive=settings.ADAPTIVE_PHRASE_CHARS,
             ),
             params=ElevenLabsTTSService.InputParams(
-                stability=0.65,
+                stability=0.5,
                 similarity_boost=0.75,
                 use_speaker_boost=False,
                 style=0.0,
