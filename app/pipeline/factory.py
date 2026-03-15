@@ -1386,12 +1386,12 @@ async def build_pipeline(
             model="eleven_flash_v2_5",
             sample_rate=16000,
             text_aggregator=PhraseTextAggregator(
-                min_phrase_chars=10,
-                subsequent_phrase_chars=25,
+                min_phrase_chars=35,
+                subsequent_phrase_chars=50,
                 adaptive=settings.ADAPTIVE_PHRASE_CHARS,
             ),
             params=ElevenLabsTTSService.InputParams(
-                stability=0.5,
+                stability=0.65,
                 similarity_boost=0.75,
                 use_speaker_boost=False,
                 style=0.0,

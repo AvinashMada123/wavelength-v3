@@ -109,7 +109,7 @@ async def _synthesize_greeting(
                 sample_rate=16000,
                 aiohttp_session=aiohttp.ClientSession(),
                 params=ElevenLabsHttpTTSService.InputParams(
-                    stability=0.5,
+                    stability=0.65,
                     similarity_boost=0.75,
                     use_speaker_boost=False,
                     style=0.0,
