@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import {
   Plus,
   Search,
@@ -9,6 +10,9 @@ import {
   Trash2,
   ChevronLeft,
   ChevronRight,
+  Upload,
+  FileSpreadsheet,
+  Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -67,13 +71,24 @@ const STATUS_COLORS: Record<string, string> = {
   unqualified: "bg-red-500/15 text-red-400 border-red-500/25",
 };
 
+const QUALIFICATION_COLORS: Record<string, string> = {
+  hot: "bg-red-500/15 text-red-400 border-red-500/25",
+  warm: "bg-orange-500/15 text-orange-400 border-orange-500/25",
+  cold: "bg-blue-500/15 text-blue-400 border-blue-500/25",
+  high: "bg-green-500/15 text-green-400 border-green-500/25",
+  medium: "bg-yellow-500/15 text-yellow-400 border-yellow-500/25",
+  low: "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
+};
+
 export default function LeadsPage() {
+  const router = useRouter();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [csvDialogOpen, setCsvDialogOpen] = useState(false);
 
   // Add dialog
   const [addOpen, setAddOpen] = useState(false);
@@ -273,16 +288,25 @@ export default function LeadsPage() {
                 </SelectContent>
               </Select>
             </div>
-            <Button
-              onClick={() => {
-                resetAddForm();
-                setAddOpen(true);
-              }}
-              className="bg-gradient-to-r from-violet-500 to-indigo-600 text-white hover:from-violet-600 hover:to-indigo-700"
-            >
-              <Plus className="h-4 w-4" />
-              Add Lead
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setCsvDialogOpen(true)}
+              >
+                <Upload className="h-4 w-4" />
+                Import CSV
+              </Button>
+              <Button
+                onClick={() => {
+                  resetAddForm();
+                  setAddOpen(true);
+                }}
+                className="bg-gradient-to-r from-violet-500 to-indigo-600 text-white hover:from-violet-600 hover:to-indigo-700"
+              >
+                <Plus className="h-4 w-4" />
+                Add Lead
+              </Button>
+            </div>
           </div>
 
           {/* Table */}
@@ -330,23 +354,27 @@ export default function LeadsPage() {
                         Company
                       </TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead className="hidden md:table-cell">
+                        Qualification
+                      </TableHead>
                       <TableHead className="hidden sm:table-cell">
                         Calls
                       </TableHead>
                       <TableHead className="hidden lg:table-cell">
-                        Source
+                        Last Call
                       </TableHead>
                       <TableHead className="hidden sm:table-cell">
                         Created
                       </TableHead>
+                      <TableHead className="w-10"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {leads.map((lead) => (
                       <TableRow
                         key={lead.id}
-                        className="cursor-pointer"
-                        onClick={() => openEditDialog(lead)}
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() => router.push(`/leads/${lead.id}`)}
                       >
                         <TableCell className="font-medium">
                           {lead.contact_name}
@@ -370,14 +398,44 @@ export default function LeadsPage() {
                             {lead.status}
                           </Badge>
                         </TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          {lead.qualification_level ? (
+                            <Badge
+                              variant="outline"
+                              className={
+                                QUALIFICATION_COLORS[lead.qualification_level.toLowerCase()] ||
+                                "text-muted-foreground"
+                              }
+                            >
+                              {lead.qualification_level}
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground">{"\u2014"}</span>
+                          )}
+                        </TableCell>
                         <TableCell className="hidden sm:table-cell text-muted-foreground">
                           {lead.call_count}
                         </TableCell>
                         <TableCell className="hidden lg:table-cell text-muted-foreground">
-                          {lead.source || "\u2014"}
+                          {lead.last_call_date
+                            ? format(new Date(lead.last_call_date), "MMM d, yyyy")
+                            : "\u2014"}
                         </TableCell>
                         <TableCell className="hidden sm:table-cell text-muted-foreground">
                           {format(new Date(lead.created_at), "MMM d, yyyy")}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openEditDialog(lead);
+                            }}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -694,6 +752,35 @@ export default function LeadsPage() {
               ) : (
                 "Delete Lead"
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* CSV Import Dialog */}
+      <Dialog open={csvDialogOpen} onOpenChange={setCsvDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Import Leads from CSV</DialogTitle>
+            <DialogDescription>
+              Upload a CSV file to bulk import leads into the system.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center justify-center py-8 border-2 border-dashed rounded-lg border-muted-foreground/25">
+            <FileSpreadsheet className="h-12 w-12 text-muted-foreground/40 mb-3" />
+            <p className="text-sm font-medium text-muted-foreground">
+              CSV import coming soon
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Expected format: name, phone, email, company, location
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setCsvDialogOpen(false)}
+            >
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
