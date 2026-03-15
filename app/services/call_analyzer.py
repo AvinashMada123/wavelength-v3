@@ -184,7 +184,7 @@ class CallAnalyzer:
             f' "sentiment": "<positive|neutral|negative>",'
             f' "sentiment_score": <1-10 where 1=very negative 10=very positive>,'
             f' "lead_temperature": "<hot|warm|cold|dead>",'
-            f' "buying_signals": ["<specific buying signal quotes or phrases from the lead>"]}}'
+            f' "buying_signals": ["<ONLY explicit intent: asking about pricing, requesting details, confirming attendance, asking how to sign up, sharing availability. NOT generic words like yeah/yes/okay/sure/hmm>"]}}'
         )
 
         response = await self._gemini_call(prompt, temperature=0.3, call_sid=call_sid)
@@ -307,7 +307,7 @@ class CallAnalyzer:
             '  "lead_temperature": "<hot|warm|cold|dead>",\n'
             '  "objections": [{"category": "<price|timing|competition|authority|need|other>", '
             '"text": "<the objection raised>", "resolved": <true|false>}],\n'
-            '  "buying_signals": ["<specific buying signal quotes or phrases>"]\n'
+            '  "buying_signals": ["<ONLY explicit intent: asking about pricing, requesting details, confirming attendance, asking how to sign up, sharing availability. NOT generic words like yeah/yes/okay/sure/hmm>"]\n'
             "}\n\n"
             f"**Transcript:**\n{conv_text}"
         )
