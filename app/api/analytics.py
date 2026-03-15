@@ -425,6 +425,56 @@ async def get_cost_breakdown(
     )
 
 
+# --- Lead Intelligence endpoint ---
+
+
+class LeadIntelResponse(BaseModel):
+    temperature_distribution: dict[str, int]
+    buying_signals: list[dict]  # [{signal: str, count: int}]
+    total_analyzed: int
+
+
+@router.get("/lead-intelligence", response_model=LeadIntelResponse)
+async def get_lead_intelligence(
+    bot_id: uuid.UUID | None = Query(None),
+    days: int = Query(30, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
+    """Lead temperature distribution and buying signals frequency."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    filters = [CallAnalytics.org_id == org_id, CallAnalytics.created_at >= since]
+    if bot_id:
+        filters.append(CallAnalytics.bot_id == bot_id)
+
+    rows = (await db.execute(
+        select(CallAnalytics.lead_temperature, CallAnalytics.buying_signals)
+        .where(*filters)
+        .where(CallAnalytics.lead_temperature.isnot(None))
+    )).all()
+
+    temp_dist: dict[str, int] = {}
+    signal_counts: dict[str, int] = {}
+    for row in rows:
+        t = row.lead_temperature or "unknown"
+        temp_dist[t] = temp_dist.get(t, 0) + 1
+        if row.buying_signals:
+            for sig in row.buying_signals:
+                if isinstance(sig, str) and sig.strip():
+                    signal_counts[sig.strip()] = signal_counts.get(sig.strip(), 0) + 1
+
+    top_signals = sorted(
+        [{"signal": k, "count": v} for k, v in signal_counts.items()],
+        key=lambda x: -x["count"],
+    )[:15]
+
+    return LeadIntelResponse(
+        temperature_distribution=temp_dist,
+        buying_signals=top_signals,
+        total_analyzed=len(rows),
+    )
+
+
 # --- Reanalysis endpoint ---
 
 

@@ -722,6 +722,25 @@ export function fetchCostBreakdown(params?: {
   return apiFetch(`/api/analytics/cost-breakdown${qs ? `?${qs}` : ""}`);
 }
 
+// --- Lead Intelligence ---
+
+export interface LeadIntelligence {
+  temperature_distribution: Record<string, number>;
+  buying_signals: Array<{ signal: string; count: number }>;
+  total_analyzed: number;
+}
+
+export function fetchLeadIntelligence(params?: {
+  bot_id?: string;
+  days?: number;
+}): Promise<LeadIntelligence> {
+  const sp = new URLSearchParams();
+  if (params?.bot_id) sp.set("bot_id", params.bot_id);
+  if (params?.days) sp.set("days", String(params.days));
+  const qs = sp.toString();
+  return apiFetch(`/api/analytics/lead-intelligence${qs ? `?${qs}` : ""}`);
+}
+
 // --- Reanalysis ---
 
 export interface ReanalysisResult {

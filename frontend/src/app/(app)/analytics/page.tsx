@@ -82,6 +82,8 @@ import {
   useAnalyticsRedFlags,
   useAnalyticsAlerts,
   useAnalyticsTrends,
+  useCostBreakdown,
+  useLeadIntelligence,
 } from "@/hooks/use-analytics";
 import { useCallLogs } from "@/hooks/use-calls";
 import { formatDuration, timeAgo } from "@/lib/utils";
@@ -212,6 +214,11 @@ export default function AnalyticsPage() {
   const [dateRange, setDateRange] = useState<DateRangeType>(() => createDateRange("30d"));
 
   const range = useMemo(() => getDateRangeValues(dateRange, 30), [dateRange]);
+  const periodDays = useMemo(() => {
+    const s = new Date(range.start + "T00:00:00");
+    const e = new Date(range.end + "T00:00:00");
+    return Math.max(1, Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)));
+  }, [range]);
 
   // Bots
   const { data: bots = [], isLoading: botsLoading } = useBots();
@@ -252,6 +259,14 @@ export default function AnalyticsPage() {
   const { data: calls = [] } = useCallLogs(
     effectiveBotId ? { botId: effectiveBotId } : undefined
   );
+  const { data: costData } = useCostBreakdown({
+    bot_id: effectiveBotId || undefined,
+    days: periodDays,
+  });
+  const { data: leadIntel } = useLeadIntelligence({
+    bot_id: effectiveBotId || undefined,
+    days: periodDays,
+  });
 
   const loading = botsLoading || summaryLoading;
 
@@ -526,15 +541,14 @@ export default function AnalyticsPage() {
                 />
                 <StatCard
                   title="Success Rate"
-                  value={
-                    summary?.outcomes
-                      ? `${
-                          summary.outcomes.find(
-                            (o) => o.outcome === "success"
-                          )?.percentage ?? 0
-                        }%`
-                      : "0%"
-                  }
+                  value={(() => {
+                    if (!summary?.outcomes || summary.total_analyzed === 0) return "0%";
+                    const failureOutcomes = new Set(["none", "unknown", "bad_audio", "voicemail", "wrong_number", "call_on_hold"]);
+                    const successCount = summary.outcomes
+                      .filter((o) => !failureOutcomes.has(o.outcome))
+                      .reduce((sum, o) => sum + o.count, 0);
+                    return `${Math.round((successCount / summary.total_analyzed) * 100)}%`;
+                  })()}
                   icon={CheckCircle2}
                   gradient="from-emerald-500 to-green-500"
                   loading={loading}
@@ -1174,7 +1188,29 @@ export default function AnalyticsPage() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <PlaceholderState message="Lead temperature data will appear here once calls are processed and leads are scored" />
+                    {!leadIntel || Object.keys(leadIntel.temperature_distribution).length === 0 ? (
+                      <PlaceholderState message="No temperature data yet — reanalyze calls to generate lead scores" />
+                    ) : (
+                      <div className="space-y-3">
+                        {Object.entries(leadIntel.temperature_distribution)
+                          .sort(([,a], [,b]) => b - a)
+                          .map(([temp, count]) => {
+                            const colors: Record<string, string> = { hot: "#ef4444", warm: "#f59e0b", cold: "#3b82f6", dead: "#6b7280" };
+                            const pct = leadIntel.total_analyzed > 0 ? Math.round((count / leadIntel.total_analyzed) * 100) : 0;
+                            return (
+                              <div key={temp} className="space-y-1">
+                                <div className="flex justify-between text-sm">
+                                  <span className="capitalize">{temp}</span>
+                                  <span className="text-muted-foreground">{count} ({pct}%)</span>
+                                </div>
+                                <div className="h-3 w-full rounded bg-muted/30 overflow-hidden">
+                                  <div className="h-full rounded" style={{ width: `${pct}%`, backgroundColor: colors[temp] || "#8b5cf6" }} />
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
 
@@ -1182,14 +1218,30 @@ export default function AnalyticsPage() {
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-base">
-                      Qualification Rates Over Time
+                      Temperature Summary
                     </CardTitle>
                     <CardDescription>
-                      Trends in lead qualification
+                      {leadIntel ? `${leadIntel.total_analyzed} calls analyzed` : "Overview"}
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <PlaceholderState message="Qualification rate trends will appear here once leads are being qualified through calls" />
+                    {!leadIntel || leadIntel.total_analyzed === 0 ? (
+                      <PlaceholderState message="Temperature summary will appear after call analysis" />
+                    ) : (
+                      <div className="grid grid-cols-2 gap-4">
+                        {[
+                          { label: "Hot", color: "text-red-400", value: leadIntel.temperature_distribution["hot"] || 0 },
+                          { label: "Warm", color: "text-amber-400", value: leadIntel.temperature_distribution["warm"] || 0 },
+                          { label: "Cold", color: "text-blue-400", value: leadIntel.temperature_distribution["cold"] || 0 },
+                          { label: "Dead", color: "text-gray-400", value: leadIntel.temperature_distribution["dead"] || 0 },
+                        ].map((t) => (
+                          <div key={t.label} className="text-center p-3 rounded-lg bg-muted/20">
+                            <div className={`text-2xl font-bold ${t.color}`}>{t.value}</div>
+                            <div className="text-xs text-muted-foreground">{t.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </div>
@@ -1205,7 +1257,18 @@ export default function AnalyticsPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <PlaceholderState message="Buying signal data will appear here once the AI starts detecting buying intent patterns in calls" />
+                  {!leadIntel || leadIntel.buying_signals.length === 0 ? (
+                    <PlaceholderState message="No buying signals detected yet — signals will appear after call analysis" />
+                  ) : (
+                    <div className="space-y-2">
+                      {leadIntel.buying_signals.map((sig) => (
+                        <div key={sig.signal} className="flex items-center justify-between text-sm">
+                          <span className="truncate max-w-[70%]">{sig.signal}</span>
+                          <Badge variant="outline">{sig.count}</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
@@ -1217,24 +1280,24 @@ export default function AnalyticsPage() {
               {/* Cost summary cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <StatCard
-                  title="Total Spend"
-                  value="$0.00"
+                  title="Credits Used"
+                  value={`₹${costData?.total_cost?.toFixed(1) ?? "0"}`}
                   icon={DollarSign}
                   gradient="from-violet-500 to-indigo-500"
                   loading={false}
                   delay={0}
                 />
                 <StatCard
-                  title="Cost per Call"
-                  value="$0.00"
+                  title="Credits / Call"
+                  value={costData?.cost_per_call ? `₹${costData.cost_per_call.toFixed(2)}` : "—"}
                   icon={DollarSign}
                   gradient="from-emerald-500 to-green-500"
                   loading={false}
                   delay={0.08}
                 />
                 <StatCard
-                  title="Cost per Conversion"
-                  value="$0.00"
+                  title="Credits / Conversion"
+                  value={costData?.cost_per_conversion ? `₹${costData.cost_per_conversion.toFixed(2)}` : "—"}
                   icon={DollarSign}
                   gradient="from-amber-500 to-orange-500"
                   loading={false}
@@ -1254,40 +1317,58 @@ export default function AnalyticsPage() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <PlaceholderState message="Cost tracking will appear here once billing data is integrated with call analytics" />
+                    {!costData || costData.daily_costs.length === 0 ? (
+                      <PlaceholderState message="No billing data yet" />
+                    ) : (
+                      <ResponsiveContainer width="100%" height={200}>
+                        <AreaChart data={costData.daily_costs.map(d => ({ date: new Date(d.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }), cost: d.amount }))}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                          <XAxis dataKey="date" tick={{ fill: "#888", fontSize: 11 }} />
+                          <YAxis tick={{ fill: "#888", fontSize: 11 }} />
+                          <Tooltip contentStyle={{ background: "#1a1a2e", border: "1px solid #333", borderRadius: 8 }} />
+                          <Area type="monotone" dataKey="cost" stroke={VIOLET} fill={VIOLET} fillOpacity={0.2} name="Credits" />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    )}
                   </CardContent>
                 </Card>
 
-                {/* Cost per conversion trend */}
+                {/* Cost breakdown by type */}
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-base">
-                      Cost per Conversion Trend
+                      Cost Breakdown
                     </CardTitle>
                     <CardDescription>
-                      Daily cost per successful conversion
+                      Estimated split by service type
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <PlaceholderState message="Conversion cost tracking will appear here once billing data is integrated" />
+                    {!costData || costData.total_cost === 0 ? (
+                      <PlaceholderState message="No cost data yet" />
+                    ) : (
+                      <div className="space-y-3">
+                        {Object.entries(costData.cost_by_type).map(([type, amount]) => {
+                          const pct = costData.total_cost > 0 ? Math.round((amount / costData.total_cost) * 100) : 0;
+                          const colors: Record<string, string> = { telephony: INDIGO, llm: VIOLET, tts: EMERALD, stt: AMBER };
+                          return (
+                            <div key={type} className="space-y-1">
+                              <div className="flex justify-between text-sm">
+                                <span className="uppercase text-xs font-medium">{type}</span>
+                                <span className="text-muted-foreground">{amount.toFixed(1)} credits ({pct}%)</span>
+                              </div>
+                              <div className="h-2 w-full rounded bg-muted/30 overflow-hidden">
+                                <div className="h-full rounded" style={{ width: `${pct}%`, backgroundColor: colors[type] || SLATE }} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </div>
 
-              {/* Cost Breakdown */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">
-                    Cost Breakdown by Type
-                  </CardTitle>
-                  <CardDescription>
-                    LLM, TTS, STT, and Telephony costs
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <PlaceholderState message="Cost breakdown by service type (LLM, TTS, STT, Telephony) will appear here once per-call cost tracking is enabled" />
-                </CardContent>
-              </Card>
             </TabsContent>
           </Tabs>
         </div>

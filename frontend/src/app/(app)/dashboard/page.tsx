@@ -540,7 +540,7 @@ export default function DashboardPage() {
             />
             <KPICard
               title="Credits Used"
-              value={`${kpis.totalCost.toFixed(1)}`}
+              value={`₹${kpis.totalCost.toFixed(1)}`}
               icon={DollarSign}
               gradient="from-rose-500 to-pink-500"
               loading={loading}
@@ -548,7 +548,7 @@ export default function DashboardPage() {
             />
             <KPICard
               title="Credits / Conversion"
-              value={kpis.costPerConversion ? kpis.costPerConversion.toFixed(1) : "—"}
+              value={kpis.costPerConversion ? `₹${kpis.costPerConversion.toFixed(1)}` : "—"}
               icon={DollarSign}
               gradient="from-fuchsia-500 to-purple-500"
               loading={loading}

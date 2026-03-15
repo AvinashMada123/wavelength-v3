@@ -10,6 +10,7 @@ import {
   fetchAnalyticsCapturedData,
   fetchDashboardAnalytics,
   fetchCostBreakdown,
+  fetchLeadIntelligence,
   acknowledgeAlert,
   snoozeAlert,
 } from "@/lib/api";
@@ -119,5 +120,12 @@ export function useCostBreakdown(params?: { bot_id?: string; days?: number }) {
   return useQuery({
     queryKey: ["analytics", "cost-breakdown", params] as const,
     queryFn: () => fetchCostBreakdown(params),
+  });
+}
+
+export function useLeadIntelligence(params?: { bot_id?: string; days?: number }) {
+  return useQuery({
+    queryKey: ["analytics", "lead-intelligence", params] as const,
+    queryFn: () => fetchLeadIntelligence(params),
   });
 }
