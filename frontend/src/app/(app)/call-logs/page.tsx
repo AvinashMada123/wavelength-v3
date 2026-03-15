@@ -23,6 +23,10 @@ import {
   Shield,
   Target,
   Database,
+  ExternalLink,
+  MessageSquareText,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Header } from "@/components/layout/header";
@@ -125,6 +129,42 @@ function InterestBadge({ level }: { level: string }) {
   );
 }
 
+// ---------- Score badge ----------
+
+function ScoreBadge({ score }: { score: number | null | undefined }) {
+  if (score == null) return <span className="text-muted-foreground">-</span>;
+  const color =
+    score >= 80
+      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+      : score >= 50
+        ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+        : "bg-red-500/10 text-red-400 border-red-500/20";
+  return (
+    <Badge variant="outline" className={cn("text-[10px] font-semibold tabular-nums", color)}>
+      {score}
+    </Badge>
+  );
+}
+
+// ---------- Sentiment badge ----------
+
+const SENTIMENT_CONFIG: Record<string, { emoji: string; color: string }> = {
+  positive: { emoji: "+", color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" },
+  neutral: { emoji: "~", color: "bg-slate-500/10 text-slate-400 border-slate-500/20" },
+  negative: { emoji: "-", color: "bg-red-500/10 text-red-400 border-red-500/20" },
+  mixed: { emoji: "+/-", color: "bg-amber-500/10 text-amber-400 border-amber-500/20" },
+};
+
+function SentimentBadge({ sentiment }: { sentiment: string | null | undefined }) {
+  if (!sentiment) return <span className="text-muted-foreground">-</span>;
+  const config = SENTIMENT_CONFIG[sentiment.toLowerCase()] || SENTIMENT_CONFIG.neutral;
+  return (
+    <Badge variant="outline" className={cn("text-[10px]", config.color)}>
+      {config.emoji} {sentiment}
+    </Badge>
+  );
+}
+
 // ---------- Severity config ----------
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -166,6 +206,11 @@ function CallLogsPageInner() {
 
   // Selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Transcript search
+  const [transcriptSearch, setTranscriptSearch] = useState("");
+  // Expanded summary rows
+  const [expandedSummaries, setExpandedSummaries] = useState<Set<string>>(new Set());
 
   // Detail modal
   const [selectedCall, setSelectedCall] = useState<CallLog | null>(null);
@@ -231,6 +276,10 @@ function CallLogsPageInner() {
     toast.success("Refreshed");
   }
 
+  function navigateToDetail(call: CallLog) {
+    router.push(`/calls/${call.id}`);
+  }
+
   async function openCallDetail(call: CallLog) {
     setSelectedCall(call);
     setLoadingDetail(true);
@@ -293,8 +342,18 @@ function CallLogsPageInner() {
       result = result.filter((c) => new Date(c.created_at) <= to);
     }
 
+    // Transcript content search
+    if (transcriptSearch.trim()) {
+      const tq = transcriptSearch.toLowerCase();
+      result = result.filter((c) =>
+        c.metadata?.transcript?.some((t) =>
+          t.content.toLowerCase().includes(tq)
+        )
+      );
+    }
+
     return result;
-  }, [calls, filterStatus, searchQuery, dateFrom, dateTo]);
+  }, [calls, filterStatus, searchQuery, dateFrom, dateTo, transcriptSearch]);
 
   const totalPages = Math.ceil(filteredCalls.length / PAGE_SIZE);
   const paginatedCalls = filteredCalls.slice(
@@ -306,7 +365,7 @@ function CallLogsPageInner() {
   useEffect(() => {
     setPage(0);
     setSelectedIds(new Set());
-  }, [filterBotId, filterStatus, filterGoalOutcome, searchQuery, dateFrom, dateTo]);
+  }, [filterBotId, filterStatus, filterGoalOutcome, searchQuery, dateFrom, dateTo, transcriptSearch]);
 
   // ---------- Selection ----------
 
@@ -382,6 +441,7 @@ function CallLogsPageInner() {
 
   const hasFilters =
     searchQuery ||
+    transcriptSearch ||
     filterStatus !== "all" ||
     filterBotId !== "all" ||
     filterGoalOutcome !== "all" ||
@@ -390,11 +450,38 @@ function CallLogsPageInner() {
 
   function clearFilters() {
     setSearchQuery("");
+    setTranscriptSearch("");
     setFilterStatus("all");
     setFilterBotId("all");
     setFilterGoalOutcome("all");
     setDateFrom("");
     setDateTo("");
+  }
+
+  function toggleSummaryExpand(id: string) {
+    setExpandedSummaries((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  // Helper to extract score/sentiment from analytics captured_data
+  function getCallScore(call: CallLog): number | null {
+    const cd = call.analytics?.captured_data;
+    if (!cd) return null;
+    if (typeof cd.score === "number") return cd.score;
+    if (typeof cd.call_score === "number") return cd.call_score;
+    return null;
+  }
+
+  function getCallSentiment(call: CallLog): string | null {
+    const cd = call.analytics?.captured_data;
+    if (!cd) return null;
+    if (typeof cd.sentiment === "string") return cd.sentiment;
+    if (typeof cd.overall_sentiment === "string") return cd.overall_sentiment;
+    return null;
   }
 
   // ---------- Pagination helpers ----------
@@ -537,6 +624,27 @@ function CallLogsPageInner() {
                     />
                   </div>
 
+                  {/* Transcript search */}
+                  <div className="relative min-w-[180px]">
+                    <MessageSquareText className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={transcriptSearch}
+                      onChange={(e) => setTranscriptSearch(e.target.value)}
+                      placeholder="Search transcripts..."
+                      className="pl-8 h-9 text-xs"
+                    />
+                    {transcriptSearch && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-0.5 top-1/2 -translate-y-1/2 h-7 w-7"
+                        onClick={() => setTranscriptSearch("")}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+
                   {/* Clear filters */}
                   {hasFilters && (
                     <Button
@@ -647,8 +755,11 @@ function CallLogsPageInner() {
                         <TableHead>Phone</TableHead>
                         <TableHead>Bot</TableHead>
                         <TableHead>Duration</TableHead>
+                        <TableHead>Score</TableHead>
+                        <TableHead>Sentiment</TableHead>
                         <TableHead>Outcome</TableHead>
                         <TableHead>Interest</TableHead>
+                        <TableHead>Summary</TableHead>
                         <TableHead>Time</TableHead>
                         <TableHead className="w-10" />
                       </TableRow>
@@ -664,7 +775,7 @@ function CallLogsPageInner() {
                             "hover:bg-muted/50 border-b transition-colors cursor-pointer",
                             selectedIds.has(call.id) && "bg-violet-500/5"
                           )}
-                          onClick={() => openCallDetail(call)}
+                          onClick={() => navigateToDetail(call)}
                         >
                           <TableCell onClick={(e) => e.stopPropagation()}>
                             <input
@@ -679,11 +790,6 @@ function CallLogsPageInner() {
                           </TableCell>
                           <TableCell>
                             <p className="font-medium">{call.contact_name}</p>
-                            {call.summary && (
-                              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1 max-w-[250px]">
-                                {call.summary}
-                              </p>
-                            )}
                           </TableCell>
                           <TableCell className="text-muted-foreground">
                             {formatPhoneNumber(call.contact_phone)}
@@ -708,6 +814,12 @@ function CallLogsPageInner() {
                               : "-"}
                           </TableCell>
                           <TableCell>
+                            <ScoreBadge score={getCallScore(call)} />
+                          </TableCell>
+                          <TableCell>
+                            <SentimentBadge sentiment={getCallSentiment(call)} />
+                          </TableCell>
+                          <TableCell>
                             {call.outcome ? (
                               <Badge variant="outline" className="text-xs">
                                 {call.outcome}
@@ -723,6 +835,34 @@ function CallLogsPageInner() {
                               <span className="text-muted-foreground">-</span>
                             )}
                           </TableCell>
+                          <TableCell className="max-w-[200px]" onClick={(e) => e.stopPropagation()}>
+                            {call.summary ? (
+                              <div>
+                                <p className={cn(
+                                  "text-xs text-muted-foreground",
+                                  !expandedSummaries.has(call.id) && "line-clamp-2"
+                                )}>
+                                  {call.summary}
+                                </p>
+                                {call.summary.length > 80 && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-5 px-1 text-[10px] text-violet-400 hover:text-violet-300 mt-0.5"
+                                    onClick={() => toggleSummaryExpand(call.id)}
+                                  >
+                                    {expandedSummaries.has(call.id) ? (
+                                      <>Less <ChevronUp className="h-3 w-3 ml-0.5" /></>
+                                    ) : (
+                                      <>More <ChevronDown className="h-3 w-3 ml-0.5" /></>
+                                    )}
+                                  </Button>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
                           <TableCell className="text-muted-foreground whitespace-nowrap text-sm">
                             {timeAgo(call.created_at)}
                           </TableCell>
@@ -733,10 +873,11 @@ function CallLogsPageInner() {
                               className="h-7 w-7"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                openCallDetail(call);
+                                navigateToDetail(call);
                               }}
+                              title="View full details"
                             >
-                              <FileText className="h-3.5 w-3.5" />
+                              <ExternalLink className="h-3.5 w-3.5" />
                             </Button>
                           </TableCell>
                         </motion.tr>
