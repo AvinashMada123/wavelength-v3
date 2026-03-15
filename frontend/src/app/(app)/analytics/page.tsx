@@ -448,6 +448,7 @@ export default function AnalyticsPage() {
                   const result = await reanalyzeCalls({
                     bot_id: effectiveBotId || undefined,
                     limit: 200,
+                    force: true,
                   });
                   if (result.succeeded > 0) {
                     toast.success(
