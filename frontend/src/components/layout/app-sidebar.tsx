@@ -24,7 +24,7 @@ const navItems = [
   { title: "Bots", href: "/bots", icon: Bot },
   { title: "Calls", href: "/calls", icon: Phone },
   { title: "Call Queue", href: "/queue", icon: ListOrdered },
-  { title: "Call Logs", href: "/call-logs", icon: ClipboardList },
+  { title: "Call History", href: "/call-logs", icon: ClipboardList },
   { title: "Analytics", href: "/analytics", icon: BarChart3 },
   { title: "Leads", href: "/leads", icon: ContactRound },
   { title: "Campaigns", href: "/campaigns", icon: Megaphone },
