@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/contexts/auth-context";
 import { OrgSwitcher } from "@/components/layout/org-switcher";
+import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 
 const navItems = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -59,6 +60,7 @@ function UserMenu() {
 export function AppSidebar() {
   const pathname = usePathname();
   const { user } = useAuth();
+  useKeyboardShortcuts();
 
   const allNavItems = user?.role === "super_admin"
     ? [...navItems, { title: "Admin", href: "/admin", icon: Shield }]
