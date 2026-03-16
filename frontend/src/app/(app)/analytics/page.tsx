@@ -265,9 +265,10 @@ export default function AnalyticsPage() {
   const { data: redFlags = [], isLoading: redFlagsLoading } =
     useAnalyticsRedFlags(effectiveBotId);
   const { data: alerts } = useAnalyticsAlerts(effectiveBotId);
+  const trendInterval = periodDays <= 2 ? "hourly" : "daily";
   const { data: trends = [], isLoading: trendsLoading } = useAnalyticsTrends(
     effectiveBotId,
-    { interval: "daily", start_date: range.start, end_date: range.end }
+    { interval: trendInterval, start_date: range.start, end_date: range.end }
   );
   const { data: calls = [] } = useCallLogs(
     effectiveBotId ? { botId: effectiveBotId } : undefined
@@ -285,15 +286,19 @@ export default function AnalyticsPage() {
 
   // -- Trend chart data --
   const trendChartData = useMemo(() => {
-    return trends.map((t) => ({
-      date: new Date(t.date + "T00:00:00").toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-      }),
-      total: t.total,
-      red_flags: t.red_flag_count,
-      ...t.outcomes,
-    }));
+    return trends.map((t) => {
+      const isHourly = t.date.includes("T");
+      const d = new Date(isHourly ? t.date : t.date + "T00:00:00");
+      const label = isHourly
+        ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
+        : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      return {
+        date: label,
+        total: t.total,
+        red_flags: t.red_flag_count,
+        ...t.outcomes,
+      };
+    });
   }, [trends]);
 
   // Outcome keys for line chart
@@ -385,6 +390,7 @@ export default function AnalyticsPage() {
     try {
       const res = await acknowledgeAllAlerts(effectiveBotId, "dashboard_user");
       toast.success(`${res.count} alerts acknowledged`);
+      queryClient.invalidateQueries({ queryKey: ["analytics", "alerts", effectiveBotId] });
     } catch {
       toast.error("Failed to acknowledge alerts");
     }
@@ -692,7 +698,7 @@ export default function AnalyticsPage() {
                       Outcomes Over Time
                     </CardTitle>
                     <CardDescription>
-                      Daily outcome distribution
+                      {trendInterval === "hourly" ? "Hourly" : "Daily"} outcome distribution
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -762,7 +768,7 @@ export default function AnalyticsPage() {
                       Red Flags Over Time
                     </CardTitle>
                     <CardDescription>
-                      Daily red flag detections
+                      {trendInterval === "hourly" ? "Hourly" : "Daily"} red flag detections
                     </CardDescription>
                   </CardHeader>
                   <CardContent>

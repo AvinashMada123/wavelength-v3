@@ -283,7 +283,7 @@ export function snoozeAlert(
 
 export function fetchAnalyticsTrends(
   botId: string,
-  params?: { interval?: "daily" | "weekly"; start_date?: string; end_date?: string }
+  params?: { interval?: "hourly" | "daily" | "weekly"; start_date?: string; end_date?: string }
 ): Promise<TrendPoint[]> {
   const sp = new URLSearchParams();
   if (params?.interval) sp.set("interval", params.interval);

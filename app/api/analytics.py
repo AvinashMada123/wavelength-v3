@@ -1236,15 +1236,17 @@ async def snooze_alert(
 @router.get("/{bot_id}/trends", response_model=list[TrendPoint])
 async def get_analytics_trends(
     bot_id: uuid.UUID,
-    interval: str = Query("daily", pattern="^(daily|weekly)$"),
+    interval: str = Query("daily", pattern="^(hourly|daily|weekly)$"),
     start_date: datetime | None = Query(None),
     end_date: datetime | None = Query(None),
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_current_org),
 ):
-    """Time-series: daily/weekly goal completion rate and red flag rate."""
+    """Time-series: hourly/daily/weekly goal completion rate and red flag rate."""
     call_date = func.coalesce(CallLog.created_at, CallAnalytics.created_at)
-    if interval == "daily":
+    if interval == "hourly":
+        date_trunc = func.date_trunc("hour", call_date)
+    elif interval == "daily":
         date_trunc = func.date_trunc("day", call_date)
     else:
         date_trunc = func.date_trunc("week", call_date)
@@ -1271,8 +1273,9 @@ async def get_analytics_trends(
 
     # Aggregate by period
     periods: dict[str, dict] = {}
+    fmt = "%Y-%m-%dT%H:%M" if interval == "hourly" else "%Y-%m-%d"
     for row in rows:
-        period_key = row.period.strftime("%Y-%m-%d")
+        period_key = row.period.strftime(fmt)
         if period_key not in periods:
             periods[period_key] = {"date": period_key, "total": 0, "outcomes": {}, "red_flag_count": 0}
         periods[period_key]["total"] += row.cnt

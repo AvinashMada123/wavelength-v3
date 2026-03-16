@@ -73,7 +73,7 @@ export function useAnalyticsAlerts(botId: string) {
 
 export function useAnalyticsTrends(
   botId: string,
-  params?: { interval?: "daily" | "weekly"; start_date?: string; end_date?: string }
+  params?: { interval?: "hourly" | "daily" | "weekly"; start_date?: string; end_date?: string }
 ) {
   return useQuery({
     queryKey: analyticsKeys.trends(botId, params),
