@@ -14,6 +14,7 @@ import {
   BarChart3,
   Brain,
   Database,
+  Download,
   AlertTriangle,
   Target,
   Volume2,
@@ -158,10 +159,20 @@ function AudioPlayer({ callSid }: { callSid: string }) {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm flex items-center gap-2">
-          <Volume2 className="h-4 w-4 text-violet-400" />
-          Recording
-        </CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Volume2 className="h-4 w-4 text-violet-400" />
+            Recording
+          </CardTitle>
+          <a
+            href={getRecordingUrl(callSid)}
+            download={`recording-${callSid}.wav`}
+            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Download
+          </a>
+        </div>
       </CardHeader>
       <CardContent className="space-y-3">
         <audio
