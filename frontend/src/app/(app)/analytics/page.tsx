@@ -11,6 +11,7 @@ import {
   TrendingUp,
   Clock,
   Users,
+  Check,
   CheckCircle2,
   XCircle,
   Bell,
@@ -88,7 +89,7 @@ import {
 } from "@/hooks/use-analytics";
 import { useCallLogs } from "@/hooks/use-calls";
 import { formatDuration, timeAgo } from "@/lib/utils";
-import { acknowledgeAlert, snoozeAlert } from "@/lib/api";
+import { acknowledgeAlert, acknowledgeAllAlerts, snoozeAlert } from "@/lib/api";
 import { toast } from "sonner";
 import type { TrendPoint } from "@/types/api";
 
@@ -376,6 +377,16 @@ export default function AnalyticsPage() {
       toast.success("Alert acknowledged");
     } catch {
       toast.error("Failed to acknowledge alert");
+    }
+  };
+
+  const handleAcknowledgeAll = async () => {
+    if (!effectiveBotId) return;
+    try {
+      const res = await acknowledgeAllAlerts(effectiveBotId, "dashboard_user");
+      toast.success(`${res.count} alerts acknowledged`);
+    } catch {
+      toast.error("Failed to acknowledge alerts");
     }
   };
 
@@ -1099,6 +1110,34 @@ export default function AnalyticsPage() {
             {/* TAB 3: Objections */}
             {/* ============================================================ */}
             <TabsContent value="objections" className="space-y-6">
+              {/* Unacknowledged alerts banner */}
+              {alerts && alerts.total_unacknowledged > 0 && (
+                <Card className="border-amber-500/30 bg-amber-500/5">
+                  <CardContent className="flex items-center justify-between py-4">
+                    <div className="flex items-center gap-3">
+                      <AlertTriangle className="h-5 w-5 text-amber-500" />
+                      <div>
+                        <p className="text-sm font-medium">
+                          {alerts.total_unacknowledged} unacknowledged red flag alert{alerts.total_unacknowledged !== 1 ? "s" : ""}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Circuit breaker may pause calls when alerts exceed threshold
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleAcknowledgeAll}
+                      className="border-amber-500/30 hover:bg-amber-500/10"
+                    >
+                      <Check className="h-4 w-4 mr-1.5" />
+                      Acknowledge All
+                    </Button>
+                  </CardContent>
+                </Card>
+              )}
+
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Top Objections bar chart */}
                 <Card>

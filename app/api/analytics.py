@@ -903,13 +903,19 @@ async def get_analytics_summary(
     org_id: uuid.UUID = Depends(get_current_org),
 ):
     """Goal completion rates, outcome breakdown, avg duration, red flag rate."""
-    query = select(CallAnalytics).where(CallAnalytics.bot_id == bot_id, CallAnalytics.org_id == org_id)
+    query = (
+        select(CallAnalytics)
+        .join(CallLog, CallAnalytics.call_log_id == CallLog.id, isouter=True)
+        .where(CallAnalytics.bot_id == bot_id, CallAnalytics.org_id == org_id)
+    )
     if start_date:
-        query = query.where(CallAnalytics.created_at >= start_date)
+        query = query.where(
+            func.coalesce(CallLog.created_at, CallAnalytics.created_at) >= start_date
+        )
     if end_date:
-        # end_date is a date string like "2026-03-15" parsed as midnight;
-        # add 1 day to include the full end day
-        query = query.where(CallAnalytics.created_at < end_date + timedelta(days=1))
+        query = query.where(
+            func.coalesce(CallLog.created_at, CallAnalytics.created_at) < end_date + timedelta(days=1)
+        )
 
     result = await db.execute(query)
     rows = result.scalars().all()
@@ -980,17 +986,25 @@ async def get_analytics_outcomes(
     org_id: uuid.UUID = Depends(get_current_org),
 ):
     """Paginated list of calls with goal outcomes."""
-    query = select(CallAnalytics).where(CallAnalytics.bot_id == bot_id, CallAnalytics.org_id == org_id)
+    query = (
+        select(CallAnalytics)
+        .join(CallLog, CallAnalytics.call_log_id == CallLog.id, isouter=True)
+        .where(CallAnalytics.bot_id == bot_id, CallAnalytics.org_id == org_id)
+    )
     if outcome:
         query = query.where(CallAnalytics.goal_outcome == outcome)
     if has_red_flags is not None:
         query = query.where(CallAnalytics.has_red_flags == has_red_flags)
     if start_date:
-        query = query.where(CallAnalytics.created_at >= start_date)
+        query = query.where(
+            func.coalesce(CallLog.created_at, CallAnalytics.created_at) >= start_date
+        )
     if end_date:
-        query = query.where(CallAnalytics.created_at < end_date + timedelta(days=1))
+        query = query.where(
+            func.coalesce(CallLog.created_at, CallAnalytics.created_at) < end_date + timedelta(days=1)
+        )
 
-    query = query.order_by(CallAnalytics.created_at.desc())
+    query = query.order_by(func.coalesce(CallLog.created_at, CallAnalytics.created_at).desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
 
     result = await db.execute(query)
@@ -1008,19 +1022,27 @@ async def get_analytics_red_flags(
     org_id: uuid.UUID = Depends(get_current_org),
 ):
     """Red flags grouped by severity with evidence quotes."""
-    query = select(CallAnalytics).where(
-        CallAnalytics.bot_id == bot_id,
-        CallAnalytics.org_id == org_id,
-        CallAnalytics.has_red_flags == True,
+    query = (
+        select(CallAnalytics)
+        .join(CallLog, CallAnalytics.call_log_id == CallLog.id, isouter=True)
+        .where(
+            CallAnalytics.bot_id == bot_id,
+            CallAnalytics.org_id == org_id,
+            CallAnalytics.has_red_flags == True,
+        )
     )
     if severity:
         query = query.where(CallAnalytics.red_flag_max_severity == severity)
     if start_date:
-        query = query.where(CallAnalytics.created_at >= start_date)
+        query = query.where(
+            func.coalesce(CallLog.created_at, CallAnalytics.created_at) >= start_date
+        )
     if end_date:
-        query = query.where(CallAnalytics.created_at < end_date + timedelta(days=1))
+        query = query.where(
+            func.coalesce(CallLog.created_at, CallAnalytics.created_at) < end_date + timedelta(days=1)
+        )
 
-    query = query.order_by(CallAnalytics.created_at.desc()).limit(500)
+    query = query.order_by(func.coalesce(CallLog.created_at, CallAnalytics.created_at).desc()).limit(500)
     result = await db.execute(query)
     rows = result.scalars().all()
 
@@ -1150,6 +1172,32 @@ async def acknowledge_alert(
     return {"status": "acknowledged", "id": str(analytics_id)}
 
 
+@router.post("/{bot_id}/alerts/acknowledge-all")
+async def acknowledge_all_alerts(
+    bot_id: uuid.UUID,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
+    """Bulk-acknowledge all unacknowledged red flag alerts for a bot."""
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        update(CallAnalytics)
+        .where(
+            CallAnalytics.bot_id == bot_id,
+            CallAnalytics.org_id == org_id,
+            CallAnalytics.has_red_flags == True,
+            CallAnalytics.acknowledged_at.is_(None),
+        )
+        .values(
+            acknowledged_at=now,
+            acknowledged_by=body.get("acknowledged_by", "unknown"),
+        )
+    )
+    await db.commit()
+    return {"status": "acknowledged", "count": result.rowcount}
+
+
 @router.post("/{bot_id}/alerts/{analytics_id}/snooze")
 async def snooze_alert(
     bot_id: uuid.UUID,
@@ -1195,10 +1243,11 @@ async def get_analytics_trends(
     org_id: uuid.UUID = Depends(get_current_org),
 ):
     """Time-series: daily/weekly goal completion rate and red flag rate."""
+    call_date = func.coalesce(CallLog.created_at, CallAnalytics.created_at)
     if interval == "daily":
-        date_trunc = func.date_trunc("day", CallAnalytics.created_at)
+        date_trunc = func.date_trunc("day", call_date)
     else:
-        date_trunc = func.date_trunc("week", CallAnalytics.created_at)
+        date_trunc = func.date_trunc("week", call_date)
 
     query = (
         select(
@@ -1207,14 +1256,15 @@ async def get_analytics_trends(
             func.count().label("cnt"),
             func.sum(case((CallAnalytics.has_red_flags == True, 1), else_=0)).label("rf_cnt"),
         )
+        .join(CallLog, CallAnalytics.call_log_id == CallLog.id, isouter=True)
         .where(CallAnalytics.bot_id == bot_id, CallAnalytics.org_id == org_id)
         .group_by("period", CallAnalytics.goal_outcome)
         .order_by("period")
     )
     if start_date:
-        query = query.where(CallAnalytics.created_at >= start_date)
+        query = query.where(call_date >= start_date)
     if end_date:
-        query = query.where(CallAnalytics.created_at < end_date + timedelta(days=1))
+        query = query.where(call_date < end_date + timedelta(days=1))
 
     result = await db.execute(query)
     rows = result.all()
@@ -1243,6 +1293,7 @@ async def get_captured_data_summary(
     """Aggregated captured data per field. Enum fields: exact counts. String fields: raw values."""
     query = (
         select(CallAnalytics.captured_data, CallAnalytics.call_log_id)
+        .join(CallLog, CallAnalytics.call_log_id == CallLog.id, isouter=True)
         .where(
             CallAnalytics.bot_id == bot_id,
             CallAnalytics.org_id == org_id,
@@ -1250,9 +1301,13 @@ async def get_captured_data_summary(
         )
     )
     if start_date:
-        query = query.where(CallAnalytics.created_at >= start_date)
+        query = query.where(
+            func.coalesce(CallLog.created_at, CallAnalytics.created_at) >= start_date
+        )
     if end_date:
-        query = query.where(CallAnalytics.created_at < end_date + timedelta(days=1))
+        query = query.where(
+            func.coalesce(CallLog.created_at, CallAnalytics.created_at) < end_date + timedelta(days=1)
+        )
     query = query.limit(1000)
 
     result = await db.execute(query)

@@ -260,6 +260,16 @@ export function acknowledgeAlert(
   });
 }
 
+export function acknowledgeAllAlerts(
+  botId: string,
+  acknowledgedBy: string
+): Promise<{ status: string; count: number }> {
+  return apiFetch(`/api/analytics/${botId}/alerts/acknowledge-all`, {
+    method: "POST",
+    body: JSON.stringify({ acknowledged_by: acknowledgedBy }),
+  });
+}
+
 export function snoozeAlert(
   botId: string,
   analyticsId: string,
