@@ -35,6 +35,7 @@ export interface BotConfig {
   ghl_workflows: GHLWorkflow[];
   max_call_duration: number;
   telephony_provider: "plivo" | "twilio";
+  phone_number_id: string | null;
   plivo_caller_id: string;
   twilio_phone_number: string | null;
   goal_config: GoalConfig | null;
@@ -78,6 +79,7 @@ export interface CreateBotConfigRequest {
   twilio_account_sid?: string | null;
   twilio_auth_token?: string | null;
   twilio_phone_number?: string | null;
+  phone_number_id?: string | null;
   circuit_breaker_enabled?: boolean;
   circuit_breaker_threshold?: number;
   goal_config?: GoalConfig | null;
@@ -116,6 +118,7 @@ export interface UpdateBotConfigRequest {
   twilio_account_sid?: string | null;
   twilio_auth_token?: string | null;
   twilio_phone_number?: string | null;
+  phone_number_id?: string | null;
   goal_config?: GoalConfig | null;
   circuit_breaker_enabled?: boolean | null;
   circuit_breaker_threshold?: number | null;

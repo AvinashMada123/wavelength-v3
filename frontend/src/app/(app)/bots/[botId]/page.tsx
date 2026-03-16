@@ -51,6 +51,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 import { useAuth } from "@/contexts/auth-context";
 import { useBot, useCreateBot, useUpdateBot } from "@/hooks/use-bots";
+import { usePhoneNumbers } from "@/hooks/use-settings";
 import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, ELEVENLABS_VOICE_GROUPS, SARVAM_LANGUAGE_OPTIONS, DEEPGRAM_LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS_CLIENT, LLM_PROVIDER_OPTIONS, LLM_MODEL_OPTIONS } from "@/lib/constants";
 import type { BotConfig, GHLWorkflow, GoalConfig, SuccessCriterion, RedFlagConfig, DataCaptureField } from "@/types/api";
 
@@ -83,6 +84,7 @@ interface BotForm {
   ghl_workflows: GHLWorkflow[];
   max_call_duration: number;
   telephony_provider: "plivo" | "twilio";
+  phone_number_id: string | null;
   plivo_caller_id: string;
   twilio_phone_number: string;
   circuit_breaker_enabled: boolean;
@@ -114,6 +116,7 @@ const EMPTY_FORM: BotForm = {
   ghl_workflows: [],
   max_call_duration: 480,
   telephony_provider: "plivo",
+  phone_number_id: null,
   plivo_caller_id: "",
   twilio_phone_number: "",
   circuit_breaker_enabled: true,
@@ -186,6 +189,7 @@ function botToForm(bot: BotConfig): BotForm {
     ghl_workflows: bot.ghl_workflows || [],
     max_call_duration: bot.max_call_duration ?? 480,
     telephony_provider: bot.telephony_provider || "plivo",
+    phone_number_id: bot.phone_number_id || null,
     plivo_caller_id: bot.plivo_caller_id,
     twilio_phone_number: bot.twilio_phone_number || "",
     circuit_breaker_enabled: bot.circuit_breaker_enabled ?? true,
@@ -339,6 +343,7 @@ export default function BotEditorPage() {
   const { data: botData, isLoading: botLoading, isError: botError } = useBot(botId);
   const createBotMutation = useCreateBot();
   const updateBotMutation = useUpdateBot();
+  const { data: phoneNumbers } = usePhoneNumbers();
   const saving = createBotMutation.isPending || updateBotMutation.isPending;
 
   const [form, setForm] = useState<BotForm>(EMPTY_FORM);
@@ -1225,9 +1230,10 @@ export default function BotEditorPage() {
                               <button
                                 key={p}
                                 type="button"
-                                onClick={() =>
-                                  setField("telephony_provider", p)
-                                }
+                                onClick={() => {
+                                  setField("telephony_provider", p);
+                                  setField("phone_number_id", null);
+                                }}
                                 className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
                                   form.telephony_provider === p
                                     ? "bg-primary text-primary-foreground"
@@ -1240,13 +1246,44 @@ export default function BotEditorPage() {
                           </div>
                         </div>
 
+                      </Section>
+
+                      <Section
+                        title="Phone Number"
+                        description="Select which phone number this bot uses for outbound calls."
+                      >
+                        <Select
+                          value={form.phone_number_id || "default"}
+                          onValueChange={(v) =>
+                            setField("phone_number_id", v === "default" ? null : v)
+                          }
+                        >
+                          <SelectTrigger className="w-full max-w-md">
+                            <SelectValue placeholder="Use default number" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="default">
+                              Use default for provider
+                            </SelectItem>
+                            {(phoneNumbers || [])
+                              .filter((pn) => pn.provider === form.telephony_provider)
+                              .map((pn) => (
+                                <SelectItem key={pn.id} value={pn.id}>
+                                  {pn.phone_number}
+                                  {pn.label ? ` — ${pn.label}` : ""}
+                                  {pn.is_default ? " (default)" : ""}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+
                         <div className="rounded-lg border border-border/50 bg-muted/30 p-3">
                           <p className="text-xs text-muted-foreground">
-                            Telephony credentials and phone numbers are configured at the account level in{" "}
+                            Phone numbers and telephony credentials are managed in{" "}
                             <a href="/settings" className="text-violet-400 hover:underline">
                               Settings
                             </a>
-                            . The bot will use the default phone number for the selected provider.
+                            .
                           </p>
                         </div>
                       </Section>
