@@ -23,11 +23,11 @@ export const CALL_STATUS_CONFIG: Record<
 > = {
   initiated: { variant: "outline", icon: Clock, color: "text-muted-foreground" },
   ringing: { variant: "outline", icon: PhoneCall, color: "text-blue-400" },
-  "in-progress": { variant: "default", icon: Activity, color: "text-green-400" },
+  in_progress: { variant: "default", icon: Activity, color: "text-green-400" },
   completed: { variant: "secondary", icon: CheckCircle2, color: "text-emerald-400" },
   failed: { variant: "destructive", icon: XCircle, color: "text-red-400" },
   error: { variant: "destructive", icon: XCircle, color: "text-red-400" },
-  "no-answer": { variant: "secondary", icon: Phone, color: "text-amber-400" },
+  no_answer: { variant: "secondary", icon: Phone, color: "text-amber-400" },
   busy: { variant: "secondary", icon: Phone, color: "text-amber-400" },
   voicemail: { variant: "secondary", icon: Phone, color: "text-amber-400" },
 };
