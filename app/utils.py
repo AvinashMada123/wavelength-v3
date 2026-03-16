@@ -18,12 +18,27 @@ def normalize_phone(phone: str) -> str:
       - 009609775259  → +919609775259  (00 prefix, remaining 10 digits → Indian)
       - 13177127687   → +13177127687   (11+ digits → already has country code)
     """
+    raw = phone.strip()
+
+    # Detect US-formatted numbers — must have parens or separators:
+    #   (XXX) XXX-XXXX, XXX-XXX-XXXX, XXX.XXX.XXXX
+    # Bare 10-digit numbers without formatting default to Indian.
+    us_match = re.match(
+        r"^\(\d{3}\)[\s\-.]?\d{3}[\s\-.]?\d{4}$"   # (XXX) XXX-XXXX
+        r"|^\d{3}[\-.]\d{3}[\-.]?\d{4}$",            # XXX-XXX-XXXX or XXX.XXX.XXXX
+        raw,
+    )
+
     # Strip whitespace, dashes, parens, dots
-    phone = re.sub(r"[\s\-().]+", "", phone.strip())
+    phone = re.sub(r"[\s\-().]+", "", raw)
 
     # Already has + prefix → valid E.164, return as-is
     if phone.startswith("+"):
         return phone
+
+    # US-formatted number detected → prepend +1
+    if us_match and len(phone) == 10:
+        return f"+1{phone}"
 
     # Strip leading 00 (international dialing prefix)
     if phone.startswith("00"):
