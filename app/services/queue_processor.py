@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import structlog
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +38,8 @@ logger = structlog.get_logger(__name__)
 POLL_INTERVAL = float(os.environ.get("QUEUE_POLL_INTERVAL", "3"))
 MAX_CONCURRENT_PER_BOT = int(os.environ.get("QUEUE_MAX_CONCURRENT_PER_BOT", "5"))
 STAGGER_DELAY_SECS = float(os.environ.get("QUEUE_STAGGER_DELAY_SECS", "2.0"))
+# Calls stuck in "ringing" or "initiated" longer than this are marked stale
+STALE_CALL_TIMEOUT_MINS = int(os.environ.get("STALE_CALL_TIMEOUT_MINS", "5"))
 
 _task: asyncio.Task | None = None
 _shutdown = False
@@ -183,8 +185,29 @@ async def stop():
     logger.info("queue_processor_stopped")
 
 
+async def _cleanup_stale_calls():
+    """Mark calls stuck in 'ringing' or 'initiated' as 'no_answer' after timeout."""
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=STALE_CALL_TIMEOUT_MINS)
+    async with get_db_session() as db:
+        result = await db.execute(
+            update(CallLog)
+            .where(
+                CallLog.status.in_(["ringing", "initiated"]),
+                CallLog.created_at < cutoff,
+            )
+            .values(
+                status="no_answer",
+                ended_at=datetime.now(timezone.utc),
+            )
+        )
+        if result.rowcount > 0:
+            logger.info("stale_calls_cleaned", count=result.rowcount)
+        await db.commit()
+
+
 async def _processor_loop(loader: BotConfigLoader):
     """Main processing loop — polls DB for queued calls."""
+    cleanup_counter = 0
     while not _shutdown:
         try:
             await _process_batch(loader)
@@ -192,6 +215,15 @@ async def _processor_loop(loader: BotConfigLoader):
             break
         except Exception:
             logger.exception("queue_processor_error")
+
+        # Run stale call cleanup every ~30s (every 10 poll cycles)
+        cleanup_counter += 1
+        if cleanup_counter >= 10:
+            cleanup_counter = 0
+            try:
+                await _cleanup_stale_calls()
+            except Exception:
+                logger.exception("stale_call_cleanup_error")
 
         await asyncio.sleep(POLL_INTERVAL)
 
