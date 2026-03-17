@@ -317,7 +317,8 @@ export default function AnalyticsPage() {
   const trendChartData = useMemo(() => {
     return trends.map((t) => {
       const isHourly = t.date.includes("T");
-      const d = new Date(isHourly ? t.date : t.date + "T00:00:00");
+      // Backend returns UTC — append Z so browser converts to local time
+      const d = new Date(isHourly ? t.date + ":00Z" : t.date + "T00:00:00");
       const label = isHourly
         ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
         : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -1117,18 +1118,45 @@ export default function AnalyticsPage() {
                   </CardContent>
                 </Card>
 
-                {/* Score Distribution placeholder */}
+                {/* Avg Call Duration Over Time */}
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-base">
-                      Call Score Distribution
+                      Avg Call Duration Over Time
                     </CardTitle>
                     <CardDescription>
-                      Distribution of call quality scores
+                      Average call length per period
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <PlaceholderState message="Call scoring data will appear here once scoring is enabled for this bot" />
+                    {trendsLoading ? (
+                      <Skeleton className="h-64 w-full" />
+                    ) : trendChartData.length === 0 ? (
+                      <PlaceholderState message="Duration data will appear once calls are processed" />
+                    ) : (
+                      <ResponsiveContainer width="100%" height={260}>
+                        <BarChart data={outcomes.slice(0, 30).reduce((acc, o) => {
+                          if (!o.call_duration_secs) return acc;
+                          const d = new Date(o.created_at);
+                          const key = d.toLocaleTimeString("en-US", { hour: "numeric", hour12: true });
+                          const existing = acc.find(a => a.time === key);
+                          if (existing) {
+                            existing.total += o.call_duration_secs;
+                            existing.count += 1;
+                            existing.avg = Math.round(existing.total / existing.count);
+                          } else {
+                            acc.push({ time: key, total: o.call_duration_secs, count: 1, avg: o.call_duration_secs });
+                          }
+                          return acc;
+                        }, [] as Array<{ time: string; total: number; count: number; avg: number }>)}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                          <XAxis dataKey="time" tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
+                          <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} unit="s" />
+                          <Tooltip contentStyle={{ background: "#1a1a2e", border: "1px solid #333", borderRadius: 8 }} />
+                          <Bar dataKey="avg" name="Avg Duration (s)" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )}
                   </CardContent>
                 </Card>
               </div>
