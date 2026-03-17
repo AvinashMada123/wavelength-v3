@@ -278,12 +278,23 @@ export function DateRangePicker({
 // -- Utility: Convert DateRange to start/end strings for API calls --
 // Returns { start: string; end: string } with defaults if null
 
+/** Convert a local datetime string (YYYY-MM-DDTHH:MM) to UTC ISO string */
+function localToUTC(dateStr: string): string {
+  if (dateStr.includes("T")) {
+    // Has time component — convert local time to UTC
+    const d = new Date(dateStr);
+    return d.toISOString().slice(0, 19); // YYYY-MM-DDTHH:MM:SS
+  }
+  // Date-only — return as-is (backend handles date-only as full day)
+  return dateStr;
+}
+
 export function getDateRangeValues(
   range: DateRange,
   defaultDays: number = 30
 ): { start: string; end: string } {
-  const end = range.to || toISODate(new Date());
-  let start = range.from;
+  const end = range.to ? localToUTC(range.to) : toISODate(new Date());
+  let start = range.from ? localToUTC(range.from) : null;
   if (!start) {
     const d = new Date();
     d.setDate(d.getDate() - defaultDays);
