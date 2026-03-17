@@ -14,7 +14,8 @@ from datetime import datetime, timezone
 import structlog
 from fastapi import APIRouter, Depends, Request, WebSocket
 from fastapi.responses import Response
-from sqlalchemy import select, update
+from sqlalchemy import cast, func, select, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot_config.loader import BotConfigLoader
@@ -83,13 +84,15 @@ async def _update_call_status(
         values["started_at"] = started_at
     if ended_at is not None:
         values["ended_at"] = ended_at
-    if metadata is not None:
-        values["metadata_"] = metadata
-
-    if not values:
+    if not values and metadata is None:
         return
 
     async with get_db_session() as db:
+        if metadata is not None:
+            # Merge metadata instead of replacing — prevents race conditions
+            # between recording callback and post-call handler
+            existing = func.coalesce(CallLog.metadata_, cast({}, JSONB))
+            values["metadata_"] = existing.op("||")(cast(metadata, JSONB))
         await db.execute(update(CallLog).where(CallLog.call_sid == call_sid).values(**values))
         await db.commit()
 
@@ -707,19 +710,14 @@ async def plivo_recording_callback(call_sid: str, request: Request):
         logger.warning("plivo_recording_callback_no_url", call_sid=call_sid)
         return {"status": "ok"}
 
-    # Race-safe merge: read existing metadata, merge recording fields
-    async with get_db_session() as db:
-        call_log = await _get_call_log(db, call_sid)
-
-    existing_meta = dict(call_log.metadata_) if call_log and call_log.metadata_ else {}
-    existing_meta["recording_url"] = record_url
-    existing_meta["recording_id"] = recording_id
+    # Merge recording fields into metadata (race-safe via jsonb merge in _update_call_status)
+    recording_meta: dict = {"recording_url": record_url, "recording_id": recording_id}
     if recording_duration_ms:
-        existing_meta["recording_duration_ms"] = int(recording_duration_ms)
+        recording_meta["recording_duration_ms"] = int(recording_duration_ms)
     elif recording_duration:
-        existing_meta["recording_duration_ms"] = int(float(recording_duration) * 1000)
+        recording_meta["recording_duration_ms"] = int(float(recording_duration) * 1000)
 
-    await _update_call_status(call_sid, metadata=existing_meta)
+    await _update_call_status(call_sid, metadata=recording_meta)
     logger.info("plivo_recording_saved", call_sid=call_sid, recording_id=recording_id)
 
     return {"status": "ok"}
