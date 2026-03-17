@@ -404,6 +404,10 @@ export function fetchLead(id: string): Promise<Lead> {
   return apiFetch(`/api/leads/${id}`);
 }
 
+export function fetchLeadCalls(leadId: string): Promise<CallLog[]> {
+  return apiFetch(`/api/leads/${leadId}/calls`);
+}
+
 export function deleteLead(id: string): Promise<void> {
   return apiFetch(`/api/leads/${id}`, { method: "DELETE" });
 }

@@ -35,6 +35,7 @@ from app.pipeline.runner import (
 )
 from app.services.billing import bill_completed_call
 from app.services.call_analyzer import CallAnalyzer
+from app.services.lead_sync import update_lead_after_call
 from app.plivo.xml_responses import build_hangup_xml, build_stream_xml
 
 logger = structlog.get_logger(__name__)
@@ -593,6 +594,27 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
             call_sid, status="completed", outcome="completed", summary=summary, metadata=existing_meta
         )
         logger.info("post_call_metadata_saved", call_sid=call_sid, turns=turn_count)
+
+        # Update lead with call results
+        try:
+            async with get_db_session() as lead_db:
+                qualification = None
+                if analysis and analysis.lead_temperature:
+                    qualification = analysis.lead_temperature
+                elif analysis and analysis.interest_level:
+                    qualification = analysis.interest_level
+
+                await update_lead_after_call(
+                    lead_db,
+                    org_id=bot_config.org_id,
+                    contact_phone=existing_log.contact_phone if existing_log else "",
+                    summary=summary,
+                    qualification_level=qualification,
+                    call_log_id=existing_log.id if existing_log else None,
+                )
+                await lead_db.commit()
+        except Exception as e:
+            logger.error("post_call_lead_update_failed", call_sid=call_sid, error=str(e))
 
         # Write to call_analytics table for any analyzed call
         if analysis:

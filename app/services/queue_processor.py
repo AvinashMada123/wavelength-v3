@@ -19,6 +19,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot_config.loader import BotConfigLoader, fill_prompt_template
+from app.services.call_memory import build_call_memory_prompt
+from app.services.lead_sync import find_or_create_lead
 from app.config import settings
 from app.database import get_db_session
 from app.models.call_log import CallLog
@@ -422,6 +424,50 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
                 bot_config.system_prompt_template, **template_vars
             )
 
+            # Inject call memory if enabled for this bot
+            if getattr(bot_config, "call_memory_enabled", False):
+                memory_count = getattr(bot_config, "call_memory_count", 3)
+                try:
+                    memory_section = await build_call_memory_prompt(
+                        db,
+                        org_id=bot_config.org_id,
+                        contact_phone=queued_call.contact_phone,
+                        max_calls=memory_count,
+                    )
+                    if memory_section:
+                        filled_prompt = filled_prompt + "\n" + memory_section
+                        logger.info(
+                            "call_memory_injected",
+                            queue_id=str(queue_id),
+                            phone=queued_call.contact_phone,
+                        )
+                except Exception as e:
+                    logger.error(
+                        "call_memory_failed",
+                        queue_id=str(queue_id),
+                        error=str(e),
+                    )
+                    # Non-fatal — proceed without memory
+
+            # Auto-create or find lead for this contact
+            lead_id = None
+            try:
+                lead = await find_or_create_lead(
+                    db,
+                    org_id=bot_config.org_id,
+                    phone_number=queued_call.contact_phone,
+                    contact_name=queued_call.contact_name,
+                    ghl_contact_id=queued_call.ghl_contact_id,
+                )
+                lead_id = lead.id
+            except Exception as e:
+                logger.error(
+                    "lead_auto_create_failed",
+                    queue_id=str(queue_id),
+                    error=str(e),
+                )
+                # Non-fatal — proceed without lead linkage
+
             # Create call log
             call_sid = str(uuid4())
             call_log = CallLog(
@@ -431,6 +477,7 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
                 contact_name=queued_call.contact_name,
                 contact_phone=queued_call.contact_phone,
                 ghl_contact_id=queued_call.ghl_contact_id,
+                lead_id=lead_id,
                 status="initiated",
                 context_data={
                     "bot_id": str(bot_config.id),

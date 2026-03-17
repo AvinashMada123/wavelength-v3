@@ -1,12 +1,14 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchLeads, fetchLead, createLead, updateLead, deleteLead } from "@/lib/api";
+import { fetchLeads, fetchLead, createLead, updateLead, deleteLead, fetchLeadCalls } from "@/lib/api";
+import type { CallLog } from "@/types/api";
 
 export const leadKeys = {
   all: ["leads"] as const,
   list: (filters: Record<string, string | number | undefined>) => ["leads", "list", filters] as const,
   detail: (id: string) => ["leads", id] as const,
+  calls: (id: string) => ["leads", id, "calls"] as const,
 };
 
 export function useLeads(params?: {
@@ -26,6 +28,14 @@ export function useLead(id: string) {
     queryKey: leadKeys.detail(id),
     queryFn: () => fetchLead(id),
     enabled: !!id,
+  });
+}
+
+export function useLeadCalls(leadId: string) {
+  return useQuery<CallLog[]>({
+    queryKey: leadKeys.calls(leadId),
+    queryFn: () => fetchLeadCalls(leadId),
+    enabled: !!leadId,
   });
 }
 

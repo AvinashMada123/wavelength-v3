@@ -57,6 +57,8 @@ class BotConfig(Base):
     )
     circuit_breaker_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     circuit_breaker_threshold: Mapped[int] = mapped_column(Integer, nullable=False, server_default="3")
+    call_memory_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    call_memory_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="3")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")

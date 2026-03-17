@@ -14,7 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_org, get_current_user
 from app.database import get_db
+from app.models.call_log import CallLog
 from app.models.lead import Lead
+from app.models.schemas import CallLogListResponse
 from app.models.user import User
 
 logger = structlog.get_logger(__name__)
@@ -238,6 +240,34 @@ async def delete_lead(
     await db.commit()
 
     logger.info("lead_deleted", lead_id=str(lead_id), org_id=str(org_id))
+
+
+@router.get("/{lead_id}/calls", response_model=list[CallLogListResponse])
+async def get_lead_calls(
+    lead_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all calls associated with a lead, newest first."""
+    # Verify lead exists and belongs to org
+    result = await db.execute(
+        select(Lead).where(Lead.id == lead_id, Lead.org_id == org_id)
+    )
+    lead = result.scalar_one_or_none()
+    if lead is None:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    # Fetch calls matching this lead's phone number within the org
+    result = await db.execute(
+        select(CallLog)
+        .where(
+            CallLog.org_id == org_id,
+            CallLog.contact_phone == lead.phone_number,
+        )
+        .order_by(CallLog.created_at.desc())
+    )
+    calls = result.scalars().all()
+    return calls
 
 
 @router.post("/import", response_model=BulkImportResponse)

@@ -32,8 +32,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
-import { useLead } from "@/hooks/use-leads";
-import { useCallLogs } from "@/hooks/use-calls";
+import { useLead, useLeadCalls } from "@/hooks/use-leads";
 import { formatDuration, formatDate } from "@/lib/utils";
 import type { CallLog } from "@/types/api";
 
@@ -156,19 +155,8 @@ export default function LeadDetailPage() {
 
   const { data: lead, isLoading, error } = useLead(leadId);
 
-  // Fetch all call logs — we'll filter client-side by phone number
-  const { data: allCalls, isLoading: callsLoading } = useCallLogs();
-
-  // Filter calls matching this lead's phone number
-  const leadCalls: CallLog[] =
-    lead && allCalls
-      ? allCalls.filter(
-          (call) => call.contact_phone === lead.phone_number
-        ).sort(
-          (a, b) =>
-            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        )
-      : [];
+  // Fetch calls for this lead via dedicated API endpoint
+  const { data: leadCalls = [], isLoading: callsLoading } = useLeadCalls(leadId);
 
   if (isLoading) {
     return (
