@@ -170,7 +170,7 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
                 content = parts[0].text if parts and hasattr(parts[0], "text") else ""
                 if role == "model":
                     role = "assistant"
-            if role in ("user", "assistant") and not content.startswith("[SYSTEM:"):
+            if role in ("user", "assistant") and content and not content.startswith("[SYSTEM:"):
                 return {"role": role, "content": content}
             return None
 
