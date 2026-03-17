@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
@@ -90,7 +90,7 @@ import {
 } from "@/hooks/use-analytics";
 import { useCallLogs } from "@/hooks/use-calls";
 import { formatDuration, timeAgo } from "@/lib/utils";
-import { acknowledgeAlert, acknowledgeAllAlerts, snoozeAlert } from "@/lib/api";
+import { acknowledgeAlert, acknowledgeAllAlerts, snoozeAlert, fetchCallDetail } from "@/lib/api";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -259,6 +259,23 @@ export default function AnalyticsPage() {
   } | null>(null);
 
   const [selectedAlert, setSelectedAlert] = useState<AlertItem | null>(null);
+  const [selectedCallDetail, setSelectedCallDetail] = useState<{
+    call_sid: string;
+    transcript: Array<{ role: string; content: string }>;
+  } | null>(null);
+
+  // Fetch call detail when alert modal opens
+  useEffect(() => {
+    if (selectedAlert?.call_log_id) {
+      setSelectedCallDetail(null);
+      fetchCallDetail(selectedAlert.call_log_id).then((call) => {
+        setSelectedCallDetail({
+          call_sid: call.call_sid,
+          transcript: call.metadata?.transcript || [],
+        });
+      }).catch(() => {});
+    }
+  }, [selectedAlert?.call_log_id]);
 
   const selectedBot = useMemo(
     () => bots.find((b) => b.id === effectiveBotId),
@@ -1608,15 +1625,47 @@ export default function AnalyticsPage() {
                 </div>
 
                 {/* Recording */}
-                {selectedAlert.call_log_id && (
+                {selectedCallDetail?.call_sid && (
                   <div className="space-y-2">
                     <h4 className="text-sm font-medium text-muted-foreground">Recording</h4>
                     <audio
                       controls
-                      src={getRecordingUrl(selectedAlert.call_log_id)}
+                      src={getRecordingUrl(selectedCallDetail.call_sid)}
                       className="w-full"
                       preload="metadata"
                     />
+                  </div>
+                )}
+
+                {/* Transcript */}
+                {selectedCallDetail?.transcript && selectedCallDetail.transcript.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-muted-foreground">
+                      Transcript ({selectedCallDetail.transcript.length} turns)
+                    </h4>
+                    <div className="max-h-60 overflow-y-auto space-y-2 rounded-md border border-border/50 p-3">
+                      {selectedCallDetail.transcript.map((t, i) => (
+                        <div
+                          key={i}
+                          className={`text-sm ${
+                            t.role === "assistant"
+                              ? "text-violet-400"
+                              : "text-foreground"
+                          }`}
+                        >
+                          <span className="text-[10px] text-muted-foreground uppercase mr-1.5">
+                            {t.role === "assistant" ? "Bot" : "User"}
+                          </span>
+                          {t.content}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {selectedAlert.call_log_id && !selectedCallDetail && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-violet-500 border-t-transparent" />
+                    Loading call details...
                   </div>
                 )}
 
