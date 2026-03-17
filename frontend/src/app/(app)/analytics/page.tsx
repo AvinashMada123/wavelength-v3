@@ -1332,6 +1332,61 @@ export default function AnalyticsPage() {
                   )}
                 </CardContent>
               </Card>
+
+              {/* Flagged Calls List */}
+              {alerts && alerts.alerts.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">
+                      Flagged Calls
+                    </CardTitle>
+                    <CardDescription>
+                      Calls with red flag detections — click to review
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {alerts.alerts.slice(0, 50).map((alert) => (
+                        <div
+                          key={alert.id}
+                          className="flex items-center justify-between p-3 rounded-lg border border-border/50 hover:bg-muted/30 cursor-pointer transition-colors"
+                          onClick={() => alert.call_log_id && router.push(`/calls/${alert.call_log_id}`)}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <AlertTriangle className={`h-4 w-4 shrink-0 ${
+                              alert.red_flag_max_severity === "critical" ? "text-red-500" :
+                              alert.red_flag_max_severity === "high" ? "text-orange-500" :
+                              "text-amber-500"
+                            }`} />
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium truncate">
+                                {alert.contact_name || "Unknown"} {alert.contact_phone ? `· ${alert.contact_phone}` : ""}
+                              </p>
+                              <div className="flex flex-wrap gap-1.5 mt-1">
+                                {(alert.red_flags || []).map((rf, i) => (
+                                  <span
+                                    key={i}
+                                    className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                      rf.severity === "high" || rf.severity === "critical"
+                                        ? "bg-orange-500/10 text-orange-400"
+                                        : "bg-amber-500/10 text-amber-400"
+                                    }`}
+                                  >
+                                    {rf.id.replace(/_/g, " ")}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                          <span className="text-[10px] text-muted-foreground shrink-0 ml-2">
+                            {new Date(alert.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </TabsContent>
 
             {/* ============================================================ */}
