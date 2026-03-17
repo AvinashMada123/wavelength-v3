@@ -94,6 +94,7 @@ class TrendPoint(BaseModel):
     total: int
     outcomes: dict[str, int]
     red_flag_count: int
+    avg_word_share: float | None = None
 
 
 class CapturedDataFieldSummary(BaseModel):
@@ -1263,6 +1264,7 @@ async def get_analytics_trends(
             CallAnalytics.goal_outcome,
             func.count().label("cnt"),
             func.sum(case((CallAnalytics.has_red_flags == True, 1), else_=0)).label("rf_cnt"),
+            func.avg(CallAnalytics.agent_word_share).label("avg_ws"),
         )
         .join(CallLog, CallAnalytics.call_log_id == CallLog.id, isouter=True)
         .where(CallAnalytics.bot_id == bot_id, CallAnalytics.org_id == org_id)
@@ -1283,10 +1285,21 @@ async def get_analytics_trends(
     for row in rows:
         period_key = row.period.strftime(fmt)
         if period_key not in periods:
-            periods[period_key] = {"date": period_key, "total": 0, "outcomes": {}, "red_flag_count": 0}
+            periods[period_key] = {
+                "date": period_key, "total": 0, "outcomes": {},
+                "red_flag_count": 0, "_ws_sum": 0.0, "_ws_count": 0,
+            }
         periods[period_key]["total"] += row.cnt
         periods[period_key]["outcomes"][row.goal_outcome or "unknown"] = row.cnt
         periods[period_key]["red_flag_count"] += row.rf_cnt
+        if row.avg_ws is not None:
+            periods[period_key]["_ws_sum"] += float(row.avg_ws) * row.cnt
+            periods[period_key]["_ws_count"] += row.cnt
+
+    for v in periods.values():
+        ws_count = v.pop("_ws_count")
+        ws_sum = v.pop("_ws_sum")
+        v["avg_word_share"] = round(ws_sum / ws_count, 3) if ws_count else None
 
     return [TrendPoint(**v) for v in periods.values()]
 

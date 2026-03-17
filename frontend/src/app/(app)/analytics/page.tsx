@@ -325,6 +325,7 @@ export default function AnalyticsPage() {
         date: label,
         total: t.total,
         red_flags: t.red_flag_count,
+        avgWordShare: t.avg_word_share != null ? Math.round(t.avg_word_share * 100) : null,
         ...t.outcomes,
       };
     });
@@ -1081,17 +1082,7 @@ export default function AnalyticsPage() {
                       <PlaceholderState message="Analysis data will appear here once calls are processed" />
                     ) : (
                       <ResponsiveContainer width="100%" height={260}>
-                        <LineChart
-                          data={trendChartData.map((d, i) => ({
-                            ...d,
-                            avgWordShare:
-                              summary?.avg_agent_word_share != null
-                                ? Math.round(
-                                    summary.avg_agent_word_share * 100
-                                  )
-                                : null,
-                          }))}
-                        >
+                        <LineChart data={trendChartData}>
                           <CartesianGrid
                             strokeDasharray="3 3"
                             stroke="rgba(255,255,255,0.06)"

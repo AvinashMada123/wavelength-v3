@@ -285,6 +285,7 @@ export interface TrendPoint {
   total: number;
   outcomes: Record<string, number>;
   red_flag_count: number;
+  avg_word_share: number | null;
 }
 
 export interface CapturedDataFieldSummary {
