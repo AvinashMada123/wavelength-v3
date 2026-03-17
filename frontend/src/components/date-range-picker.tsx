@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 // -- Types --
 
 export interface DateRange {
-  from: string | null;
+  from: string | null; // YYYY-MM-DD or YYYY-MM-DDTHH:MM
   to: string | null;
 }
 
@@ -60,15 +60,32 @@ function getPresetRange(key: PresetKey): DateRange {
   return { from: toISODate(start), to: toISODate(end) };
 }
 
+/** Extract just the date part from a date or datetime string */
+function datePartOf(str: string): string {
+  return str.slice(0, 10);
+}
+
+/** Extract time part (HH:MM) or null */
+function timePartOf(str: string): string | null {
+  if (str.length > 10 && str[10] === "T") return str.slice(11, 16);
+  return null;
+}
+
 function formatDisplayDate(dateStr: string): string {
-  const d = new Date(dateStr + "T00:00:00");
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const datePart = datePartOf(dateStr);
+  const timePart = timePartOf(dateStr);
+  const d = new Date(datePart + "T00:00:00");
+  const dateLabel = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  if (timePart) return `${dateLabel} ${timePart}`;
+  return dateLabel;
 }
 
 function detectPreset(range: DateRange): PresetKey {
   if (!range.from || !range.to) return "custom";
+  // If time components are present, it's custom
+  if (timePartOf(range.from) || timePartOf(range.to)) return "custom";
   const today = toISODate(new Date());
-  if (range.to !== today) return "custom";
+  if (datePartOf(range.to) !== today) return "custom";
 
   for (const p of PRESETS) {
     if (p.key === "custom") continue;
@@ -84,12 +101,14 @@ interface DateRangePickerProps {
   value: DateRange;
   onChange: (range: DateRange) => void;
   className?: string;
+  enableTime?: boolean;
 }
 
 export function DateRangePicker({
   value,
   onChange,
   className,
+  enableTime = false,
 }: DateRangePickerProps) {
   const [open, setOpen] = useState(false);
   const activePreset = useMemo(() => detectPreset(value), [value]);
@@ -108,7 +127,7 @@ export function DateRangePicker({
 
   const handlePresetClick = useCallback(
     (key: PresetKey) => {
-      if (key === "custom") return; // just show custom inputs
+      if (key === "custom") return;
       const range = getPresetRange(key);
       onChange(range);
       setOpen(false);
@@ -116,21 +135,19 @@ export function DateRangePicker({
     [onChange]
   );
 
-  const handleCustomFromChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      onChange({ ...value, from: e.target.value || null });
-    },
-    [onChange, value]
-  );
-
-  const handleCustomToChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      onChange({ ...value, to: e.target.value || null });
-    },
-    [onChange, value]
-  );
-
   const [showCustom, setShowCustom] = useState(activePreset === "custom");
+
+  // Derived date/time parts for custom inputs
+  const fromDate = value.from ? datePartOf(value.from) : "";
+  const fromTime = value.from ? (timePartOf(value.from) || "") : "";
+  const toDate = value.to ? datePartOf(value.to) : "";
+  const toTime = value.to ? (timePartOf(value.to) || "") : "";
+
+  const buildValue = (date: string, time: string): string | null => {
+    if (!date) return null;
+    if (time) return `${date}T${time}`;
+    return date;
+  };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -148,7 +165,7 @@ export function DateRangePicker({
           {displayLabel}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-64 p-3">
+      <PopoverContent align="start" className="w-72 p-3">
         <div className="space-y-2">
           {/* Preset buttons */}
           <div className="grid grid-cols-2 gap-1.5">
@@ -193,26 +210,54 @@ export function DateRangePicker({
                 <label className="text-xs text-muted-foreground mb-1 block">
                   From
                 </label>
-                <input
-                  type="date"
-                  value={value.from || ""}
-                  onChange={handleCustomFromChange}
-                  max={value.to || toISODate(new Date())}
-                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-xs focus:outline-none focus:ring-2 focus:ring-ring/50"
-                />
+                <div className={cn("flex gap-1.5", enableTime ? "" : "")}>
+                  <input
+                    type="date"
+                    value={fromDate}
+                    onChange={(e) =>
+                      onChange({ ...value, from: buildValue(e.target.value, fromTime) })
+                    }
+                    max={toDate || toISODate(new Date())}
+                    className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-xs focus:outline-none focus:ring-2 focus:ring-ring/50"
+                  />
+                  {enableTime && (
+                    <input
+                      type="time"
+                      value={fromTime}
+                      onChange={(e) =>
+                        onChange({ ...value, from: buildValue(fromDate, e.target.value) })
+                      }
+                      className="w-[100px] rounded-md border border-input bg-background px-2 py-1.5 text-sm shadow-xs focus:outline-none focus:ring-2 focus:ring-ring/50"
+                    />
+                  )}
+                </div>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
                   To
                 </label>
-                <input
-                  type="date"
-                  value={value.to || ""}
-                  onChange={handleCustomToChange}
-                  min={value.from || undefined}
-                  max={toISODate(new Date())}
-                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-xs focus:outline-none focus:ring-2 focus:ring-ring/50"
-                />
+                <div className="flex gap-1.5">
+                  <input
+                    type="date"
+                    value={toDate}
+                    onChange={(e) =>
+                      onChange({ ...value, to: buildValue(e.target.value, toTime) })
+                    }
+                    min={fromDate || undefined}
+                    max={toISODate(new Date())}
+                    className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-xs focus:outline-none focus:ring-2 focus:ring-ring/50"
+                  />
+                  {enableTime && (
+                    <input
+                      type="time"
+                      value={toTime}
+                      onChange={(e) =>
+                        onChange({ ...value, to: buildValue(toDate, e.target.value) })
+                      }
+                      className="w-[100px] rounded-md border border-input bg-background px-2 py-1.5 text-sm shadow-xs focus:outline-none focus:ring-2 focus:ring-ring/50"
+                    />
+                  )}
+                </div>
               </div>
               <Button
                 size="sm"

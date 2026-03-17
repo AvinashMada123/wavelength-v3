@@ -223,24 +223,28 @@ export function fetchAnalyticsSummary(
 
 export function fetchAnalyticsOutcomes(
   botId: string,
-  params?: { outcome?: string; has_red_flags?: boolean; page?: number; page_size?: number }
+  params?: { outcome?: string; has_red_flags?: boolean; page?: number; page_size?: number; start_date?: string; end_date?: string }
 ): Promise<AnalyticsOutcomeItem[]> {
   const sp = new URLSearchParams();
   if (params?.outcome) sp.set("outcome", params.outcome);
   if (params?.has_red_flags !== undefined) sp.set("has_red_flags", String(params.has_red_flags));
   if (params?.page) sp.set("page", String(params.page));
   if (params?.page_size) sp.set("page_size", String(params.page_size));
+  if (params?.start_date) sp.set("start_date", params.start_date);
+  if (params?.end_date) sp.set("end_date", params.end_date);
   const qs = sp.toString();
   return apiFetch(`/api/analytics/${botId}/outcomes${qs ? `?${qs}` : ""}`);
 }
 
 export function fetchAnalyticsRedFlags(
   botId: string,
-  params?: { severity?: string; flag_id?: string }
+  params?: { severity?: string; flag_id?: string; start_date?: string; end_date?: string }
 ): Promise<RedFlagGroupItem[]> {
   const sp = new URLSearchParams();
   if (params?.severity) sp.set("severity", params.severity);
   if (params?.flag_id) sp.set("flag_id", params.flag_id);
+  if (params?.start_date) sp.set("start_date", params.start_date);
+  if (params?.end_date) sp.set("end_date", params.end_date);
   const qs = sp.toString();
   return apiFetch(`/api/analytics/${botId}/red-flags${qs ? `?${qs}` : ""}`);
 }
@@ -724,10 +728,14 @@ export interface CostBreakdown {
 export function fetchCostBreakdown(params?: {
   bot_id?: string;
   days?: number;
+  start_date?: string;
+  end_date?: string;
 }): Promise<CostBreakdown> {
   const sp = new URLSearchParams();
   if (params?.bot_id) sp.set("bot_id", params.bot_id);
   if (params?.days) sp.set("days", String(params.days));
+  if (params?.start_date) sp.set("start_date", params.start_date);
+  if (params?.end_date) sp.set("end_date", params.end_date);
   const qs = sp.toString();
   return apiFetch(`/api/analytics/cost-breakdown${qs ? `?${qs}` : ""}`);
 }
@@ -743,10 +751,14 @@ export interface LeadIntelligence {
 export function fetchLeadIntelligence(params?: {
   bot_id?: string;
   days?: number;
+  start_date?: string;
+  end_date?: string;
 }): Promise<LeadIntelligence> {
   const sp = new URLSearchParams();
   if (params?.bot_id) sp.set("bot_id", params.bot_id);
   if (params?.days) sp.set("days", String(params.days));
+  if (params?.start_date) sp.set("start_date", params.start_date);
+  if (params?.end_date) sp.set("end_date", params.end_date);
   const qs = sp.toString();
   return apiFetch(`/api/analytics/lead-intelligence${qs ? `?${qs}` : ""}`);
 }

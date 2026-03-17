@@ -18,6 +18,7 @@ import {
   BellOff,
   Eye,
   Database,
+  ExternalLink,
   ArrowRight,
   DollarSign,
   Thermometer,
@@ -91,7 +92,14 @@ import { useCallLogs } from "@/hooks/use-calls";
 import { formatDuration, timeAgo } from "@/lib/utils";
 import { acknowledgeAlert, acknowledgeAllAlerts, snoozeAlert } from "@/lib/api";
 import { toast } from "sonner";
-import type { TrendPoint } from "@/types/api";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { getRecordingUrl } from "@/lib/api";
+import type { TrendPoint, AlertItem } from "@/types/api";
 
 // -- Colors --
 const VIOLET = "#8b5cf6";
@@ -250,6 +258,8 @@ export default function AnalyticsPage() {
     callName: string;
   } | null>(null);
 
+  const [selectedAlert, setSelectedAlert] = useState<AlertItem | null>(null);
+
   const selectedBot = useMemo(
     () => bots.find((b) => b.id === effectiveBotId),
     [bots, effectiveBotId]
@@ -261,9 +271,9 @@ export default function AnalyticsPage() {
     { start_date: range.start, end_date: range.end }
   );
   const { data: outcomes = [], isLoading: outcomesLoading } =
-    useAnalyticsOutcomes(effectiveBotId, { page_size: 20 });
+    useAnalyticsOutcomes(effectiveBotId, { page_size: 20, start_date: range.start, end_date: range.end });
   const { data: redFlags = [], isLoading: redFlagsLoading } =
-    useAnalyticsRedFlags(effectiveBotId);
+    useAnalyticsRedFlags(effectiveBotId, { start_date: range.start, end_date: range.end });
   const { data: alerts } = useAnalyticsAlerts(effectiveBotId);
   const trendInterval = periodDays <= 2 ? "hourly" : "daily";
   const { data: trends = [], isLoading: trendsLoading } = useAnalyticsTrends(
@@ -275,11 +285,13 @@ export default function AnalyticsPage() {
   );
   const { data: costData } = useCostBreakdown({
     bot_id: effectiveBotId || undefined,
-    days: periodDays,
+    start_date: range.start,
+    end_date: range.end,
   });
   const { data: leadIntel } = useLeadIntelligence({
     bot_id: effectiveBotId || undefined,
-    days: periodDays,
+    start_date: range.start,
+    end_date: range.end,
   });
 
   const loading = botsLoading || summaryLoading;
@@ -467,7 +479,7 @@ export default function AnalyticsPage() {
                 ))}
               </SelectContent>
             </Select>
-            <DateRangePicker value={dateRange} onChange={setDateRange} />
+            <DateRangePicker value={dateRange} onChange={setDateRange} enableTime />
             <Button
               variant="outline"
               size="sm"
@@ -481,6 +493,8 @@ export default function AnalyticsPage() {
                   if (effectiveBotId) params.set("bot_id", effectiveBotId);
                   params.set("limit", "500");
                   params.set("force", "true");
+                  if (range.start) params.set("start_date", range.start);
+                  if (range.end) params.set("end_date", range.end);
 
                   const startRes = await fetch(`/api/analytics/reanalyze-start?${params}`, {
                     method: "POST",
@@ -1350,7 +1364,7 @@ export default function AnalyticsPage() {
                         <div
                           key={alert.id}
                           className="flex items-center justify-between p-3 rounded-lg border border-border/50 hover:bg-muted/30 cursor-pointer transition-colors"
-                          onClick={() => alert.call_log_id && router.push(`/calls/${alert.call_log_id}`)}
+                          onClick={() => setSelectedAlert(alert)}
                         >
                           <div className="flex items-center gap-3 min-w-0">
                             <AlertTriangle className={`h-4 w-4 shrink-0 ${
@@ -1553,6 +1567,92 @@ export default function AnalyticsPage() {
           </Tabs>
         </div>
       </PageTransition>
+
+      {/* Flagged Call Detail Modal */}
+      <Dialog open={!!selectedAlert} onOpenChange={(open) => !open && setSelectedAlert(null)}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          {selectedAlert && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <AlertTriangle className={`h-5 w-5 ${
+                    selectedAlert.red_flag_max_severity === "critical" ? "text-red-500" :
+                    selectedAlert.red_flag_max_severity === "high" ? "text-orange-500" :
+                    "text-amber-500"
+                  }`} />
+                  {selectedAlert.contact_name || "Unknown"} {selectedAlert.contact_phone ? `· ${selectedAlert.contact_phone}` : ""}
+                </DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-4">
+                {/* Red flags */}
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium text-muted-foreground">Red Flags</h4>
+                  <div className="space-y-1.5">
+                    {(selectedAlert.red_flags || []).map((rf, i) => (
+                      <div key={i} className="flex items-start gap-2 p-2 rounded-md bg-muted/30">
+                        <Badge className={`text-[10px] shrink-0 ${
+                          rf.severity === "high" || rf.severity === "critical"
+                            ? "bg-orange-500/10 text-orange-400 border-orange-500/20"
+                            : "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                        }`}>
+                          {rf.severity}
+                        </Badge>
+                        <div>
+                          <p className="text-sm font-medium capitalize">{rf.id.replace(/_/g, " ")}</p>
+                          {rf.evidence && <p className="text-xs text-muted-foreground mt-0.5">{rf.evidence}</p>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Recording */}
+                {selectedAlert.call_log_id && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-muted-foreground">Recording</h4>
+                    <audio
+                      controls
+                      src={getRecordingUrl(selectedAlert.call_log_id)}
+                      className="w-full"
+                      preload="metadata"
+                    />
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex gap-2 pt-2">
+                  {selectedAlert.call_log_id && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        router.push(`/calls/${selectedAlert.call_log_id}`);
+                        setSelectedAlert(null);
+                      }}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+                      Full Details
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      await handleAcknowledge(selectedAlert.id);
+                      queryClient.invalidateQueries({ queryKey: ["analytics", "alerts", effectiveBotId] });
+                      setSelectedAlert(null);
+                    }}
+                  >
+                    <Check className="h-3.5 w-3.5 mr-1.5" />
+                    Acknowledge
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

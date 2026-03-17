@@ -43,7 +43,7 @@ export function useAnalyticsSummary(
 
 export function useAnalyticsOutcomes(
   botId: string,
-  params?: { outcome?: string; has_red_flags?: boolean; page?: number; page_size?: number }
+  params?: { outcome?: string; has_red_flags?: boolean; page?: number; page_size?: number; start_date?: string; end_date?: string }
 ) {
   return useQuery({
     queryKey: analyticsKeys.outcomes(botId, params),
@@ -54,7 +54,7 @@ export function useAnalyticsOutcomes(
 
 export function useAnalyticsRedFlags(
   botId: string,
-  params?: { severity?: string; flag_id?: string }
+  params?: { severity?: string; flag_id?: string; start_date?: string; end_date?: string }
 ) {
   return useQuery({
     queryKey: analyticsKeys.redFlags(botId, params),
@@ -116,14 +116,14 @@ export function useDashboardAnalytics(params?: { bot_id?: string; days?: number 
   });
 }
 
-export function useCostBreakdown(params?: { bot_id?: string; days?: number }) {
+export function useCostBreakdown(params?: { bot_id?: string; days?: number; start_date?: string; end_date?: string }) {
   return useQuery({
     queryKey: ["analytics", "cost-breakdown", params] as const,
     queryFn: () => fetchCostBreakdown(params),
   });
 }
 
-export function useLeadIntelligence(params?: { bot_id?: string; days?: number }) {
+export function useLeadIntelligence(params?: { bot_id?: string; days?: number; start_date?: string; end_date?: string }) {
   return useQuery({
     queryKey: ["analytics", "lead-intelligence", params] as const,
     queryFn: () => fetchLeadIntelligence(params),

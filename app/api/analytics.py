@@ -716,6 +716,8 @@ async def start_reanalysis(
     bot_id: uuid.UUID | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
     force: bool = Query(True),
+    start_date: datetime | None = Query(None),
+    end_date: datetime | None = Query(None),
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_current_org),
 ):
@@ -729,6 +731,10 @@ async def start_reanalysis(
     ]
     if bot_id:
         filters.append(CallLog.bot_id == bot_id)
+    if start_date:
+        filters.append(CallLog.created_at >= start_date)
+    if end_date:
+        filters.append(CallLog.created_at <= end_date)
 
     if not force:
         subq = select(CallAnalytics.call_log_id).where(
