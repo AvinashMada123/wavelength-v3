@@ -486,25 +486,25 @@ export default function SequenceAnalyticsPage() {
               <KPICard
                 label="Total Sent"
                 value={overview?.total_sent ?? null}
-                trend={overview?.trend.sent_change ?? null}
+                trend={overview?.trend?.sent_change ?? null}
                 fmt="number"
               />
               <KPICard
                 label="Reply Rate"
                 value={overview?.reply_rate ?? null}
-                trend={overview?.trend.reply_rate_change ?? null}
+                trend={overview?.trend?.reply_rate_change ?? null}
                 fmt="percent"
               />
               <KPICard
                 label="Completion Rate"
                 value={overview?.completion_rate ?? null}
-                trend={overview?.trend.completion_rate_change ?? null}
+                trend={overview?.trend?.completion_rate_change ?? null}
                 fmt="percent"
               />
               <KPICard
                 label="Avg Reply Time"
                 value={overview?.avg_time_to_reply_hours ?? null}
-                trend={overview?.trend.avg_reply_time_change ?? null}
+                trend={overview?.trend?.avg_reply_time_change ?? null}
                 fmt="hours"
               />
             </div>
