@@ -16,6 +16,7 @@ export interface BotConfig {
   event_date: string | null;
   event_time: string | null;
   greeting_template: string | null;
+  callback_greeting_template: string | null;
   stt_provider: "deepgram" | "sarvam";
   tts_provider: "gemini" | "sarvam";
   tts_voice: string;

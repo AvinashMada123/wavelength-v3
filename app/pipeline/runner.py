@@ -32,8 +32,18 @@ _DEFAULT_GREETING = "Hi {contact_name}, this is {agent_name} calling from {compa
 
 
 def _resolve_greeting_text(ctx: CallContext, bot_config: BotConfig) -> str:
-    """Resolve the greeting template into final text."""
-    greeting_template = getattr(bot_config, "greeting_template", None) or _DEFAULT_GREETING
+    """Resolve the greeting template into final text.
+
+    Uses callback_greeting_template for returning callers (when call memory is present).
+    """
+    # Check if this is a returning caller by looking for memory in the prompt
+    is_returning = "PREVIOUS CALL HISTORY WITH THIS CONTACT" in (ctx.filled_prompt or "")
+    callback_greeting = getattr(bot_config, "callback_greeting_template", None)
+
+    if is_returning and callback_greeting:
+        greeting_template = callback_greeting
+    else:
+        greeting_template = getattr(bot_config, "greeting_template", None) or _DEFAULT_GREETING
     _greeting_vars = {
         "contact_name": ctx.contact_name or "there",
         "agent_name": bot_config.agent_name,

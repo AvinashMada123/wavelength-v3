@@ -67,6 +67,7 @@ interface BotForm {
   event_date: string;
   event_time: string;
   greeting_template: string;
+  callback_greeting_template: string;
   stt_provider: "deepgram" | "sarvam";
   tts_provider: "gemini" | "sarvam" | "elevenlabs";
   tts_voice: string;
@@ -114,6 +115,7 @@ const EMPTY_FORM: BotForm = {
   event_date: "",
   event_time: "",
   greeting_template: "",
+  callback_greeting_template: "",
   stt_provider: "deepgram",
   tts_provider: "sarvam",
   tts_voice: "priya",
@@ -196,6 +198,7 @@ function botToForm(bot: BotConfig): BotForm {
     event_date: bot.event_date || "",
     event_time: bot.event_time || "",
     greeting_template: bot.greeting_template || "",
+    callback_greeting_template: bot.callback_greeting_template || "",
     stt_provider: bot.stt_provider || "deepgram",
     tts_provider: (bot.tts_provider as "gemini" | "sarvam" | "elevenlabs") || "sarvam",
     tts_voice: bot.tts_voice,
@@ -854,6 +857,23 @@ export default function BotEditorPage() {
                           />
                           <p className="text-xs text-muted-foreground">
                             Available variables: {"{contact_name}"}, {"{agent_name}"}, {"{company_name}"}, {"{event_name}"}, {"{event_date}"}, {"{event_time}"}, {"{location}"}
+                          </p>
+                        </div>
+
+                        <div className="space-y-2 mt-4">
+                          <Label htmlFor="callback_greeting_template">
+                            Callback Greeting (Returning Callers)
+                          </Label>
+                          <Input
+                            id="callback_greeting_template"
+                            value={form.callback_greeting_template}
+                            onChange={(e) =>
+                              setField("callback_greeting_template", e.target.value)
+                            }
+                            placeholder="Hi {contact_name}, this is {agent_name} again from {company_name}. Good to connect with you again!"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Used when calling someone who has been called before (when call memory is active). Same variables available.
                           </p>
                         </div>
                       </Section>

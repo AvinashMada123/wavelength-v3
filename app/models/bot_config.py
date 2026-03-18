@@ -48,6 +48,7 @@ class BotConfig(Base):
         UUID(as_uuid=True), ForeignKey("phone_numbers.id"), nullable=True
     )
     greeting_template: Mapped[str | None] = mapped_column(Text)
+    callback_greeting_template: Mapped[str | None] = mapped_column(Text)
     llm_provider: Mapped[str] = mapped_column(Text, nullable=False, server_default="google")
     llm_model: Mapped[str] = mapped_column(Text, nullable=False, server_default="gemini-2.5-flash")
     llm_thinking_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")

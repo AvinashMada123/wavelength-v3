@@ -141,6 +141,7 @@ class CreateBotConfigRequest(BaseModel):
     event_date: str | None = None
     event_time: str | None = None
     greeting_template: str | None = None
+    callback_greeting_template: str | None = None
     stt_provider: str = "deepgram"
     tts_provider: str = "sarvam"
     tts_voice: str = "priya"
@@ -189,6 +190,7 @@ class UpdateBotConfigRequest(BaseModel):
     event_date: str | None = None
     event_time: str | None = None
     greeting_template: str | None = None
+    callback_greeting_template: str | None = None
     stt_provider: str | None = None
     tts_provider: str | None = None
     tts_voice: str | None = None
@@ -247,6 +249,7 @@ class BotConfigResponse(BaseModel):
     event_date: str | None
     event_time: str | None
     greeting_template: str | None = None
+    callback_greeting_template: str | None = None
     stt_provider: str
     tts_provider: str
     tts_voice: str
