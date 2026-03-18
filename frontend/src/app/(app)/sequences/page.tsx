@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   Plus,
   Workflow,
@@ -61,6 +62,12 @@ const TRIGGER_TYPE_OPTIONS = [
   { value: "post_call", label: "Post Call" },
   { value: "manual", label: "Manual" },
   { value: "campaign_complete", label: "Campaign Complete" },
+];
+
+const NAV_LINKS = [
+  { href: "/sequences", label: "Templates" },
+  { href: "/sequences/monitor", label: "Monitor" },
+  { href: "/sequences/analytics", label: "Analytics" },
 ];
 
 function triggerLabel(value: string): string {
@@ -220,6 +227,20 @@ export default function SequencesPage() {
       <Header title="Sequence Templates" />
       <PageTransition>
         <div className="space-y-6 p-6">
+          {/* Nav links */}
+          <div className="flex items-center gap-1 border-b border-border pb-3">
+            {NAV_LINKS.map((link) => (
+              <Link key={link.href} href={link.href}>
+                <Button
+                  variant={link.href === "/sequences" ? "secondary" : "ghost"}
+                  size="sm"
+                >
+                  {link.label}
+                </Button>
+              </Link>
+            ))}
+          </div>
+
           {/* Description + Actions */}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
