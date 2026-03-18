@@ -433,15 +433,11 @@ export default function DashboardPage() {
     return buildFunnel(calls);
   }, [dashData, calls]);
 
-  // Sentiment extracted from call captured_data
+  // Sentiment from call analytics
   const sentimentData = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const c of calls) {
-      const captured = c.analytics?.captured_data;
-      const raw =
-        (captured && typeof captured.sentiment === "string" && captured.sentiment) ||
-        (captured && typeof captured.overall_sentiment === "string" && captured.overall_sentiment) ||
-        null;
+      const raw = c.analytics?.sentiment || null;
       if (!raw) continue;
       const key = raw.toLowerCase();
       counts[key] = (counts[key] || 0) + 1;
