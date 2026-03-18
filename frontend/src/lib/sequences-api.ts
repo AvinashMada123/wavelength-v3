@@ -112,12 +112,12 @@ export const exportTemplate = (id: string) =>
   apiFetch<Record<string, any>>(`/api/sequences/templates/${id}/export`);
 
 export const importTemplate = (templateJson: Record<string, any>) =>
-  apiFetch<SequenceTemplate>("/api/sequences/templates/import", { method: "POST", body: JSON.stringify({ template_json: templateJson }) });
+  apiFetch<SequenceTemplate>("/api/sequences/templates/import", { method: "POST", body: JSON.stringify(templateJson) });
 
 export const previewImport = (templateJson: Record<string, any>) =>
   apiFetch<{ valid: boolean; errors: string[]; template: SequenceTemplate | null }>(
     "/api/sequences/templates/import/preview",
-    { method: "POST", body: JSON.stringify({ template_json: templateJson }) }
+    { method: "POST", body: JSON.stringify(templateJson) }
   );
 
 // --- Instances ---
