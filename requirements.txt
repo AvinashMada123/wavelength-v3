@@ -33,3 +33,6 @@ pydantic[email]>=2.0.0
 
 # Logging
 structlog>=24.4.0,<25
+
+# AI Copywriting (engagement sequences)
+anthropic>=0.40.0,<1
