@@ -51,6 +51,7 @@ export interface BotConfig {
   call_memory_enabled: boolean;
   call_memory_count: number;
   bot_switch_targets: Array<{ id: string; target_bot_id: string; description: string }>;
+  sequence_template_id: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;

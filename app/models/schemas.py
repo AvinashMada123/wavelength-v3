@@ -177,6 +177,7 @@ class CreateBotConfigRequest(BaseModel):
     callback_window_start: int = 9
     callback_window_end: int = 20
     bot_switch_targets: list[dict] = Field(default_factory=list)
+    sequence_template_id: uuid.UUID | None = None
     call_memory_enabled: bool = False
     call_memory_count: int = 3
     goal_config: GoalConfig | None = None
@@ -227,6 +228,7 @@ class UpdateBotConfigRequest(BaseModel):
     callback_window_start: int | None = None
     callback_window_end: int | None = None
     bot_switch_targets: list[dict] | None = None
+    sequence_template_id: uuid.UUID | None = None
     call_memory_enabled: bool | None = None
     call_memory_count: int | None = None
     is_active: bool | None = None
@@ -282,6 +284,7 @@ class BotConfigResponse(BaseModel):
     callback_window_start: int
     callback_window_end: int
     bot_switch_targets: list[dict]
+    sequence_template_id: uuid.UUID | None = None
     call_memory_enabled: bool
     call_memory_count: int
     is_active: bool

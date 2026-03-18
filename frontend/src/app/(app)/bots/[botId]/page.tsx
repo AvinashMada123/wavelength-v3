@@ -54,6 +54,7 @@ import { useBot, useBots, useCreateBot, useUpdateBot } from "@/hooks/use-bots";
 import { usePhoneNumbers } from "@/hooks/use-settings";
 import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, ELEVENLABS_VOICE_GROUPS, SARVAM_LANGUAGE_OPTIONS, DEEPGRAM_LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS_CLIENT, LLM_PROVIDER_OPTIONS, LLM_MODEL_OPTIONS } from "@/lib/constants";
 import type { BotConfig, GHLWorkflow, GoalConfig, SuccessCriterion, RedFlagConfig, DataCaptureField } from "@/types/api";
+import { fetchTemplates, type SequenceTemplate } from "@/lib/sequences-api";
 
 // ---------------------------------------------------------------------------
 // Form type
@@ -99,6 +100,7 @@ interface BotForm {
   call_memory_enabled: boolean;
   call_memory_count: number;
   bot_switch_targets: BotSwitchTarget[];
+  sequence_template_id: string | null;
 }
 
 interface BotSwitchTarget {
@@ -147,6 +149,7 @@ const EMPTY_FORM: BotForm = {
   call_memory_enabled: false,
   call_memory_count: 3,
   bot_switch_targets: [],
+  sequence_template_id: null,
 };
 
 const TIMING_OPTIONS = [
@@ -230,6 +233,7 @@ function botToForm(bot: BotConfig): BotForm {
     call_memory_enabled: bot.call_memory_enabled ?? false,
     call_memory_count: bot.call_memory_count ?? 3,
     bot_switch_targets: bot.bot_switch_targets || [],
+    sequence_template_id: bot.sequence_template_id || null,
   };
 }
 
@@ -378,6 +382,10 @@ export default function BotEditorPage() {
   // ---- React Query hooks ----
   const { data: botData, isLoading: botLoading, isError: botError } = useBot(botId);
   const { data: allBots } = useBots();
+  const [sequenceTemplates, setSequenceTemplates] = useState<SequenceTemplate[]>([]);
+  useEffect(() => {
+    fetchTemplates(1, 100).then((data) => setSequenceTemplates(data.items)).catch(() => {});
+  }, []);
   const createBotMutation = useCreateBot();
   const updateBotMutation = useUpdateBot();
   const { data: phoneNumbers } = usePhoneNumbers();
@@ -2070,6 +2078,38 @@ export default function BotEditorPage() {
                             </div>
                           </div>
                         )}
+                      </Section>
+
+                      <Separator />
+
+                      <Section
+                        title="Post-Call Sequence"
+                        description="Automatically run an engagement sequence after calls complete."
+                      >
+                        <div className="flex items-center justify-between rounded-lg border p-4">
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium">Sequence Template</p>
+                            <p className="text-xs text-muted-foreground">
+                              Select a sequence to trigger after this bot finishes a call.
+                            </p>
+                          </div>
+                          <Select
+                            value={form.sequence_template_id || "none"}
+                            onValueChange={(v) => setField("sequence_template_id", v === "none" ? null : v)}
+                          >
+                            <SelectTrigger className="w-64">
+                              <SelectValue placeholder="No sequence" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">No sequence</SelectItem>
+                              {sequenceTemplates.map((t) => (
+                                <SelectItem key={t.id} value={t.id}>
+                                  {t.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </Section>
 
                       <Separator />

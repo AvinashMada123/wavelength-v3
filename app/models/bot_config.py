@@ -65,6 +65,9 @@ class BotConfig(Base):
     callback_window_start: Mapped[int] = mapped_column(Integer, nullable=False, server_default="9")
     callback_window_end: Mapped[int] = mapped_column(Integer, nullable=False, server_default="20")
     bot_switch_targets: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    sequence_template_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sequence_templates.id", ondelete="SET NULL"), nullable=True
+    )
     call_memory_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     call_memory_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="3")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
