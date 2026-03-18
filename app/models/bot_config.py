@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Text, text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -57,6 +57,13 @@ class BotConfig(Base):
     )
     circuit_breaker_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     circuit_breaker_threshold: Mapped[int] = mapped_column(Integer, nullable=False, server_default="3")
+    callback_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    callback_retry_delay_hours: Mapped[float] = mapped_column(Float, nullable=False, server_default="2.0")
+    callback_max_retries: Mapped[int] = mapped_column(Integer, nullable=False, server_default="3")
+    callback_timezone: Mapped[str] = mapped_column(Text, nullable=False, server_default="Asia/Kolkata")
+    callback_window_start: Mapped[int] = mapped_column(Integer, nullable=False, server_default="9")
+    callback_window_end: Mapped[int] = mapped_column(Integer, nullable=False, server_default="20")
+    bot_switch_targets: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     call_memory_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     call_memory_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="3")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")

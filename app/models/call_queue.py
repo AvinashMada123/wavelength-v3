@@ -14,6 +14,7 @@ class QueuedCall(Base):
         Index("idx_call_queue_bot_id", "bot_id"),
         Index("idx_call_queue_status", "status"),
         Index("idx_call_queue_created", "created_at"),
+        Index("idx_call_queue_scheduled", "status", "scheduled_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -40,6 +41,9 @@ class QueuedCall(Base):
     campaign_lead_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("campaign_leads.id")
     )
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    original_call_sid: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

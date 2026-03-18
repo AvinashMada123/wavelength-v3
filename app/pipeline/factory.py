@@ -856,6 +856,240 @@ def _build_workflow_tools(bot_config: BotConfig, call_context: CallContext):
     return tool_schema, handle_trigger_workflow
 
 
+def _build_callback_tool(bot_config: BotConfig, call_context: CallContext):
+    """Build LLM tool for scheduling callbacks."""
+    from pipecat.adapters.schemas.function_schema import FunctionSchema
+
+    if not getattr(bot_config, "callback_enabled", False):
+        return None, None
+
+    max_retries = getattr(bot_config, "callback_max_retries", 3)
+
+    tool_schema = FunctionSchema(
+        name="schedule_callback",
+        description=(
+            "Schedule a callback to this contact. Use this when the person asks to be called back later, "
+            "says they are busy, or requests a call at a different time.\n\n"
+            "IMPORTANT: Before calling this, try to ask the person when they'd like to be called back. "
+            "If they give a time, pass it as callback_time. If they don't want to specify, leave it empty.\n\n"
+            f"Maximum {max_retries} callback attempts are allowed per contact."
+        ),
+        properties={
+            "callback_time": {
+                "type": "string",
+                "description": (
+                    "When the person wants to be called back, e.g. '3 PM', 'tomorrow morning', "
+                    "'in 2 hours', 'after 30 minutes'. Leave empty if they didn't specify a time."
+                ),
+            },
+            "reason": {
+                "type": "string",
+                "description": "Why the callback is being scheduled, e.g. 'customer is busy', 'requested afternoon call'",
+            },
+        },
+        required=["reason"],
+    )
+
+    async def handle_schedule_callback(params):
+        callback_time = params.arguments.get("callback_time")
+        reason = params.arguments.get("reason", "callback requested")
+
+        # Determine retry count from the queue entry that spawned this call
+        current_retry = 0
+        try:
+            from app.database import get_db_session
+            from app.models.call_log import CallLog
+            from app.models.call_queue import QueuedCall
+            from sqlalchemy import select
+
+            async with get_db_session() as db:
+                log_result = await db.execute(
+                    select(CallLog).where(CallLog.call_sid == call_context.call_sid)
+                )
+                call_log = log_result.scalar_one_or_none()
+                if call_log:
+                    q_result = await db.execute(
+                        select(QueuedCall).where(QueuedCall.call_log_id == call_log.id)
+                    )
+                    spawning_queue = q_result.scalar_one_or_none()
+                    if spawning_queue:
+                        current_retry = spawning_queue.retry_count
+        except Exception as e:
+            logger.error("callback_retry_count_lookup_failed", error=str(e))
+
+        next_retry = current_retry + 1
+
+        if next_retry > max_retries:
+            await params.result_callback(
+                f"Cannot schedule callback — maximum of {max_retries} callback attempts reached. "
+                "Apologize to the customer and let them know someone will reach out."
+            )
+            return
+
+        # Schedule the callback
+        try:
+            from app.database import get_db_session
+            from app.services.callback_scheduler import create_scheduled_callback
+            from app.models.call_log import CallLog
+            from sqlalchemy import select
+
+            async with get_db_session() as db:
+                log_result = await db.execute(
+                    select(CallLog).where(CallLog.call_sid == call_context.call_sid)
+                )
+                call_log = log_result.scalar_one_or_none()
+
+                await create_scheduled_callback(
+                    db,
+                    org_id=bot_config.org_id,
+                    bot_id=bot_config.id,
+                    contact_name=call_context.contact_name,
+                    contact_phone=call_log.contact_phone if call_log else "",
+                    ghl_contact_id=call_context.ghl_contact_id,
+                    call_sid=call_context.call_sid,
+                    callback_time=callback_time,
+                    reason=reason,
+                    retry_count=next_retry,
+                    tz_name=getattr(bot_config, "callback_timezone", "Asia/Kolkata"),
+                    default_delay_hours=getattr(bot_config, "callback_retry_delay_hours", 2.0),
+                    window_start=getattr(bot_config, "callback_window_start", 9),
+                    window_end=getattr(bot_config, "callback_window_end", 20),
+                )
+                await db.commit()
+
+            time_msg = callback_time if callback_time else "the next available time"
+            await params.result_callback(
+                f"Callback scheduled for {time_msg}. Now end the call politely."
+            )
+
+            logger.info(
+                "callback_tool_invoked",
+                call_sid=call_context.call_sid,
+                callback_time=callback_time,
+                reason=reason,
+                retry=next_retry,
+            )
+        except Exception as e:
+            logger.error("callback_schedule_failed", call_sid=call_context.call_sid, error=str(e))
+            await params.result_callback(
+                "I couldn't schedule the callback due to a technical issue. "
+                "Apologize and let them know someone will call back."
+            )
+
+    return tool_schema, handle_schedule_callback
+
+
+def _build_switch_bot_tool(bot_config: BotConfig, call_context: CallContext):
+    """Build LLM tool for switching to a different bot mid-call."""
+    from pipecat.adapters.schemas.function_schema import FunctionSchema
+
+    targets = getattr(bot_config, "bot_switch_targets", None) or []
+    if isinstance(targets, str):
+        import json
+        try:
+            targets = json.loads(targets)
+        except (json.JSONDecodeError, TypeError):
+            targets = []
+
+    if not targets:
+        return None, None
+
+    target_descriptions = "\n".join(
+        f"- {t['id']}: {t.get('description', 'No description')}"
+        for t in targets
+    )
+
+    tool_schema = FunctionSchema(
+        name="switch_bot",
+        description=(
+            "Transfer this call to a different agent. The current call will end and the other agent "
+            "will call the customer immediately.\n\n"
+            "Use this when the customer needs a different language or agent type.\n\n"
+            f"Available targets:\n{target_descriptions}"
+        ),
+        properties={
+            "target_id": {
+                "type": "string",
+                "description": "The ID of the target agent to switch to",
+                "enum": [t["id"] for t in targets],
+            },
+            "reason": {
+                "type": "string",
+                "description": "Why the switch is happening, e.g. 'customer prefers Hindi'",
+            },
+        },
+        required=["target_id", "reason"],
+    )
+
+    target_lookup = {t["id"]: t for t in targets}
+
+    async def handle_switch_bot(params):
+        target_id = params.arguments.get("target_id")
+        reason = params.arguments.get("reason", "bot switch requested")
+
+        target = target_lookup.get(target_id)
+        if not target:
+            await params.result_callback(f"Unknown target: {target_id}")
+            return
+
+        target_bot_id = target.get("target_bot_id")
+        if not target_bot_id:
+            await params.result_callback("Target bot not configured properly.")
+            return
+
+        try:
+            from app.database import get_db_session
+            from app.models.call_log import CallLog
+            from app.models.call_queue import QueuedCall
+            from sqlalchemy import select
+
+            async with get_db_session() as db:
+                # Get current call's contact phone
+                log_result = await db.execute(
+                    select(CallLog).where(CallLog.call_sid == call_context.call_sid)
+                )
+                call_log = log_result.scalar_one_or_none()
+                contact_phone = call_log.contact_phone if call_log else ""
+
+                # Create immediate queue entry for target bot
+                queued_call = QueuedCall(
+                    org_id=bot_config.org_id,
+                    bot_id=target_bot_id,
+                    contact_name=call_context.contact_name,
+                    contact_phone=contact_phone,
+                    ghl_contact_id=call_context.ghl_contact_id,
+                    source="bot_switch",
+                    status="queued",
+                    priority=2,  # Highest priority — immediate pickup
+                    extra_vars={
+                        "switched_from_bot": str(bot_config.id),
+                        "switch_reason": reason,
+                        "original_call_sid": call_context.call_sid,
+                    },
+                )
+                db.add(queued_call)
+                await db.commit()
+
+            await params.result_callback(
+                "Transfer initiated. Say a brief goodbye and then call end_call immediately."
+            )
+
+            logger.info(
+                "bot_switch_initiated",
+                call_sid=call_context.call_sid,
+                from_bot=str(bot_config.id),
+                to_bot=target_bot_id,
+                reason=reason,
+            )
+        except Exception as e:
+            logger.error("bot_switch_failed", call_sid=call_context.call_sid, error=str(e))
+            await params.result_callback(
+                "I couldn't transfer the call due to a technical issue. Continue helping the customer."
+            )
+
+    return tool_schema, handle_switch_bot
+
+
 def _build_end_call_tool():
     """Build the end_call LLM tool definition as a provider-agnostic FunctionSchema."""
     from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -1308,10 +1542,20 @@ async def build_pipeline(
     # --- During-call workflow tools ---
     workflow_tool_schema, workflow_handler = _build_workflow_tools(bot_config, call_context)
 
+    # --- Callback tool ---
+    callback_tool_schema, callback_handler = _build_callback_tool(bot_config, call_context)
+
+    # --- Bot switch tool ---
+    switch_tool_schema, switch_handler = _build_switch_bot_tool(bot_config, call_context)
+
     if not _groq_no_tools:
         llm.register_function("end_call", handle_end_call)
         if workflow_handler:
             llm.register_function("trigger_crm_workflow", workflow_handler)
+        if callback_handler:
+            llm.register_function("schedule_callback", callback_handler)
+        if switch_handler:
+            llm.register_function("switch_bot", switch_handler)
     else:
         logger.info("tools_disabled_for_model", model=llm_model, provider=llm_provider)
 
@@ -1429,6 +1673,10 @@ async def build_pipeline(
         standard_tools = [_build_end_call_tool()]
         if workflow_tool_schema:
             standard_tools.append(workflow_tool_schema)
+        if callback_tool_schema:
+            standard_tools.append(callback_tool_schema)
+        if switch_tool_schema:
+            standard_tools.append(switch_tool_schema)
         context.set_tools(ToolsSchema(standard_tools=standard_tools))
 
     # --- Context aggregator ---

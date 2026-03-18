@@ -169,6 +169,13 @@ class CreateBotConfigRequest(BaseModel):
     phone_number_id: uuid.UUID | None = None
     circuit_breaker_enabled: bool = True
     circuit_breaker_threshold: int = 3
+    callback_enabled: bool = False
+    callback_retry_delay_hours: float = 2.0
+    callback_max_retries: int = 3
+    callback_timezone: str = "Asia/Kolkata"
+    callback_window_start: int = 9
+    callback_window_end: int = 20
+    bot_switch_targets: list[dict] = Field(default_factory=list)
     call_memory_enabled: bool = False
     call_memory_count: int = 3
     goal_config: GoalConfig | None = None
@@ -211,6 +218,13 @@ class UpdateBotConfigRequest(BaseModel):
     goal_config: GoalConfig | dict | None = None
     circuit_breaker_enabled: bool | None = None
     circuit_breaker_threshold: int | None = None
+    callback_enabled: bool | None = None
+    callback_retry_delay_hours: float | None = None
+    callback_max_retries: int | None = None
+    callback_timezone: str | None = None
+    callback_window_start: int | None = None
+    callback_window_end: int | None = None
+    bot_switch_targets: list[dict] | None = None
     call_memory_enabled: bool | None = None
     call_memory_count: int | None = None
     is_active: bool | None = None
@@ -258,6 +272,13 @@ class BotConfigResponse(BaseModel):
     goal_config: dict | None = None
     circuit_breaker_enabled: bool
     circuit_breaker_threshold: int
+    callback_enabled: bool
+    callback_retry_delay_hours: float
+    callback_max_retries: int
+    callback_timezone: str
+    callback_window_start: int
+    callback_window_end: int
+    bot_switch_targets: list[dict]
     call_memory_enabled: bool
     call_memory_count: int
     is_active: bool

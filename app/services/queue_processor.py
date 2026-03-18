@@ -312,9 +312,20 @@ async def _process_batch(loader: BotConfigLoader):
 
             # Fetch next batch of queued calls for this bot
             # FOR UPDATE SKIP LOCKED prevents multiple workers from picking up the same call
+            # Filter out future-scheduled calls (scheduled_at in the future)
+            from sqlalchemy import or_
+
+            now_utc = datetime.now(timezone.utc)
             result = await db.execute(
                 select(QueuedCall)
-                .where(QueuedCall.bot_id == bot_id, QueuedCall.status == "queued")
+                .where(
+                    QueuedCall.bot_id == bot_id,
+                    QueuedCall.status == "queued",
+                    or_(
+                        QueuedCall.scheduled_at.is_(None),
+                        QueuedCall.scheduled_at <= now_utc,
+                    ),
+                )
                 .order_by(QueuedCall.priority.desc(), QueuedCall.created_at.asc())
                 .limit(slots_available)
                 .with_for_update(skip_locked=True)
@@ -369,6 +380,42 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
                         call_log_id=None, success=False,
                     )
                 return
+
+            # Enforce callback retry limit and calling window for scheduled calls
+            if queued_call.scheduled_at is not None:
+                max_retries = getattr(bot_config, "callback_max_retries", 3)
+                if queued_call.retry_count > max_retries:
+                    queued_call.status = "failed"
+                    queued_call.error_message = f"Max callback retries ({max_retries}) exceeded"
+                    queued_call.processed_at = datetime.now(timezone.utc)
+                    await db.commit()
+                    logger.info(
+                        "callback_max_retries_exceeded",
+                        queue_id=str(queue_id),
+                        retry_count=queued_call.retry_count,
+                    )
+                    return
+
+                # Check calling window
+                tz_name = getattr(bot_config, "callback_timezone", "Asia/Kolkata")
+                window_start = getattr(bot_config, "callback_window_start", 9)
+                window_end = getattr(bot_config, "callback_window_end", 20)
+                try:
+                    from zoneinfo import ZoneInfo
+                    tz = ZoneInfo(tz_name)
+                    local_now = datetime.now(tz)
+                    if not (window_start <= local_now.hour < window_end):
+                        # Outside calling window — keep as queued, will be picked up later
+                        logger.info(
+                            "callback_outside_window",
+                            queue_id=str(queue_id),
+                            local_hour=local_now.hour,
+                            window=f"{window_start}-{window_end}",
+                        )
+                        return
+                except Exception as e:
+                    logger.error("callback_window_check_failed", error=str(e))
+                    # Proceed anyway on timezone errors
 
             # Check org has enough credits before dialing
             has_credits, balance = await check_org_credits(db, bot_config.org_id)
