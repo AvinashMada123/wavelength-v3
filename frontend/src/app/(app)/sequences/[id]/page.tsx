@@ -77,7 +77,7 @@ export default function TemplateBuilderPage() {
   const [templateName, setTemplateName] = useState("");
   const [triggerType, setTriggerType] = useState("post_call");
   const [isActive, setIsActive] = useState(false);
-  const [variables, setVariables] = useState<Array<{ key: string; default_value: string; description: string }>>([]);
+  const [variables, setVariables] = useState<Array<{ key: string; default_value: string; description: string; type?: string }>>([]);
 
   // UI state
   const [expandedStepId, setExpandedStepId] = useState<string | null>(null);
@@ -383,7 +383,7 @@ export default function TemplateBuilderPage() {
                   size="sm"
                   className="h-7 text-xs gap-1"
                   onClick={() => {
-                    const updated = [...variables, { key: "", default_value: "", description: "" }];
+                    const updated = [...variables, { key: "", default_value: "", description: "", type: "text" }];
                     setVariables(updated);
                   }}
                 >
@@ -396,61 +396,123 @@ export default function TemplateBuilderPage() {
                 </p>
               ) : (
                 <div className="space-y-2">
-                  <div className="grid grid-cols-[1fr_1.5fr_1.5fr_32px] gap-2 text-xs text-muted-foreground font-medium px-1">
+                  <div className="grid grid-cols-[1fr_0.6fr_1.2fr_1.2fr_32px] gap-2 text-xs text-muted-foreground font-medium px-1">
                     <span>Key</span>
+                    <span>Type</span>
                     <span>Default Value</span>
                     <span>Description</span>
                     <span />
                   </div>
-                  {variables.map((v, i) => (
-                    <div key={i} className="grid grid-cols-[1fr_1.5fr_1.5fr_32px] gap-2 items-center">
-                      <Input
-                        className="h-8 text-xs font-mono"
-                        placeholder="event_date"
-                        value={v.key}
-                        onChange={(e) => {
-                          const updated = [...variables];
-                          updated[i] = { ...updated[i], key: e.target.value };
-                          setVariables(updated);
-                        }}
-                        onBlur={() => saveHeader({ variables })}
-                      />
-                      <Input
-                        className="h-8 text-xs"
-                        placeholder="2026-03-22"
-                        value={v.default_value}
-                        onChange={(e) => {
-                          const updated = [...variables];
-                          updated[i] = { ...updated[i], default_value: e.target.value };
-                          setVariables(updated);
-                        }}
-                        onBlur={() => saveHeader({ variables })}
-                      />
-                      <Input
-                        className="h-8 text-xs"
-                        placeholder="Masterclass date"
-                        value={v.description}
-                        onChange={(e) => {
-                          const updated = [...variables];
-                          updated[i] = { ...updated[i], description: e.target.value };
-                          setVariables(updated);
-                        }}
-                        onBlur={() => saveHeader({ variables })}
-                      />
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 w-8 p-0 text-muted-foreground hover:text-red-400"
-                        onClick={() => {
-                          const updated = variables.filter((_, idx) => idx !== i);
-                          setVariables(updated);
-                          saveHeader({ variables: updated });
-                        }}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  ))}
+                  {variables.map((v, i) => {
+                    const varType = (v as any).type || "text";
+                    return (
+                      <div key={i} className="grid grid-cols-[1fr_0.6fr_1.2fr_1.2fr_32px] gap-2 items-center">
+                        <Input
+                          className="h-8 text-xs font-mono"
+                          placeholder="event_date"
+                          value={v.key}
+                          onChange={(e) => {
+                            const updated = [...variables];
+                            updated[i] = { ...updated[i], key: e.target.value };
+                            setVariables(updated);
+                          }}
+                          onBlur={() => saveHeader({ variables })}
+                        />
+                        <Select
+                          value={varType}
+                          onValueChange={(val) => {
+                            const updated = [...variables];
+                            updated[i] = { ...updated[i], type: val as any, default_value: "" };
+                            setVariables(updated);
+                            saveHeader({ variables: updated });
+                          }}
+                        >
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="text">Text</SelectItem>
+                            <SelectItem value="date">Date</SelectItem>
+                            <SelectItem value="time">Time</SelectItem>
+                            <SelectItem value="datetime">Date & Time</SelectItem>
+                            <SelectItem value="url">URL</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {varType === "date" ? (
+                          <Input
+                            type="date"
+                            className="h-8 text-xs"
+                            value={v.default_value}
+                            onChange={(e) => {
+                              const updated = [...variables];
+                              updated[i] = { ...updated[i], default_value: e.target.value };
+                              setVariables(updated);
+                            }}
+                            onBlur={() => saveHeader({ variables })}
+                          />
+                        ) : varType === "time" ? (
+                          <Input
+                            type="time"
+                            className="h-8 text-xs"
+                            value={v.default_value}
+                            onChange={(e) => {
+                              const updated = [...variables];
+                              updated[i] = { ...updated[i], default_value: e.target.value };
+                              setVariables(updated);
+                            }}
+                            onBlur={() => saveHeader({ variables })}
+                          />
+                        ) : varType === "datetime" ? (
+                          <Input
+                            type="datetime-local"
+                            className="h-8 text-xs"
+                            value={v.default_value}
+                            onChange={(e) => {
+                              const updated = [...variables];
+                              updated[i] = { ...updated[i], default_value: e.target.value };
+                              setVariables(updated);
+                            }}
+                            onBlur={() => saveHeader({ variables })}
+                          />
+                        ) : (
+                          <Input
+                            className="h-8 text-xs"
+                            placeholder={varType === "url" ? "https://..." : "value"}
+                            value={v.default_value}
+                            onChange={(e) => {
+                              const updated = [...variables];
+                              updated[i] = { ...updated[i], default_value: e.target.value };
+                              setVariables(updated);
+                            }}
+                            onBlur={() => saveHeader({ variables })}
+                          />
+                        )}
+                        <Input
+                          className="h-8 text-xs"
+                          placeholder="Description"
+                          value={v.description}
+                          onChange={(e) => {
+                            const updated = [...variables];
+                            updated[i] = { ...updated[i], description: e.target.value };
+                            setVariables(updated);
+                          }}
+                          onBlur={() => saveHeader({ variables })}
+                        />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 text-muted-foreground hover:text-red-400"
+                          onClick={() => {
+                            const updated = variables.filter((_, idx) => idx !== i);
+                            setVariables(updated);
+                            saveHeader({ variables: updated });
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </CardContent>

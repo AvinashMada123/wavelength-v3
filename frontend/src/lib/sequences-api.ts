@@ -5,6 +5,7 @@ export interface TemplateVariable {
   key: string;
   default_value: string;
   description: string;
+  type?: string;
 }
 
 export interface SequenceTemplate {
