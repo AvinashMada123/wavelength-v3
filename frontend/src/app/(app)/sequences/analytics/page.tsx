@@ -54,6 +54,7 @@ import {
   type FunnelData,
   type LeadDetail,
 } from "@/lib/sequences-api";
+import { AnalyticsDrillDown } from "@/components/sequences/AnalyticsDrillDown";
 
 // ---------------------------------------------------------------------------
 // Nav links
@@ -321,7 +322,7 @@ export default function SequenceAnalyticsPage() {
     sortCol === col ? (sortDir === "asc" ? " \u2191" : " \u2193") : "";
 
   // ---------------------------------------------------------------------------
-  // Drill-down view (placeholder for Task 7)
+  // Drill-down view
   // ---------------------------------------------------------------------------
 
   if (drillDown) {
@@ -329,13 +330,17 @@ export default function SequenceAnalyticsPage() {
       <PageTransition>
         <Header title="Sequence Analytics" />
         <div className="p-6">
-          <Button variant="ghost" onClick={() => setDrillDown(null)}>
-            &larr; Back to Overview
-          </Button>
-          <p className="mt-4 text-muted-foreground">
-            Drill-down view for {drillDown.type} {drillDown.id} &mdash;
-            component coming in Task 7
-          </p>
+          <AnalyticsDrillDown
+            type={drillDown.type}
+            onBack={() => {
+              setDrillDown(null);
+              setFunnelData(null);
+              setLeadDetail(null);
+            }}
+            funnelData={funnelData}
+            failuresData={failures}
+            leadDetail={leadDetail}
+          />
         </div>
       </PageTransition>
     );
