@@ -1,4 +1,4 @@
-"""Sequence analytics API — overview, channels, and failures endpoints."""
+"""Sequence analytics API — overview, channels, failures, funnel, and templates endpoints."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -78,6 +78,38 @@ class FailuresResponse(BaseModel):
     total_failed: int = 0
     failure_reasons: list[FailureReason] = []
     retry_stats: RetryStats = RetryStats()
+
+
+class FunnelStep(BaseModel):
+    step_order: int
+    name: str
+    sent: int = 0
+    skipped: int = 0
+    failed: int = 0
+    replied: int = 0
+    drop_off_rate: float = 0.0
+
+
+class FunnelResponse(BaseModel):
+    template_name: str
+    total_entered: int = 0
+    steps: list[FunnelStep] = []
+
+
+class TemplateStats(BaseModel):
+    template_id: str
+    name: str
+    total_sent: int = 0
+    completion_rate: float = 0.0
+    reply_rate: float = 0.0
+    avg_steps_completed: float = 0.0
+    total_steps: int = 0
+    active_instances: int = 0
+    funnel_summary: list[int] = []
+
+
+class TemplatesResponse(BaseModel):
+    templates: list[TemplateStats] = []
 
 
 # ---------------------------------------------------------------------------
@@ -543,4 +575,312 @@ async def get_failures(
         retry_stats=retry_stats,
     )
     _cache_set(str(org_id), "failures", params, result.model_dump())
+    return result
+
+
+@router.get("/funnel", response_model=FunnelResponse)
+async def get_funnel(
+    org_id: uuid.UUID = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+    template_id: uuid.UUID = Query(...),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
+    channel: str | None = Query(None),
+    bot_id: uuid.UUID | None = Query(None),
+) -> FunnelResponse:
+    """Funnel view for a specific template: per-step sent/skipped/failed/replied with drop-off."""
+    params = _filter_params_dict(start_date, end_date, template_id, channel, bot_id)
+    cached = _cache_get(str(org_id), "funnel", params)
+    if cached is not None:
+        return FunnelResponse(**cached)
+
+    # Verify template exists and belongs to org
+    tpl_q = select(SequenceTemplate).where(
+        SequenceTemplate.id == template_id,
+        SequenceTemplate.org_id == org_id,
+    )
+    tpl = (await db.execute(tpl_q)).scalar_one_or_none()
+    if tpl is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    # Get step names ordered by step_order
+    steps_q = (
+        select(SequenceStep.step_order, SequenceStep.name)
+        .where(SequenceStep.template_id == template_id)
+        .order_by(SequenceStep.step_order)
+    )
+    step_rows = (await db.execute(steps_q)).all()
+    step_names: dict[int, str] = {row[0]: row[1] for row in step_rows}
+
+    # Total entered = instance count for this template
+    inst_count_q = (
+        select(func.count())
+        .select_from(SequenceInstance)
+        .where(
+            SequenceInstance.org_id == org_id,
+            SequenceInstance.template_id == template_id,
+        )
+    )
+    total_entered = (await db.execute(inst_count_q)).scalar() or 0
+
+    # Aggregate touchpoints by step_order
+    filters = _build_touchpoint_filters(org_id, start_date, end_date, template_id, channel, bot_id)
+    tp_q = (
+        select(
+            SequenceTouchpoint.step_order,
+            SequenceTouchpoint.status,
+            func.count().label("cnt"),
+        )
+        .select_from(SequenceTouchpoint)
+        .where(*filters, SequenceTouchpoint.status.notin_(_EXCLUDED_STATUSES))
+        .group_by(SequenceTouchpoint.step_order, SequenceTouchpoint.status)
+    )
+    tp_rows = (await db.execute(tp_q)).all()
+
+    # Build per-step aggregates
+    step_data: dict[int, dict[str, int]] = {}
+    for step_order, status, cnt in tp_rows:
+        if step_order not in step_data:
+            step_data[step_order] = {"sent": 0, "skipped": 0, "failed": 0, "replied": 0}
+        if status in ("sent", "awaiting_reply", "replied"):
+            step_data[step_order]["sent"] += cnt
+        if status == "skipped":
+            step_data[step_order]["skipped"] += cnt
+        if status == "failed":
+            step_data[step_order]["failed"] += cnt
+        if status == "replied":
+            step_data[step_order]["replied"] += cnt
+
+    # Calculate drop-off rate relative to first step
+    first_step_sent = 0
+    sorted_orders = sorted(set(step_names.keys()) | set(step_data.keys()))
+    if sorted_orders:
+        first = sorted_orders[0]
+        first_step_sent = step_data.get(first, {}).get("sent", 0)
+
+    steps: list[FunnelStep] = []
+    for order in sorted_orders:
+        data = step_data.get(order, {"sent": 0, "skipped": 0, "failed": 0, "replied": 0})
+        drop_off = max(0.0, round(1 - (data["sent"] / first_step_sent), 4)) if first_step_sent > 0 else 0.0
+        steps.append(
+            FunnelStep(
+                step_order=order,
+                name=step_names.get(order, f"Step {order}"),
+                sent=data["sent"],
+                skipped=data["skipped"],
+                failed=data["failed"],
+                replied=data["replied"],
+                drop_off_rate=drop_off,
+            )
+        )
+
+    result = FunnelResponse(
+        template_name=tpl.name,
+        total_entered=total_entered,
+        steps=steps,
+    )
+    _cache_set(str(org_id), "funnel", params, result.model_dump())
+    return result
+
+
+@router.get("/templates", response_model=TemplatesResponse)
+async def get_templates(
+    org_id: uuid.UUID = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
+    channel: str | None = Query(None),
+    bot_id: uuid.UUID | None = Query(None),
+) -> TemplatesResponse:
+    """Per-template performance: sent, completion rate, reply rate, funnel summary."""
+    params = _filter_params_dict(start_date, end_date, None, channel, bot_id)
+    cached = _cache_get(str(org_id), "templates", params)
+    if cached is not None:
+        return TemplatesResponse(**cached)
+
+    # Fetch all templates for the org
+    tpl_q = (
+        select(SequenceTemplate.id, SequenceTemplate.name)
+        .where(SequenceTemplate.org_id == org_id)
+        .order_by(SequenceTemplate.name)
+    )
+    tpl_rows = (await db.execute(tpl_q)).all()
+
+    if not tpl_rows:
+        result = TemplatesResponse(templates=[])
+        _cache_set(str(org_id), "templates", params, result.model_dump())
+        return result
+
+    template_ids = [row[0] for row in tpl_rows]
+    template_names: dict[uuid.UUID, str] = {row[0]: row[1] for row in tpl_rows}
+
+    # Instance stats per template (exclude paused)
+    inst_q = (
+        select(
+            SequenceInstance.template_id,
+            SequenceInstance.status,
+            func.count().label("cnt"),
+        )
+        .select_from(SequenceInstance)
+        .where(
+            SequenceInstance.org_id == org_id,
+            SequenceInstance.template_id.in_(template_ids),
+            SequenceInstance.status.notin_(("paused",)),
+        )
+        .group_by(SequenceInstance.template_id, SequenceInstance.status)
+    )
+    inst_rows = (await db.execute(inst_q)).all()
+
+    inst_data: dict[uuid.UUID, dict[str, int]] = {}
+    for tid, status, cnt in inst_rows:
+        if tid not in inst_data:
+            inst_data[tid] = {}
+        inst_data[tid][status] = cnt
+
+    # Touchpoint stats per template: sent and replied counts (exclude pending/generating/scheduled)
+    # Build base touchpoint filters without template_id (we group by it instead)
+    base_tp_filters: list = [SequenceTouchpoint.org_id == org_id]
+    if start_date:
+        base_tp_filters.append(SequenceTouchpoint.scheduled_at >= datetime.combine(start_date, datetime.min.time()))
+    if end_date:
+        base_tp_filters.append(
+            SequenceTouchpoint.scheduled_at < datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+        )
+    if channel:
+        base_tp_filters.append(
+            SequenceTouchpoint.step_id.in_(
+                select(SequenceStep.id).where(SequenceStep.channel == channel)
+            )
+        )
+    if bot_id:
+        base_tp_filters.append(
+            SequenceTouchpoint.instance_id.in_(
+                select(SequenceInstance.id)
+                .join(SequenceTemplate, SequenceTemplate.id == SequenceInstance.template_id)
+                .where(SequenceTemplate.bot_id == bot_id)
+            )
+        )
+
+    tp_status_q = (
+        select(
+            SequenceInstance.template_id,
+            SequenceTouchpoint.status,
+            func.count().label("cnt"),
+        )
+        .select_from(SequenceTouchpoint)
+        .join(SequenceInstance, SequenceInstance.id == SequenceTouchpoint.instance_id)
+        .where(
+            *base_tp_filters,
+            SequenceInstance.template_id.in_(template_ids),
+            SequenceTouchpoint.status.notin_(_EXCLUDED_STATUSES),
+        )
+        .group_by(SequenceInstance.template_id, SequenceTouchpoint.status)
+    )
+    tp_rows = (await db.execute(tp_status_q)).all()
+
+    tp_data: dict[uuid.UUID, dict[str, int]] = {}
+    for tid, status, cnt in tp_rows:
+        if tid not in tp_data:
+            tp_data[tid] = {"sent": 0, "replied": 0}
+        if status in ("sent", "awaiting_reply", "replied"):
+            tp_data[tid]["sent"] += cnt
+        if status == "replied":
+            tp_data[tid]["replied"] += cnt
+
+    # Step count per template
+    step_count_q = (
+        select(SequenceStep.template_id, func.count().label("cnt"))
+        .select_from(SequenceStep)
+        .where(SequenceStep.template_id.in_(template_ids))
+        .group_by(SequenceStep.template_id)
+    )
+    step_count_rows = (await db.execute(step_count_q)).all()
+    step_counts: dict[uuid.UUID, int] = {row[0]: row[1] for row in step_count_rows}
+
+    # Funnel summary: sent counts per step_order per template
+    funnel_q = (
+        select(
+            SequenceInstance.template_id,
+            SequenceTouchpoint.step_order,
+            func.count().label("cnt"),
+        )
+        .select_from(SequenceTouchpoint)
+        .join(SequenceInstance, SequenceInstance.id == SequenceTouchpoint.instance_id)
+        .where(
+            *base_tp_filters,
+            SequenceInstance.template_id.in_(template_ids),
+            SequenceTouchpoint.status.in_(("sent", "awaiting_reply", "replied")),
+        )
+        .group_by(SequenceInstance.template_id, SequenceTouchpoint.step_order)
+        .order_by(SequenceInstance.template_id, SequenceTouchpoint.step_order)
+    )
+    funnel_rows = (await db.execute(funnel_q)).all()
+
+    funnel_data: dict[uuid.UUID, dict[int, int]] = {}
+    for tid, step_order, cnt in funnel_rows:
+        if tid not in funnel_data:
+            funnel_data[tid] = {}
+        funnel_data[tid][step_order] = cnt
+
+    # Avg steps completed per instance per template (subquery approach)
+    steps_per_instance = (
+        select(
+            SequenceInstance.template_id.label("template_id"),
+            SequenceTouchpoint.instance_id.label("instance_id"),
+            func.count().label("step_cnt"),
+        )
+        .select_from(SequenceTouchpoint)
+        .join(SequenceInstance, SequenceInstance.id == SequenceTouchpoint.instance_id)
+        .where(
+            *base_tp_filters,
+            SequenceInstance.template_id.in_(template_ids),
+            SequenceTouchpoint.status.in_(("sent", "awaiting_reply", "replied")),
+        )
+        .group_by(SequenceInstance.template_id, SequenceTouchpoint.instance_id)
+    ).subquery()
+
+    avg_steps_q = (
+        select(
+            steps_per_instance.c.template_id,
+            func.avg(steps_per_instance.c.step_cnt).label("avg_steps"),
+        )
+        .group_by(steps_per_instance.c.template_id)
+    )
+    avg_steps_rows = (await db.execute(avg_steps_q)).all()
+    avg_steps: dict[uuid.UUID, float] = {row[0]: float(row[1]) for row in avg_steps_rows}
+
+    # Build response
+    templates: list[TemplateStats] = []
+    for tid in template_ids:
+        inst = inst_data.get(tid, {})
+        total_inst = sum(inst.values())
+        completed = inst.get("completed", 0)
+        active = inst.get("active", 0)
+        tp = tp_data.get(tid, {"sent": 0, "replied": 0})
+        total_sent = tp["sent"]
+        total_replied = tp["replied"]
+
+        completion_rate = round(completed / total_inst, 4) if total_inst > 0 else 0.0
+        reply_rate = round(total_replied / total_sent, 4) if total_sent > 0 else 0.0
+
+        # Funnel summary: ordered list of sent counts per step
+        fdata = funnel_data.get(tid, {})
+        funnel_summary = [fdata[k] for k in sorted(fdata.keys())]
+
+        templates.append(
+            TemplateStats(
+                template_id=str(tid),
+                name=template_names[tid],
+                total_sent=total_sent,
+                completion_rate=completion_rate,
+                reply_rate=reply_rate,
+                avg_steps_completed=round(avg_steps.get(tid, 0.0), 2),
+                total_steps=step_counts.get(tid, 0),
+                active_instances=active,
+                funnel_summary=funnel_summary,
+            )
+        )
+
+    result = TemplatesResponse(templates=templates)
+    _cache_set(str(org_id), "templates", params, result.model_dump())
     return result
