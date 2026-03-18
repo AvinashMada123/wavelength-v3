@@ -240,7 +240,7 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
             call_metadata["red_flags"] = [rf.model_dump() for rf in analysis.red_flags]
             call_metadata["captured_data"] = analysis.captured_data
 
-        await _update_call_status(call_sid, outcome="completed", summary=summary, metadata=call_metadata)
+        await _update_call_status(call_sid, status="completed", outcome="completed", summary=summary, metadata=call_metadata)
         await _post_ghl_outcome(ctx, outcome="completed", summary=summary, metadata=call_metadata)
         await _run_ghl_workflows(ctx, bot_config, "post_call")
 
