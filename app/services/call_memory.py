@@ -73,19 +73,7 @@ async def build_call_memory_prompt(
         sentiment = meta.get("sentiment", "N/A")
 
         lines.append(f"--- Call {i} ({date_str}, Duration: {duration_str}) ---")
-        lines.append(f"Outcome: {outcome}")
-        lines.append(f"Interest Level: {interest}")
-        lines.append(f"Sentiment: {sentiment}")
-        lines.append(f"Summary: {call.summary}")
-
-        # Include captured data if available
-        captured = meta.get("captured_data")
-        if captured:
-            items = [f"  - {k}: {v}" for k, v in captured.items() if v]
-            if items:
-                lines.append("Captured Data:")
-                lines.extend(items)
-
+        lines.append(call.summary or "No summary available.")
         lines.append("")
 
     lines.append("--------------------------------------------------------------------------------")
