@@ -682,9 +682,7 @@ async def test_step(
     # Resolve template params with variables
     from app.services.messaging_client import send_template, send_session_message
 
-    phone = body.phone.strip()
-    if not phone.startswith("+"):
-        phone = "+" + phone
+    phone = body.phone.strip().lstrip("+")
 
     if channel == "whatsapp_template":
         template_name = step.whatsapp_template_name

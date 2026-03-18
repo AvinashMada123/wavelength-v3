@@ -34,11 +34,13 @@ async def _wati_send_template(
     creds: dict, phone: str, template_name: str, params: list
 ) -> DeliveryResult:
     """Send a WhatsApp template message via WATI."""
-    url = f"{creds['api_url']}/api/v1/sendTemplateMessage"
+    # WATI expects phone without + prefix
+    clean_phone = phone.lstrip("+")
+    url = f"{creds['api_url']}/api/v1/sendTemplateMessage?whatsappNumber={clean_phone}"
     headers = {"Authorization": creds["api_token"], "Content-Type": "application/json"}
     body = {
         "template_name": template_name,
-        "broadcast_name": f"seq_{template_name}_{phone}",
+        "broadcast_name": f"seq_{template_name}_{clean_phone}",
         "parameters": params,
     }
     async with aiohttp.ClientSession() as session:
@@ -55,7 +57,8 @@ async def _wati_send_template(
 
 async def _wati_send_session(creds: dict, phone: str, text: str) -> DeliveryResult:
     """Send a WhatsApp session (free-form) message via WATI."""
-    url = f"{creds['api_url']}/api/v1/sendSessionMessage/{phone}"
+    clean_phone = phone.lstrip("+")
+    url = f"{creds['api_url']}/api/v1/sendSessionMessage/{clean_phone}"
     headers = {"Authorization": creds["api_token"], "Content-Type": "application/json"}
     body = {"messageText": text}
     async with aiohttp.ClientSession() as session:
