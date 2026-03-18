@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, useCallback, type FormEvent } from "react";
-import { Loader2, Plus, Trash2, Star, Phone, Shield, Key } from "lucide-react";
+import { Loader2, Plus, Trash2, Star, Phone, Shield, Key, MessageSquare, ArrowRight } from "lucide-react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/auth-context";
 import { Header } from "@/components/layout/header";
@@ -445,6 +446,26 @@ export default function SettingsPage() {
                   </form>
                 </>
               )}
+            </CardContent>
+          </Card>
+          {/* Messaging Providers */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <MessageSquare className="h-5 w-5 text-violet-400" />
+                Messaging Providers
+              </CardTitle>
+              <CardDescription>
+                Connect WhatsApp and SMS providers (WATI, AISensy, Twilio) for engagement sequences
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Link href="/settings/messaging">
+                <Button variant="outline" className="gap-2">
+                  Manage Messaging Providers
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              </Link>
             </CardContent>
           </Card>
         </div>
