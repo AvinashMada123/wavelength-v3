@@ -45,7 +45,7 @@ function extractErrorMessage(body: string, status: number): string {
   return body || `Request failed (${status})`;
 }
 
-async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
+export async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
   const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
