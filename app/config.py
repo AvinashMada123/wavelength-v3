@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     CASHFREE_SECRET_KEY: str = ""
     CASHFREE_ENVIRONMENT: str = "PRODUCTION"
 
+    # Anthropic (for sequence copywriting)
+    ANTHROPIC_API_KEY: str = ""
+
+    # Messaging provider credential encryption
+    MESSAGING_CREDENTIALS_KEY: str = ""  # Fernet key
+
     # --- Audio quality feature flags (Phase 0-4) ---
     # Phase 1: Plivo server-side noise cancellation on incoming audio
     PLIVO_NOISE_CANCEL: bool = True

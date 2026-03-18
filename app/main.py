@@ -28,7 +28,7 @@ if _env_file.exists():
             if key and key not in os.environ:
                 os.environ[key] = value
 
-from app.api import admin, analytics, billing, bots, calls, campaigns, health, leads, payments, queue, telephony, webhook
+from app.api import admin, analytics, billing, bots, calls, campaigns, health, leads, messaging_providers, payments, queue, sequences, telephony, webhook, webhooks
 from app.auth import router as auth_router
 from app.bot_config.loader import BotConfigLoader
 from app.database import close_asyncpg_pool, init_asyncpg_pool
@@ -101,5 +101,8 @@ app.include_router(admin.router)
 app.include_router(billing.router)
 app.include_router(payments.router)
 app.include_router(telephony.router)
+app.include_router(sequences.router)
+app.include_router(messaging_providers.router)
+app.include_router(webhooks.router)
 app.include_router(plivo_routes.router)
 app.include_router(twilio_routes.router)

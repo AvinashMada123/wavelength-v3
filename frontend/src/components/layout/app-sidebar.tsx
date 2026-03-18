@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Bot, Phone, ClipboardList, Radio, ListOrdered, BarChart3, Users, ContactRound, Megaphone, CreditCard, LogOut, Shield, Settings } from "lucide-react";
+import { LayoutDashboard, Bot, Phone, ClipboardList, Radio, ListOrdered, BarChart3, Users, ContactRound, Megaphone, Workflow, CreditCard, LogOut, Shield, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Sidebar,
@@ -28,6 +28,7 @@ const navItems = [
   { title: "Analytics", href: "/analytics", icon: BarChart3 },
   { title: "Leads", href: "/leads", icon: ContactRound },
   { title: "Campaigns", href: "/campaigns", icon: Megaphone },
+  { title: "Sequences", href: "/sequences", icon: Workflow },
   { title: "Team", href: "/team", icon: Users },
   { title: "Settings", href: "/settings", icon: Settings },
   { title: "Billing", href: "/billing", icon: CreditCard },
