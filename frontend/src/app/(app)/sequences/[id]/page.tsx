@@ -10,6 +10,8 @@ import {
   Download,
   Loader2,
   Workflow,
+  Trash2,
+  Variable,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -19,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -74,6 +77,7 @@ export default function TemplateBuilderPage() {
   const [templateName, setTemplateName] = useState("");
   const [triggerType, setTriggerType] = useState("post_call");
   const [isActive, setIsActive] = useState(false);
+  const [variables, setVariables] = useState<Array<{ key: string; default_value: string; description: string }>>([]);
 
   // UI state
   const [expandedStepId, setExpandedStepId] = useState<string | null>(null);
@@ -99,6 +103,7 @@ export default function TemplateBuilderPage() {
       setTemplateName(data.name);
       setTriggerType(data.trigger_type);
       setIsActive(data.is_active);
+      setVariables(data.variables || []);
     } catch {
       toast.error("Failed to load template");
     } finally {
@@ -361,6 +366,95 @@ export default function TemplateBuilderPage() {
               Export JSON
             </Button>
           </div>
+
+          {/* Template Variables */}
+          <Card>
+            <CardContent className="pt-5 pb-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Variable className="h-4 w-4 text-violet-400" />
+                  <h3 className="text-sm font-medium">Template Variables</h3>
+                  <span className="text-xs text-muted-foreground">
+                    Use as {"{{variable_name}}"} in templates
+                  </span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs gap-1"
+                  onClick={() => {
+                    const updated = [...variables, { key: "", default_value: "", description: "" }];
+                    setVariables(updated);
+                  }}
+                >
+                  <Plus className="h-3 w-3" /> Add Variable
+                </Button>
+              </div>
+              {variables.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-2">
+                  No variables defined. Add variables like event_date, masterclass_link, etc.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-[1fr_1.5fr_1.5fr_32px] gap-2 text-xs text-muted-foreground font-medium px-1">
+                    <span>Key</span>
+                    <span>Default Value</span>
+                    <span>Description</span>
+                    <span />
+                  </div>
+                  {variables.map((v, i) => (
+                    <div key={i} className="grid grid-cols-[1fr_1.5fr_1.5fr_32px] gap-2 items-center">
+                      <Input
+                        className="h-8 text-xs font-mono"
+                        placeholder="event_date"
+                        value={v.key}
+                        onChange={(e) => {
+                          const updated = [...variables];
+                          updated[i] = { ...updated[i], key: e.target.value };
+                          setVariables(updated);
+                        }}
+                        onBlur={() => saveHeader({ variables })}
+                      />
+                      <Input
+                        className="h-8 text-xs"
+                        placeholder="2026-03-22"
+                        value={v.default_value}
+                        onChange={(e) => {
+                          const updated = [...variables];
+                          updated[i] = { ...updated[i], default_value: e.target.value };
+                          setVariables(updated);
+                        }}
+                        onBlur={() => saveHeader({ variables })}
+                      />
+                      <Input
+                        className="h-8 text-xs"
+                        placeholder="Masterclass date"
+                        value={v.description}
+                        onChange={(e) => {
+                          const updated = [...variables];
+                          updated[i] = { ...updated[i], description: e.target.value };
+                          setVariables(updated);
+                        }}
+                        onBlur={() => saveHeader({ variables })}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0 text-muted-foreground hover:text-red-400"
+                        onClick={() => {
+                          const updated = variables.filter((_, idx) => idx !== i);
+                          setVariables(updated);
+                          saveHeader({ variables: updated });
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Steps list */}
           {steps.length === 0 ? (

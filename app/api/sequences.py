@@ -34,12 +34,19 @@ router = APIRouter(prefix="/api/sequences", tags=["sequences"])
 # ---------------------------------------------------------------------------
 
 
+class TemplateVariable(BaseModel):
+    key: str
+    default_value: str = ""
+    description: str = ""
+
+
 class TemplateCreate(BaseModel):
     name: str
     bot_id: uuid.UUID | None = None
     trigger_type: str = "manual"
     trigger_conditions: dict[str, Any] = Field(default_factory=dict)
     max_active_per_lead: int = 1
+    variables: list[TemplateVariable] = Field(default_factory=list)
 
 
 class TemplateUpdate(BaseModel):
@@ -48,6 +55,7 @@ class TemplateUpdate(BaseModel):
     trigger_type: str | None = None
     trigger_conditions: dict[str, Any] | None = None
     max_active_per_lead: int | None = None
+    variables: list[TemplateVariable] | None = None
     is_active: bool | None = None
 
 
@@ -83,6 +91,7 @@ class TemplateResponse(BaseModel):
     trigger_type: str
     trigger_conditions: dict[str, Any]
     max_active_per_lead: int
+    variables: list[dict[str, Any]] = Field(default_factory=list)
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -255,6 +264,7 @@ class ImportRequest(BaseModel):
     trigger_type: str = "manual"
     trigger_conditions: dict[str, Any] = Field(default_factory=dict)
     max_active_per_lead: int = 1
+    variables: list[TemplateVariable] = Field(default_factory=list)
     steps: list[ImportStepData] = Field(default_factory=list)
 
 
@@ -356,6 +366,7 @@ async def create_template(
         trigger_type=body.trigger_type,
         trigger_conditions=body.trigger_conditions,
         max_active_per_lead=body.max_active_per_lead,
+        variables=[v.model_dump() for v in body.variables] if body.variables else [],
     )
     db.add(template)
     await db.commit()
@@ -667,6 +678,7 @@ async def export_template(
         "trigger_type": template.trigger_type,
         "trigger_conditions": template.trigger_conditions,
         "max_active_per_lead": template.max_active_per_lead,
+        "variables": template.variables or [],
         "steps": [
             {
                 "step_order": s.step_order,
@@ -711,6 +723,7 @@ async def import_template(
         trigger_type=body.trigger_type,
         trigger_conditions=body.trigger_conditions,
         max_active_per_lead=body.max_active_per_lead,
+        variables=[v.model_dump() for v in body.variables] if body.variables else [],
     )
     db.add(template)
     await db.flush()

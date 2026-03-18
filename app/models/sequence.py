@@ -31,6 +31,7 @@ class SequenceTemplate(Base):
     trigger_type: Mapped[str] = mapped_column(Text, nullable=False)
     trigger_conditions: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     max_active_per_lead: Mapped[int] = mapped_column(Integer, server_default=text("1"))
+    variables: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     is_active: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(server_default=text("now()"))
     updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), onupdate=datetime.utcnow)

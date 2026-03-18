@@ -1,6 +1,12 @@
 import { apiFetch } from "./api";
 
 // --- Types ---
+export interface TemplateVariable {
+  key: string;
+  default_value: string;
+  description: string;
+}
+
 export interface SequenceTemplate {
   id: string;
   name: string;
@@ -8,6 +14,7 @@ export interface SequenceTemplate {
   trigger_conditions: Record<string, any>;
   bot_id: string | null;
   max_active_per_lead: number;
+  variables: TemplateVariable[];
   is_active: boolean;
   step_count?: number;
   created_at: string;
