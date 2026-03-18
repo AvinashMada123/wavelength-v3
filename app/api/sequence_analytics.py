@@ -1,8 +1,9 @@
-"""Sequence analytics API — overview, channels, failures, funnel, and templates endpoints."""
+"""Sequence analytics API — overview, channels, failures, funnel, templates, leads, and lead detail endpoints."""
 
 from __future__ import annotations
 
 import uuid
+from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -14,13 +15,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_org
 from app.database import get_db
+from app.models.lead import Lead
 from app.models.sequence import (
     SequenceInstance,
     SequenceStep,
     SequenceTemplate,
     SequenceTouchpoint,
 )
-from app.services.sequence_analytics import _cache_get, _cache_set
+from app.services.sequence_analytics import _cache_get, _cache_set, compute_engagement_score
 
 logger = structlog.get_logger(__name__)
 
@@ -110,6 +112,65 @@ class TemplateStats(BaseModel):
 
 class TemplatesResponse(BaseModel):
     templates: list[TemplateStats] = []
+
+
+class LeadStats(BaseModel):
+    lead_id: str
+    lead_name: str | None = None
+    lead_phone: str | None = None
+    score: int = 0
+    tier: str = "inactive"
+    active_sequences: int = 0
+    total_replies: int = 0
+    last_interaction_at: str | None = None
+
+
+class TierSummary(BaseModel):
+    hot: int = 0
+    warm: int = 0
+    cold: int = 0
+    inactive: int = 0
+
+
+class LeadsResponse(BaseModel):
+    leads: list[LeadStats] = []
+    tier_summary: TierSummary = TierSummary()
+    total: int = 0
+    page: int = 1
+    page_size: int = 20
+
+
+class ScoreDimension(BaseModel):
+    score: int
+    max: int
+
+
+class ScoreBreakdown(BaseModel):
+    activity: ScoreDimension
+    recency: ScoreDimension
+    outcome: ScoreDimension
+
+
+class TimelineEntry(BaseModel):
+    timestamp: str
+    template_name: str
+    step_name: str
+    channel: str
+    status: str
+    content_preview: str | None = None
+    reply_text: str | None = None
+
+
+class LeadDetailResponse(BaseModel):
+    lead_id: str
+    lead_name: str | None = None
+    score: int = 0
+    tier: str = "inactive"
+    score_breakdown: ScoreBreakdown
+    active_sequences: int = 0
+    total_replies: int = 0
+    avg_reply_time_hours: float | None = None
+    timeline: list[TimelineEntry] = []
 
 
 # ---------------------------------------------------------------------------
@@ -883,4 +944,334 @@ async def get_templates(
 
     result = TemplatesResponse(templates=templates)
     _cache_set(str(org_id), "templates", params, result.model_dump())
+    return result
+
+
+@router.get("/leads", response_model=LeadsResponse)
+async def get_leads(
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
+    template_id: uuid.UUID | None = Query(None),
+    channel: str | None = Query(None),
+    bot_id: uuid.UUID | None = Query(None),
+    tier: str | None = Query(None, description="Filter by engagement tier: hot/warm/cold/inactive"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    sort_by: str = Query("score"),
+    sort_order: str = Query("desc"),
+    org_id: uuid.UUID = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+) -> LeadsResponse:
+    """Leads engagement table with scoring, tier summary, and pagination."""
+    # Cache key excludes pagination/sort — we cache the full scored list
+    filter_params = _filter_params_dict(start_date, end_date, template_id, channel, bot_id)
+    cache_params = {**filter_params, "tier": tier}
+    cache_key_params = {**filter_params}  # no tier/page/sort in cache key
+    cached = _cache_get(str(org_id), "leads", cache_key_params)
+
+    if cached is not None:
+        scored_leads: list[dict] = cached["scored_leads"]
+        tier_summary_data: dict = cached["tier_summary"]
+    else:
+        # --- 1. Get all unique lead_ids from touchpoints matching filters ---
+        filters = _build_touchpoint_filters(org_id, start_date, end_date, template_id, channel, bot_id)
+        lead_ids_q = (
+            select(SequenceTouchpoint.lead_id)
+            .select_from(SequenceTouchpoint)
+            .where(*filters, SequenceTouchpoint.lead_id.isnot(None))
+            .distinct()
+        )
+        lead_id_rows = (await db.execute(lead_ids_q)).all()
+        lead_ids = [row[0] for row in lead_id_rows]
+
+        if not lead_ids:
+            return LeadsResponse()
+
+        # --- 2. BATCH fetch: touchpoints, instances, lead info ---
+        # All touchpoints for these leads (with filters applied)
+        tp_q = (
+            select(
+                SequenceTouchpoint.lead_id,
+                SequenceTouchpoint.status,
+                SequenceTouchpoint.sent_at,
+                SequenceTouchpoint.updated_at,
+                SequenceTouchpoint.step_id,
+            )
+            .select_from(SequenceTouchpoint)
+            .where(*filters, SequenceTouchpoint.lead_id.in_(lead_ids))
+        )
+        tp_rows = (await db.execute(tp_q)).all()
+
+        # expects_reply lookup: batch fetch step_ids
+        step_ids = {row.step_id for row in tp_rows if row.step_id is not None}
+        expects_reply_map: dict[uuid.UUID, bool] = {}
+        if step_ids:
+            step_q = select(SequenceStep.id, SequenceStep.expects_reply).where(
+                SequenceStep.id.in_(step_ids)
+            )
+            step_rows = (await db.execute(step_q)).all()
+            expects_reply_map = {row[0]: row[1] for row in step_rows}
+
+        # Group touchpoints by lead_id
+        lead_touchpoints: dict[uuid.UUID, list[dict]] = defaultdict(list)
+        for row in tp_rows:
+            lead_touchpoints[row.lead_id].append({
+                "status": row.status,
+                "sent_at": row.sent_at,
+                "updated_at": row.updated_at,
+                "expects_reply": expects_reply_map.get(row.step_id, False),
+            })
+
+        # Instance counts per lead (completed and total)
+        inst_q = (
+            select(
+                SequenceInstance.lead_id,
+                SequenceInstance.status,
+                func.count().label("cnt"),
+            )
+            .select_from(SequenceInstance)
+            .where(
+                SequenceInstance.org_id == org_id,
+                SequenceInstance.lead_id.in_(lead_ids),
+            )
+            .group_by(SequenceInstance.lead_id, SequenceInstance.status)
+        )
+        inst_rows = (await db.execute(inst_q)).all()
+        lead_instances: dict[uuid.UUID, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        for row in inst_rows:
+            lead_instances[row.lead_id][row.status] = row.cnt
+
+        # Lead info (batch)
+        lead_info_q = select(Lead.id, Lead.contact_name, Lead.phone_number).where(
+            Lead.id.in_(lead_ids)
+        )
+        lead_info_rows = (await db.execute(lead_info_q)).all()
+        lead_info: dict[uuid.UUID, tuple[str | None, str | None]] = {
+            row[0]: (row[1], row[2]) for row in lead_info_rows
+        }
+
+        # --- 3. Compute engagement score per lead ---
+        scored_leads = []
+        for lid in lead_ids:
+            tps = lead_touchpoints.get(lid, [])
+            inst = lead_instances.get(lid, {})
+            completed_seqs = inst.get("completed", 0)
+            total_seqs = sum(inst.values())
+            active_seqs = inst.get("active", 0)
+
+            eng = compute_engagement_score(tps, completed_seqs, total_seqs)
+
+            total_replies = sum(1 for tp in tps if tp["status"] == "replied")
+
+            # Last interaction: most recent updated_at or sent_at
+            interaction_times = [
+                tp["updated_at"] or tp["sent_at"]
+                for tp in tps
+                if tp["updated_at"] or tp["sent_at"]
+            ]
+            last_interaction = max(interaction_times).isoformat() if interaction_times else None
+
+            name, phone = lead_info.get(lid, (None, None))
+
+            scored_leads.append({
+                "lead_id": str(lid),
+                "lead_name": name,
+                "lead_phone": phone,
+                "score": eng["score"],
+                "tier": eng["tier"],
+                "active_sequences": active_seqs,
+                "total_replies": total_replies,
+                "last_interaction_at": last_interaction,
+            })
+
+        # --- 4. Tier summary (BEFORE tier filtering) ---
+        tier_summary_data = {"hot": 0, "warm": 0, "cold": 0, "inactive": 0}
+        for lead in scored_leads:
+            t = lead["tier"]
+            if t in tier_summary_data:
+                tier_summary_data[t] += 1
+
+        # Cache full scored list + tier summary
+        _cache_set(str(org_id), "leads", cache_key_params, {
+            "scored_leads": scored_leads,
+            "tier_summary": tier_summary_data,
+        })
+
+    # --- 5. Apply tier filter AFTER computing summary ---
+    filtered_leads = scored_leads
+    if tier:
+        filtered_leads = [l for l in scored_leads if l["tier"] == tier]
+
+    # --- 6. Sort ---
+    reverse = sort_order == "desc"
+    if sort_by == "score":
+        filtered_leads.sort(key=lambda l: l["score"], reverse=reverse)
+    elif sort_by == "replies":
+        filtered_leads.sort(key=lambda l: l["total_replies"], reverse=reverse)
+    elif sort_by == "last_interaction":
+        filtered_leads.sort(key=lambda l: l["last_interaction_at"] or "", reverse=reverse)
+    else:
+        filtered_leads.sort(key=lambda l: l["score"], reverse=reverse)
+
+    # --- 7. Paginate ---
+    total = len(filtered_leads)
+    start = (page - 1) * page_size
+    end = start + page_size
+    page_leads = filtered_leads[start:end]
+
+    return LeadsResponse(
+        leads=[LeadStats(**l) for l in page_leads],
+        tier_summary=TierSummary(**tier_summary_data),
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/leads/{lead_id}", response_model=LeadDetailResponse)
+async def get_lead_detail(
+    lead_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+) -> LeadDetailResponse:
+    """Single lead drill-down: engagement score breakdown, reply time, and timeline."""
+    cache_params = {"lead_id": str(lead_id)}
+    cached = _cache_get(str(org_id), "lead_detail", cache_params)
+    if cached is not None:
+        return LeadDetailResponse(**cached)
+
+    # --- Verify lead has touchpoints in this org ---
+    exists_q = (
+        select(func.count())
+        .select_from(SequenceTouchpoint)
+        .where(
+            SequenceTouchpoint.org_id == org_id,
+            SequenceTouchpoint.lead_id == lead_id,
+        )
+    )
+    tp_count = (await db.execute(exists_q)).scalar() or 0
+    if tp_count == 0:
+        raise HTTPException(status_code=404, detail="Lead not found or has no touchpoints")
+
+    # --- Lead info ---
+    lead_q = select(Lead.contact_name, Lead.phone_number).where(Lead.id == lead_id)
+    lead_row = (await db.execute(lead_q)).one_or_none()
+    lead_name = lead_row[0] if lead_row else None
+
+    # --- All touchpoints with step info (outerjoin SequenceStep) ---
+    tp_q = (
+        select(
+            SequenceTouchpoint.id,
+            SequenceTouchpoint.status,
+            SequenceTouchpoint.sent_at,
+            SequenceTouchpoint.updated_at,
+            SequenceTouchpoint.created_at,
+            SequenceTouchpoint.generated_content,
+            SequenceTouchpoint.reply_text,
+            SequenceTouchpoint.instance_id,
+            SequenceTouchpoint.step_order,
+            SequenceStep.name.label("step_name"),
+            SequenceStep.channel.label("channel"),
+            SequenceStep.expects_reply,
+        )
+        .select_from(SequenceTouchpoint)
+        .outerjoin(SequenceStep, SequenceStep.id == SequenceTouchpoint.step_id)
+        .where(
+            SequenceTouchpoint.org_id == org_id,
+            SequenceTouchpoint.lead_id == lead_id,
+        )
+        .order_by(SequenceTouchpoint.created_at)
+    )
+    tp_rows = (await db.execute(tp_q)).all()
+
+    # --- Instance data for this lead ---
+    inst_q = (
+        select(
+            SequenceInstance.id,
+            SequenceInstance.status,
+            SequenceInstance.template_id,
+        )
+        .where(
+            SequenceInstance.org_id == org_id,
+            SequenceInstance.lead_id == lead_id,
+        )
+    )
+    inst_rows = (await db.execute(inst_q)).all()
+    completed_seqs = sum(1 for r in inst_rows if r.status == "completed")
+    total_seqs = len(inst_rows)
+    active_seqs = sum(1 for r in inst_rows if r.status == "active")
+
+    # --- Template names (batch) ---
+    template_ids = {r.template_id for r in inst_rows}
+    template_names: dict[uuid.UUID, str] = {}
+    if template_ids:
+        tpl_q = select(SequenceTemplate.id, SequenceTemplate.name).where(
+            SequenceTemplate.id.in_(template_ids)
+        )
+        tpl_rows = (await db.execute(tpl_q)).all()
+        template_names = {r[0]: r[1] for r in tpl_rows}
+
+    # Instance -> template mapping
+    inst_template: dict[uuid.UUID, uuid.UUID] = {r.id: r.template_id for r in inst_rows}
+
+    # --- Compute engagement score ---
+    touchpoint_dicts = [
+        {
+            "status": r.status,
+            "sent_at": r.sent_at,
+            "updated_at": r.updated_at,
+            "expects_reply": r.expects_reply or False,
+        }
+        for r in tp_rows
+    ]
+    eng = compute_engagement_score(touchpoint_dicts, completed_seqs, total_seqs)
+
+    total_replies = sum(1 for r in tp_rows if r.status == "replied")
+
+    # --- Avg reply time ---
+    reply_deltas = []
+    for r in tp_rows:
+        if r.status == "replied" and r.sent_at and r.updated_at:
+            delta_seconds = (r.updated_at - r.sent_at).total_seconds()
+            if delta_seconds > 0:
+                reply_deltas.append(delta_seconds)
+    avg_reply_time_hours = (
+        round(sum(reply_deltas) / len(reply_deltas) / 3600, 2) if reply_deltas else None
+    )
+
+    # --- Build timeline ---
+    timeline: list[TimelineEntry] = []
+    for r in tp_rows:
+        tpl_id = inst_template.get(r.instance_id)
+        tpl_name = template_names.get(tpl_id, "Unknown") if tpl_id else "Unknown"
+        content_preview = r.generated_content[:80] if r.generated_content else None
+
+        timeline.append(TimelineEntry(
+            timestamp=r.created_at.isoformat() if r.created_at else "",
+            template_name=tpl_name,
+            step_name=r.step_name or f"Step {r.step_order}",
+            channel=r.channel or "unknown",
+            status=r.status,
+            content_preview=content_preview,
+            reply_text=r.reply_text,
+        ))
+
+    breakdown = eng["breakdown"]
+    result = LeadDetailResponse(
+        lead_id=str(lead_id),
+        lead_name=lead_name,
+        score=eng["score"],
+        tier=eng["tier"],
+        score_breakdown=ScoreBreakdown(
+            activity=ScoreDimension(**breakdown["activity"]),
+            recency=ScoreDimension(**breakdown["recency"]),
+            outcome=ScoreDimension(**breakdown["outcome"]),
+        ),
+        active_sequences=active_seqs,
+        total_replies=total_replies,
+        avg_reply_time_hours=avg_reply_time_hours,
+        timeline=timeline,
+    )
+
+    _cache_set(str(org_id), "lead_detail", cache_params, result.model_dump())
     return result
