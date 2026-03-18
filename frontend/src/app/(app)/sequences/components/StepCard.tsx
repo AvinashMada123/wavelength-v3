@@ -48,6 +48,8 @@ const CONTENT_TYPE_OPTIONS = [
 
 const TIMING_TYPE_OPTIONS = [
   { value: "delay", label: "Delay After Previous" },
+  { value: "relative_to_event", label: "Relative to Event" },
+  { value: "relative_to_signup", label: "After Signup/Call" },
   { value: "fixed_time", label: "Fixed Time" },
   { value: "immediate", label: "Immediate" },
 ];
@@ -81,6 +83,28 @@ function timingSummary(step: SequenceStep): string {
     const time = val?.at_time;
     if (time) parts.push(`at ${time}`);
     return parts.length ? parts.join(" ") + " after prev" : "After previous";
+  }
+  if (step.timing_type === "relative_to_event") {
+    const val = step.timing_value as Record<string, number | string>;
+    const days = Number(val?.days ?? 0);
+    const time = val?.time;
+    if (days < 0) {
+      return `${Math.abs(days)}d before event${time ? ` at ${time}` : ""}`;
+    } else if (days === 0) {
+      return `Event day${time ? ` at ${time}` : ""}`;
+    }
+    return `${days}d after event${time ? ` at ${time}` : ""}`;
+  }
+  if (step.timing_type === "relative_to_signup") {
+    const val = step.timing_value as Record<string, number | string>;
+    const hours = val?.hours ?? 0;
+    const days = val?.days ?? 0;
+    const parts: string[] = [];
+    if (days) parts.push(`${days}d`);
+    if (hours) parts.push(`${hours}h`);
+    const time = val?.time;
+    if (time) parts.push(`at ${time}`);
+    return parts.length ? parts.join(" ") + " after signup" : "After signup";
   }
   if (step.timing_type === "fixed_time") {
     const val = step.timing_value as Record<string, string>;
@@ -332,7 +356,7 @@ export function StepCard({
               </SelectContent>
             </Select>
 
-            {timingType === "delay" && (
+            {(timingType === "delay" || timingType === "relative_to_signup") && (
               <>
                 <div className="flex items-center gap-2">
                   <Input
@@ -370,13 +394,30 @@ export function StepCard({
               </>
             )}
 
-            {(timingType === "delay" || timingType === "fixed_time") && (
+            {timingType === "relative_to_event" && (
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  placeholder="Days"
+                  value={timingValue.days ?? ""}
+                  onChange={(e) => {
+                    const tv = { ...timingValue, days: Number(e.target.value) };
+                    setTimingValue(tv);
+                    updateField({ timing_value: tv });
+                  }}
+                  onBlur={flush}
+                  className="w-full"
+                />
+                <span className="text-xs text-muted-foreground whitespace-nowrap">days (- = before)</span>
+              </div>
+            )}
+
+            {(timingType === "delay" || timingType === "fixed_time" || timingType === "relative_to_event" || timingType === "relative_to_signup") && (
               <Input
                 type="time"
                 value={timingValue.at_time ?? timingValue.time ?? ""}
                 onChange={(e) => {
-                  const key = timingType === "fixed_time" ? "time" : "at_time";
-                  const tv = { ...timingValue, [key]: e.target.value };
+                  const tv = { ...timingValue, time: e.target.value };
                   setTimingValue(tv);
                   updateField({ timing_value: tv });
                 }}

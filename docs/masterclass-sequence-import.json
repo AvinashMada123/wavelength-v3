@@ -1,0 +1,152 @@
+{
+  "name": "Masterclass Engagement Sequence",
+  "trigger_type": "call_outcome",
+  "trigger_conditions": {
+    "outcomes": ["completed", "info_delivered", "callback_scheduled"],
+    "min_interest": "low"
+  },
+  "max_active_per_lead": 1,
+  "steps": [
+    {
+      "step_order": 1,
+      "name": "Gift Message (AI-personalized career gift)",
+      "channel": "whatsapp",
+      "timing_type": "relative_to_signup",
+      "timing_value": { "hours": 1 },
+      "skip_conditions": null,
+      "content_type": "whatsapp_template",
+      "whatsapp_template_name": "ai_career_gift",
+      "whatsapp_template_params": {
+        "1": "{{contact_name}}",
+        "2": "{{gift_plan}}",
+        "3": "{{anchor_task}}",
+        "4": "{{masterclass_link}}"
+      },
+      "ai_prompt": null,
+      "ai_model": null,
+      "expects_reply": false,
+      "reply_handler": null
+    },
+    {
+      "step_order": 2,
+      "name": "Hope Question (personal motivation prompt)",
+      "channel": "whatsapp",
+      "timing_type": "relative_to_event",
+      "timing_value": { "days": -3, "time": "19:30" },
+      "skip_conditions": {
+        "min_days_to_event": 3,
+        "skip_reason": "Less than 3 days to event — not enough time for hope arc"
+      },
+      "content_type": "whatsapp_template",
+      "whatsapp_template_name": "ai_hope_question",
+      "whatsapp_template_params": {
+        "1": "{{contact_name}}"
+      },
+      "ai_prompt": null,
+      "ai_model": null,
+      "expects_reply": true,
+      "reply_handler": {
+        "type": "ai_match",
+        "action": "match_success_story",
+        "ai_prompt": "The user replied to a hope question about what they'd do if AI could help their career. Match their reply to one of these success stories and send the most relevant one as a WhatsApp session message:\n\n1. Ramesh (40, factory supervisor) → learned AI quality checks, promoted\n2. Priya (28, teacher) → built AI lesson planner, 200 students use it\n3. Arun (35, shopkeeper) → AI inventory system, 40% less waste\n4. Meera (32, freelancer) → AI writing tools, income doubled\n5. Karthik (45, accountant) → automated reports, landed corporate clients",
+        "response_template_name": null
+      }
+    },
+    {
+      "step_order": 3,
+      "name": "Proof Stories (success stories from past attendees)",
+      "channel": "whatsapp",
+      "timing_type": "relative_to_event",
+      "timing_value": { "days": -2, "time": "10:00" },
+      "skip_conditions": {
+        "min_days_to_event": 4,
+        "skip_reason": "Less than 4 days to event — proof stories skipped"
+      },
+      "content_type": "whatsapp_template",
+      "whatsapp_template_name": "ai_proof_stories",
+      "whatsapp_template_params": {
+        "1": "{{contact_name}}"
+      },
+      "ai_prompt": null,
+      "ai_model": null,
+      "expects_reply": false,
+      "reply_handler": null
+    },
+    {
+      "step_order": 4,
+      "name": "Eve Reminder (night-before excitement builder)",
+      "channel": "whatsapp",
+      "timing_type": "relative_to_event",
+      "timing_value": { "days": -1, "time": "20:00" },
+      "skip_conditions": {
+        "min_days_to_event": 1,
+        "skip_reason": "Same-day signup — skip eve reminder"
+      },
+      "content_type": "whatsapp_template",
+      "whatsapp_template_name": "ai_eve_reminder",
+      "whatsapp_template_params": {
+        "1": "{{contact_name}}",
+        "2": "{{event_time}}"
+      },
+      "ai_prompt": null,
+      "ai_model": null,
+      "expects_reply": false,
+      "reply_handler": null
+    },
+    {
+      "step_order": 5,
+      "name": "Call 2 (pre-event excitement call)",
+      "channel": "voice",
+      "timing_type": "relative_to_event",
+      "timing_value": { "days": 0, "time": "11:00" },
+      "skip_conditions": null,
+      "content_type": "voice_call",
+      "whatsapp_template_name": null,
+      "whatsapp_template_params": null,
+      "ai_prompt": null,
+      "ai_model": null,
+      "expects_reply": false,
+      "reply_handler": null
+    },
+    {
+      "step_order": 6,
+      "name": "Go Live (masterclass starting now)",
+      "channel": "whatsapp",
+      "timing_type": "relative_to_event",
+      "timing_value": { "days": 0, "time": "19:25" },
+      "skip_conditions": null,
+      "content_type": "whatsapp_template",
+      "whatsapp_template_name": "ai_golive",
+      "whatsapp_template_params": {
+        "1": "{{contact_name}}",
+        "2": "{{masterclass_link}}"
+      },
+      "ai_prompt": null,
+      "ai_model": null,
+      "expects_reply": false,
+      "reply_handler": null
+    },
+    {
+      "step_order": 7,
+      "name": "No-Show Recovery (Sunday morning re-engage)",
+      "channel": "whatsapp",
+      "timing_type": "relative_to_event",
+      "timing_value": { "days": 1, "time": "10:00" },
+      "skip_conditions": {
+        "attended": true,
+        "skip_reason": "Lead attended — no recovery needed"
+      },
+      "content_type": "whatsapp_template",
+      "whatsapp_template_name": "ai_noshow_recovery",
+      "whatsapp_template_params": {
+        "1": "{{contact_name}}",
+        "2": "{{sunday_link}}",
+        "3": "{{anchor_task}}"
+      },
+      "ai_prompt": null,
+      "ai_model": null,
+      "expects_reply": false,
+      "reply_handler": null
+    }
+  ]
+}
