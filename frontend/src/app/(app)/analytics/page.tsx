@@ -262,6 +262,7 @@ export default function AnalyticsPage() {
   const [selectedCallDetail, setSelectedCallDetail] = useState<{
     call_sid: string;
     transcript: Array<{ role: string; content: string }>;
+    has_recording: boolean;
   } | null>(null);
 
   // Fetch call detail when alert modal opens
@@ -272,6 +273,7 @@ export default function AnalyticsPage() {
         setSelectedCallDetail({
           call_sid: call.call_sid,
           transcript: call.metadata?.transcript || [],
+          has_recording: !!call.metadata?.recording_url,
         });
       }).catch(() => {});
     }
@@ -1644,7 +1646,7 @@ export default function AnalyticsPage() {
                 </div>
 
                 {/* Recording */}
-                {selectedCallDetail?.call_sid && (
+                {selectedCallDetail?.has_recording && (
                   <div className="space-y-2">
                     <h4 className="text-sm font-medium text-muted-foreground">Recording</h4>
                     <audio

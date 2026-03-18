@@ -701,6 +701,35 @@ async def plivo_event(call_sid: str, request: Request):
                 reported_duration_seconds=duration_val,
             )
 
+    # Trigger engagement sequence if matching template exists
+    if call_log and call_log.metadata_:
+        try:
+            from app.services import sequence_engine
+            from app.models.lead import Lead
+            from app.database import get_db_session as _get_db
+            async with _get_db() as seq_db:
+                lead_result = await seq_db.execute(
+                    select(Lead).where(
+                        Lead.org_id == call_log.org_id,
+                        Lead.phone_number.contains(call_log.contact_phone[-10:]),
+                    ).limit(1)
+                )
+                lead = lead_result.scalar_one_or_none()
+                if lead and call_log.metadata_.get("goal_outcome"):
+                    from types import SimpleNamespace
+                    analysis = SimpleNamespace(
+                        goal_outcome=call_log.metadata_.get("goal_outcome", ""),
+                        interest_level=call_log.metadata_.get("interest_level", ""),
+                        captured_data=call_log.metadata_.get("captured_data", {}),
+                        sentiment=call_log.metadata_.get("sentiment", ""),
+                        summary=call_log.metadata_.get("summary", ""),
+                    )
+                    await sequence_engine.evaluate_trigger(
+                        seq_db, call_log.org_id, call_log.bot_id, analysis, lead, call_log
+                    )
+        except Exception:
+            logger.exception("sequence_trigger_failed", call_sid=call_sid)
+
     # Backup GHL outcome posting — if pipeline didn't post (e.g. crash)
     if call_log and call_log.context_data and not call_log.outcome:
         bot_config = await bot_config_loader.get(call_log.context_data["bot_id"])

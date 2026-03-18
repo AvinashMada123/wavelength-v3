@@ -35,6 +35,7 @@ from app.database import close_asyncpg_pool, init_asyncpg_pool
 from app.ghl.client import GHLClient
 from app.plivo import routes as plivo_routes
 from app.services import queue_processor
+from app.services import sequence_scheduler
 from app.twilio import routes as twilio_routes
 
 logger = structlog.get_logger(__name__)
@@ -63,6 +64,7 @@ async def lifespan(app: FastAPI):
 
     # Start background queue processor
     queue_processor.start(bot_config_loader)
+    sequence_scheduler.start()
 
     logger.info("app_started")
 
@@ -70,6 +72,7 @@ async def lifespan(app: FastAPI):
 
     # --- Shutdown ---
     logger.info("app_shutting_down")
+    await sequence_scheduler.stop()
     await queue_processor.stop()
     await bot_config_loader.stop()
     await ghl_client.close()

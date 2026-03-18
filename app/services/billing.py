@@ -189,3 +189,39 @@ async def bill_completed_call(
         new_balance=new_balance,
     )
     return True
+
+
+async def bill_ai_usage(
+    db: AsyncSession,
+    org_id,
+    tokens_used: int,
+    model: str,
+    reference: str,
+) -> bool:
+    """Bill for AI content generation (Claude API usage)."""
+    cost_per_1m = {"claude-sonnet": 18.0, "claude-haiku": 4.8}
+    cost_usd = (tokens_used / 1_000_000) * cost_per_1m.get(model, 18.0)
+    credits = Decimal(str(round(cost_usd * 100, 2)))
+
+    if credits <= ZERO_CREDITS:
+        return False
+
+    org = await db.execute(
+        select(Organization).where(Organization.id == org_id).with_for_update()
+    )
+    org_obj = org.scalar_one_or_none()
+    if not org_obj:
+        return False
+
+    org_obj.credit_balance = org_obj.credit_balance - credits
+
+    tx = CreditTransaction(
+        org_id=org_id,
+        type="usage",
+        amount=-credits,
+        description=f"AI generation ({model})",
+        reference_id=reference,
+    )
+    db.add(tx)
+    await db.commit()
+    return True
