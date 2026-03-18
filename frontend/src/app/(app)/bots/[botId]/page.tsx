@@ -50,7 +50,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 import { useAuth } from "@/contexts/auth-context";
-import { useBot, useCreateBot, useUpdateBot } from "@/hooks/use-bots";
+import { useBot, useBots, useCreateBot, useUpdateBot } from "@/hooks/use-bots";
 import { usePhoneNumbers } from "@/hooks/use-settings";
 import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, ELEVENLABS_VOICE_GROUPS, SARVAM_LANGUAGE_OPTIONS, DEEPGRAM_LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS_CLIENT, LLM_PROVIDER_OPTIONS, LLM_MODEL_OPTIONS } from "@/lib/constants";
 import type { BotConfig, GHLWorkflow, GoalConfig, SuccessCriterion, RedFlagConfig, DataCaptureField } from "@/types/api";
@@ -89,6 +89,21 @@ interface BotForm {
   twilio_phone_number: string;
   circuit_breaker_enabled: boolean;
   circuit_breaker_threshold: number;
+  callback_enabled: boolean;
+  callback_retry_delay_hours: number;
+  callback_max_retries: number;
+  callback_timezone: string;
+  callback_window_start: number;
+  callback_window_end: number;
+  call_memory_enabled: boolean;
+  call_memory_count: number;
+  bot_switch_targets: BotSwitchTarget[];
+}
+
+interface BotSwitchTarget {
+  id: string;
+  target_bot_id: string;
+  description: string;
 }
 
 const EMPTY_FORM: BotForm = {
@@ -121,6 +136,15 @@ const EMPTY_FORM: BotForm = {
   twilio_phone_number: "",
   circuit_breaker_enabled: true,
   circuit_breaker_threshold: 3,
+  callback_enabled: false,
+  callback_retry_delay_hours: 2,
+  callback_max_retries: 3,
+  callback_timezone: "Asia/Kolkata",
+  callback_window_start: 9,
+  callback_window_end: 20,
+  call_memory_enabled: false,
+  call_memory_count: 3,
+  bot_switch_targets: [],
 };
 
 const TIMING_OPTIONS = [
@@ -194,6 +218,15 @@ function botToForm(bot: BotConfig): BotForm {
     twilio_phone_number: bot.twilio_phone_number || "",
     circuit_breaker_enabled: bot.circuit_breaker_enabled ?? true,
     circuit_breaker_threshold: bot.circuit_breaker_threshold ?? 3,
+    callback_enabled: bot.callback_enabled ?? false,
+    callback_retry_delay_hours: bot.callback_retry_delay_hours ?? 2,
+    callback_max_retries: bot.callback_max_retries ?? 3,
+    callback_timezone: bot.callback_timezone || "Asia/Kolkata",
+    callback_window_start: bot.callback_window_start ?? 9,
+    callback_window_end: bot.callback_window_end ?? 20,
+    call_memory_enabled: bot.call_memory_enabled ?? false,
+    call_memory_count: bot.call_memory_count ?? 3,
+    bot_switch_targets: bot.bot_switch_targets || [],
   };
 }
 
@@ -341,6 +374,7 @@ export default function BotEditorPage() {
 
   // ---- React Query hooks ----
   const { data: botData, isLoading: botLoading, isError: botError } = useBot(botId);
+  const { data: allBots } = useBots();
   const createBotMutation = useCreateBot();
   const updateBotMutation = useUpdateBot();
   const { data: phoneNumbers } = usePhoneNumbers();
@@ -470,6 +504,38 @@ export default function BotEditorPage() {
     }));
   }
 
+  // ---- Bot switch target helpers ----
+
+  function addSwitchTarget() {
+    setForm((prev) => ({
+      ...prev,
+      bot_switch_targets: [
+        ...prev.bot_switch_targets,
+        {
+          id: crypto.randomUUID(),
+          target_bot_id: "",
+          description: "",
+        },
+      ],
+    }));
+  }
+
+  function updateSwitchTarget(id: string, updates: Partial<BotSwitchTarget>) {
+    setForm((prev) => ({
+      ...prev,
+      bot_switch_targets: prev.bot_switch_targets.map((t) =>
+        t.id === id ? { ...t, ...updates } : t,
+      ),
+    }));
+  }
+
+  function removeSwitchTarget(id: string) {
+    setForm((prev) => ({
+      ...prev,
+      bot_switch_targets: prev.bot_switch_targets.filter((t) => t.id !== id),
+    }));
+  }
+
   // ---- Goal config helpers ----
 
   function initGoalConfig() {
@@ -586,7 +652,7 @@ export default function BotEditorPage() {
     try {
       const payload: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(form)) {
-        if (k === "context_variables" || k === "ghl_workflows" || k === "allowed_languages") {
+        if (k === "context_variables" || k === "ghl_workflows" || k === "allowed_languages" || k === "bot_switch_targets") {
           payload[k] = v;
         } else if (
           typeof v === "string" &&
@@ -1939,6 +2005,253 @@ export default function BotEditorPage() {
                             </div>
                           </div>
                         )}
+                      </Section>
+
+                      <Separator />
+
+                      <Section
+                        title="Call Memory"
+                        description="Inject previous call summaries into the AI prompt so it remembers past conversations."
+                      >
+                        <div className="flex items-center justify-between rounded-lg border p-4">
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium">Call Memory</p>
+                            <p className="text-xs text-muted-foreground">
+                              When enabled, the AI will see summaries of previous calls
+                              with the same contact and can reference them naturally.
+                            </p>
+                          </div>
+                          <Switch
+                            checked={form.call_memory_enabled}
+                            onCheckedChange={(v) => setField("call_memory_enabled", v)}
+                          />
+                        </div>
+
+                        {form.call_memory_enabled && (
+                          <div className="flex items-center justify-between rounded-lg border p-4">
+                            <div className="space-y-1">
+                              <p className="text-sm font-medium">Memory Depth</p>
+                              <p className="text-xs text-muted-foreground">
+                                Number of past calls to include in the AI&apos;s memory.
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Input
+                                type="number"
+                                value={form.call_memory_count}
+                                onChange={(e) =>
+                                  setField("call_memory_count", Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))
+                                }
+                                min={1}
+                                max={10}
+                                className="w-20 text-center"
+                              />
+                              <span className="text-sm text-muted-foreground">calls</span>
+                            </div>
+                          </div>
+                        )}
+                      </Section>
+
+                      <Separator />
+
+                      <Section
+                        title="Scheduled Callbacks"
+                        description="Allow the AI to schedule callback calls when the contact is busy or requests a later call."
+                      >
+                        <div className="flex items-center justify-between rounded-lg border p-4">
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium">Enable Callbacks</p>
+                            <p className="text-xs text-muted-foreground">
+                              The AI can schedule a callback when the person says
+                              &quot;call me later&quot; or is busy.
+                            </p>
+                          </div>
+                          <Switch
+                            checked={form.callback_enabled}
+                            onCheckedChange={(v) => setField("callback_enabled", v)}
+                          />
+                        </div>
+
+                        {form.callback_enabled && (
+                          <div className="space-y-4">
+                            <div className="flex items-center justify-between rounded-lg border p-4">
+                              <div className="space-y-1">
+                                <p className="text-sm font-medium">Default Retry Delay</p>
+                                <p className="text-xs text-muted-foreground">
+                                  Hours to wait before calling back when no specific time is given.
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  type="number"
+                                  value={form.callback_retry_delay_hours}
+                                  onChange={(e) =>
+                                    setField("callback_retry_delay_hours", Math.max(0.5, parseFloat(e.target.value) || 2))
+                                  }
+                                  min={0.5}
+                                  max={48}
+                                  step={0.5}
+                                  className="w-20 text-center"
+                                />
+                                <span className="text-sm text-muted-foreground">hrs</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between rounded-lg border p-4">
+                              <div className="space-y-1">
+                                <p className="text-sm font-medium">Max Retries</p>
+                                <p className="text-xs text-muted-foreground">
+                                  Maximum number of callback attempts per contact.
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  type="number"
+                                  value={form.callback_max_retries}
+                                  onChange={(e) =>
+                                    setField("callback_max_retries", Math.max(1, Math.min(10, parseInt(e.target.value) || 3)))
+                                  }
+                                  min={1}
+                                  max={10}
+                                  className="w-20 text-center"
+                                />
+                                <span className="text-sm text-muted-foreground">retries</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between rounded-lg border p-4">
+                              <div className="space-y-1">
+                                <p className="text-sm font-medium">Timezone</p>
+                                <p className="text-xs text-muted-foreground">
+                                  Timezone for interpreting callback times and calling window.
+                                </p>
+                              </div>
+                              <Select
+                                value={form.callback_timezone}
+                                onValueChange={(v) => setField("callback_timezone", v)}
+                              >
+                                <SelectTrigger className="w-48">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="Asia/Kolkata">Asia/Kolkata (IST)</SelectItem>
+                                  <SelectItem value="America/New_York">America/New_York (EST)</SelectItem>
+                                  <SelectItem value="America/Los_Angeles">America/Los_Angeles (PST)</SelectItem>
+                                  <SelectItem value="America/Chicago">America/Chicago (CST)</SelectItem>
+                                  <SelectItem value="Europe/London">Europe/London (GMT)</SelectItem>
+                                  <SelectItem value="Europe/Berlin">Europe/Berlin (CET)</SelectItem>
+                                  <SelectItem value="Asia/Dubai">Asia/Dubai (GST)</SelectItem>
+                                  <SelectItem value="Asia/Singapore">Asia/Singapore (SGT)</SelectItem>
+                                  <SelectItem value="Australia/Sydney">Australia/Sydney (AEST)</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="flex items-center justify-between rounded-lg border p-4">
+                              <div className="space-y-1">
+                                <p className="text-sm font-medium">Calling Window</p>
+                                <p className="text-xs text-muted-foreground">
+                                  Only place callbacks during these hours (in the bot&apos;s timezone).
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  type="number"
+                                  value={form.callback_window_start}
+                                  onChange={(e) =>
+                                    setField("callback_window_start", Math.max(0, Math.min(23, parseInt(e.target.value) || 9)))
+                                  }
+                                  min={0}
+                                  max={23}
+                                  className="w-16 text-center"
+                                />
+                                <span className="text-sm text-muted-foreground">to</span>
+                                <Input
+                                  type="number"
+                                  value={form.callback_window_end}
+                                  onChange={(e) =>
+                                    setField("callback_window_end", Math.max(1, Math.min(24, parseInt(e.target.value) || 20)))
+                                  }
+                                  min={1}
+                                  max={24}
+                                  className="w-16 text-center"
+                                />
+                                <span className="text-sm text-muted-foreground">hrs</span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </Section>
+
+                      <Separator />
+
+                      <Section
+                        title="Bot Switching"
+                        description="Configure target bots that the AI can transfer calls to (e.g., for language switching)."
+                      >
+                        {form.bot_switch_targets.map((target) => (
+                          <div
+                            key={target.id}
+                            className="rounded-lg border p-4 space-y-3"
+                          >
+                            <div className="flex items-center justify-between">
+                              <p className="text-sm font-medium">Switch Target</p>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0 text-muted-foreground hover:text-red-400"
+                                onClick={() => removeSwitchTarget(target.id)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <div className="space-y-1.5">
+                                <Label className="text-xs">Target Bot</Label>
+                                <Select
+                                  value={target.target_bot_id}
+                                  onValueChange={(v) =>
+                                    updateSwitchTarget(target.id, { target_bot_id: v })
+                                  }
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Select a bot..." />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {(allBots || [])
+                                      .filter((b) => b.id !== botId && b.is_active)
+                                      .map((b) => (
+                                        <SelectItem key={b.id} value={b.id}>
+                                          {b.agent_name} — {b.company_name}
+                                        </SelectItem>
+                                      ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label className="text-xs">AI Trigger Description</Label>
+                                <Input
+                                  placeholder="e.g. Customer prefers Hindi"
+                                  value={target.description}
+                                  onChange={(e) =>
+                                    updateSwitchTarget(target.id, {
+                                      description: e.target.value,
+                                    })
+                                  }
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={addSwitchTarget}
+                          className="gap-1"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          Add Switch Target
+                        </Button>
                       </Section>
                     </CardContent>
                   </Card>

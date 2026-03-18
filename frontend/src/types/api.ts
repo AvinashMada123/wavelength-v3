@@ -41,6 +41,15 @@ export interface BotConfig {
   goal_config: GoalConfig | null;
   circuit_breaker_enabled: boolean;
   circuit_breaker_threshold: number;
+  callback_enabled: boolean;
+  callback_retry_delay_hours: number;
+  callback_max_retries: number;
+  callback_timezone: string;
+  callback_window_start: number;
+  callback_window_end: number;
+  call_memory_enabled: boolean;
+  call_memory_count: number;
+  bot_switch_targets: Array<{ id: string; target_bot_id: string; description: string }>;
   is_active: boolean;
   created_at: string;
   updated_at: string;
