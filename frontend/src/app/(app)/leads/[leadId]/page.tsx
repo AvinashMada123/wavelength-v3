@@ -32,9 +32,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useLead, useLeadCalls } from "@/hooks/use-leads";
 import { formatDuration, formatDate } from "@/lib/utils";
 import type { CallLog } from "@/types/api";
+import { SequencesTab } from "@/app/(app)/leads/components/SequencesTab";
 
 const STATUS_COLORS: Record<string, string> = {
   new: "bg-blue-500/15 text-blue-400 border-blue-500/25",
@@ -267,92 +269,148 @@ export default function LeadDetailPage() {
             </div>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-3">
-            {/* Profile Card */}
-            <div className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Profile</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-1">
-                  <InfoRow icon={User} label="Name" value={lead.contact_name} />
-                  <Separator />
-                  <InfoRow icon={Phone} label="Phone" value={lead.phone_number} />
-                  <Separator />
-                  <InfoRow icon={Mail} label="Email" value={lead.email} />
-                  <Separator />
-                  <InfoRow icon={Building2} label="Company" value={lead.company} />
-                  <Separator />
-                  <InfoRow icon={MapPin} label="Location" value={lead.location} />
-                  <Separator />
-                  <InfoRow icon={Tag} label="Source" value={lead.source} />
-                  <Separator />
-                  <InfoRow
-                    icon={CalendarDays}
-                    label="Created"
-                    value={format(new Date(lead.created_at), "MMM d, yyyy")}
-                  />
-                </CardContent>
-              </Card>
+          <Tabs defaultValue="overview" className="space-y-4">
+            <TabsList>
+              <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="calls">Call History</TabsTrigger>
+              <TabsTrigger value="sequences">Sequences</TabsTrigger>
+            </TabsList>
 
-              {/* Aggregated Insights */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Insights</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-xs text-muted-foreground">
-                        Total Calls
-                      </p>
-                      <p className="text-lg font-semibold">{totalCalls}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">
-                        Last Call
-                      </p>
-                      <p className="text-sm font-medium">
-                        {lastCallDate
-                          ? format(new Date(lastCallDate), "MMM d, yyyy")
-                          : "--"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">
-                        Avg Duration
-                      </p>
-                      <p className="text-sm font-medium">
-                        {avgDuration !== null
-                          ? formatDuration(avgDuration)
-                          : "--"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">
-                        Qualification
-                      </p>
-                      <p className="text-sm font-medium capitalize">
-                        {lead.qualification_level || "--"}
-                      </p>
-                    </div>
-                  </div>
-                  {lead.bot_notes && (
-                    <div className="mt-4">
-                      <p className="text-xs text-muted-foreground mb-1">
-                        Bot Notes
-                      </p>
-                      <p className="text-sm text-foreground/80 whitespace-pre-line rounded-md bg-muted/50 p-3">
-                        {lead.bot_notes}
-                      </p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+            {/* Overview tab */}
+            <TabsContent value="overview">
+              <div className="grid gap-6 lg:grid-cols-3">
+                {/* Profile Card */}
+                <div className="space-y-6">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">Profile</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-1">
+                      <InfoRow icon={User} label="Name" value={lead.contact_name} />
+                      <Separator />
+                      <InfoRow icon={Phone} label="Phone" value={lead.phone_number} />
+                      <Separator />
+                      <InfoRow icon={Mail} label="Email" value={lead.email} />
+                      <Separator />
+                      <InfoRow icon={Building2} label="Company" value={lead.company} />
+                      <Separator />
+                      <InfoRow icon={MapPin} label="Location" value={lead.location} />
+                      <Separator />
+                      <InfoRow icon={Tag} label="Source" value={lead.source} />
+                      <Separator />
+                      <InfoRow
+                        icon={CalendarDays}
+                        label="Created"
+                        value={format(new Date(lead.created_at), "MMM d, yyyy")}
+                      />
+                    </CardContent>
+                  </Card>
 
-            {/* Call History Timeline */}
-            <div className="lg:col-span-2">
+                  {/* Aggregated Insights */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">Insights</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-xs text-muted-foreground">
+                            Total Calls
+                          </p>
+                          <p className="text-lg font-semibold">{totalCalls}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">
+                            Last Call
+                          </p>
+                          <p className="text-sm font-medium">
+                            {lastCallDate
+                              ? format(new Date(lastCallDate), "MMM d, yyyy")
+                              : "--"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">
+                            Avg Duration
+                          </p>
+                          <p className="text-sm font-medium">
+                            {avgDuration !== null
+                              ? formatDuration(avgDuration)
+                              : "--"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">
+                            Qualification
+                          </p>
+                          <p className="text-sm font-medium capitalize">
+                            {lead.qualification_level || "--"}
+                          </p>
+                        </div>
+                      </div>
+                      {lead.bot_notes && (
+                        <div className="mt-4">
+                          <p className="text-xs text-muted-foreground mb-1">
+                            Bot Notes
+                          </p>
+                          <p className="text-sm text-foreground/80 whitespace-pre-line rounded-md bg-muted/50 p-3">
+                            {lead.bot_notes}
+                          </p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Call History Preview */}
+                <div className="lg:col-span-2">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">Recent Calls</CardTitle>
+                      <CardDescription>
+                        Latest calls — switch to Call History tab for full list
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {callsLoading ? (
+                        <div className="space-y-4">
+                          {Array.from({ length: 3 }).map((_, i) => (
+                            <Skeleton key={i} className="h-24 w-full" />
+                          ))}
+                        </div>
+                      ) : leadCalls.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                          <Phone className="h-10 w-10 opacity-30 mb-3" />
+                          <p className="text-sm font-medium">No calls yet</p>
+                          <p className="text-xs mt-1">
+                            Calls to this lead will appear here
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-0">
+                          {leadCalls.slice(0, 3).map((call, i) => (
+                            <motion.div
+                              key={call.id}
+                              initial={{ opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: i * 0.05 }}
+                            >
+                              <CallTimelineEntry
+                                call={call}
+                                onClick={() => router.push(`/calls/${call.id}`)}
+                              />
+                            </motion.div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* Call History tab */}
+            <TabsContent value="calls">
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Call History</CardTitle>
@@ -394,8 +452,23 @@ export default function LeadDetailPage() {
                   )}
                 </CardContent>
               </Card>
-            </div>
-          </div>
+            </TabsContent>
+
+            {/* Sequences tab */}
+            <TabsContent value="sequences">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Engagement Sequences</CardTitle>
+                  <CardDescription>
+                    Active and past sequences running for this lead
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <SequencesTab leadId={leadId} />
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </div>
       </PageTransition>
     </>
