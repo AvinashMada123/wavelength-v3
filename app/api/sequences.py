@@ -618,6 +618,118 @@ async def reorder_steps(
 
 
 # ---------------------------------------------------------------------------
+# Step testing
+# ---------------------------------------------------------------------------
+
+
+class TestStepRequest(BaseModel):
+    phone: str
+    variables: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/steps/{step_id}/test")
+async def test_step(
+    step_id: uuid.UUID,
+    body: TestStepRequest,
+    org_id: uuid.UUID = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a single step to a test phone number for verification."""
+    # Load step + template
+    result = await db.execute(
+        select(SequenceStep)
+        .join(SequenceTemplate, SequenceStep.template_id == SequenceTemplate.id)
+        .where(SequenceStep.id == step_id, SequenceTemplate.org_id == org_id)
+    )
+    step = result.scalar_one_or_none()
+    if step is None:
+        raise HTTPException(status_code=404, detail="Step not found")
+
+    # Load template for variables
+    tmpl_result = await db.execute(
+        select(SequenceTemplate).where(SequenceTemplate.id == step.template_id)
+    )
+    template = tmpl_result.scalar_one_or_none()
+
+    # Build variables: template defaults merged with test overrides
+    variables = {}
+    if template and template.variables:
+        for v in template.variables:
+            if isinstance(v, dict):
+                variables[v.get("key", "")] = v.get("default_value", "")
+    variables.update(body.variables)
+    variables["contact_phone"] = body.phone
+
+    # Determine channel
+    channel = step.channel
+    if channel not in ("whatsapp_template", "whatsapp_session", "sms"):
+        if channel == "voice_call":
+            return {"success": False, "error": "Voice call testing not supported yet — trigger a call instead."}
+        return {"success": False, "error": f"Unsupported channel for testing: {channel}"}
+
+    # Get default messaging provider for org
+    from app.models.messaging_provider import MessagingProvider
+    prov_result = await db.execute(
+        select(MessagingProvider).where(
+            MessagingProvider.org_id == org_id,
+            MessagingProvider.is_default == True,
+        ).limit(1)
+    )
+    provider = prov_result.scalar_one_or_none()
+    if not provider:
+        return {"success": False, "error": "No default messaging provider configured. Go to Settings → Messaging Providers."}
+
+    # Resolve template params with variables
+    from app.services.messaging_client import send_template, send_session_message
+
+    phone = body.phone.strip()
+    if not phone.startswith("+"):
+        phone = "+" + phone
+
+    if channel == "whatsapp_template":
+        template_name = step.whatsapp_template_name
+        if not template_name:
+            return {"success": False, "error": "No WhatsApp template name configured on this step."}
+
+        # Resolve params: replace {{var}} with actual values
+        raw_params = step.whatsapp_template_params or {}
+        if isinstance(raw_params, dict):
+            resolved = []
+            for key in sorted(raw_params.keys()):
+                val = raw_params[key]
+                for var_key, var_val in variables.items():
+                    val = val.replace("{{" + var_key + "}}", str(var_val))
+                resolved.append({"name": key, "value": val})
+        else:
+            resolved = raw_params
+
+        result = await send_template(
+            encrypted_creds=provider.credentials,
+            provider_type=provider.provider_type,
+            phone=phone,
+            template_name=template_name,
+            params=resolved,
+        )
+        return {"success": result.success, "message_id": result.message_id, "error": result.error}
+
+    elif channel == "whatsapp_session":
+        # For session messages, use AI prompt or static text
+        text = step.ai_prompt or "Test session message from Wavelength"
+        for var_key, var_val in variables.items():
+            text = text.replace("{{" + var_key + "}}", str(var_val))
+
+        result = await send_session_message(
+            encrypted_creds=provider.credentials,
+            provider_type=provider.provider_type,
+            phone=phone,
+            text=text,
+        )
+        return {"success": result.success, "message_id": result.message_id, "error": result.error}
+
+    return {"success": False, "error": "Unhandled channel"}
+
+
+# ---------------------------------------------------------------------------
 # Prompt testing
 # ---------------------------------------------------------------------------
 

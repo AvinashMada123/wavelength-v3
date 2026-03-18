@@ -150,6 +150,13 @@ export const resumeInstance = (id: string) =>
 export const cancelInstance = (id: string) =>
   apiFetch<void>(`/api/sequences/instances/${id}/cancel`, { method: "POST" });
 
+// --- Step Testing ---
+export const testStep = (stepId: string, phone: string, variables?: Record<string, string>) =>
+  apiFetch<{ success: boolean; message_id?: string; error?: string }>(
+    `/api/sequences/steps/${stepId}/test`,
+    { method: "POST", body: JSON.stringify({ phone, variables: variables || {} }) }
+  );
+
 // --- Touchpoints ---
 export const fetchTouchpoint = (id: string) =>
   apiFetch<SequenceTouchpoint>(`/api/sequences/touchpoints/${id}`);

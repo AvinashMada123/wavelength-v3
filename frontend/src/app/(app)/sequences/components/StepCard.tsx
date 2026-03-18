@@ -12,7 +12,11 @@ import {
   Sparkles,
   FileText,
   ToggleLeft,
+  Send,
+  Loader2,
 } from "lucide-react";
+import { toast } from "sonner";
+import { testStep } from "@/lib/sequences-api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -642,6 +646,46 @@ export function StepCard({
             </div>
           )}
         </div>
+
+        {/* Send Test */}
+        {(step.channel === "whatsapp_template" || step.channel === "whatsapp_session") && (
+          <div className="flex items-center gap-2 border-t pt-4">
+            <Input
+              className="h-8 text-xs max-w-[200px]"
+              placeholder="Phone e.g. +919609775259"
+              id={`test-phone-${step.id}`}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs gap-1 shrink-0"
+              onClick={async () => {
+                const phoneInput = document.getElementById(`test-phone-${step.id}`) as HTMLInputElement;
+                const phone = phoneInput?.value?.trim();
+                if (!phone) { toast.error("Enter a phone number"); return; }
+                phoneInput.disabled = true;
+                const btn = phoneInput.nextElementSibling as HTMLButtonElement;
+                if (btn) btn.disabled = true;
+                try {
+                  const result = await testStep(step.id, phone);
+                  if (result.success) {
+                    toast.success(`Test sent! Message ID: ${result.message_id || "OK"}`);
+                  } else {
+                    toast.error(result.error || "Test failed");
+                  }
+                } catch (err: any) {
+                  toast.error(err?.message || "Test failed");
+                } finally {
+                  phoneInput.disabled = false;
+                  if (btn) btn.disabled = false;
+                }
+              }}
+            >
+              <Send className="h-3 w-3" />
+              Send Test
+            </Button>
+          </div>
+        )}
 
         {/* Footer: Active toggle + Delete */}
         <div className="flex items-center justify-between border-t pt-4">
