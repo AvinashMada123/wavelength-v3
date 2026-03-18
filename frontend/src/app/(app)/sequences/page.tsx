@@ -444,15 +444,42 @@ export default function SequencesPage() {
 
       {/* Import Dialog */}
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-h-[85vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Import Sequence Template</DialogTitle>
             <DialogDescription>
-              Paste a JSON template exported from another workspace.
+              Upload a .json file or paste template JSON to import a sequence.
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleImport} className="space-y-4">
-            <div className="space-y-2">
+          <form onSubmit={handleImport} className="flex flex-col gap-4 flex-1 min-h-0">
+            {/* File upload zone */}
+            <div
+              onClick={() => {
+                const input = document.getElementById("import-file-input") as HTMLInputElement;
+                input?.click();
+              }}
+              className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-muted-foreground/25 hover:border-violet-500/50 cursor-pointer p-4 transition-colors"
+            >
+              <Upload className="h-6 w-6 text-muted-foreground mb-1" />
+              <p className="text-sm font-medium">Upload .json file</p>
+              <p className="text-xs text-muted-foreground">Click to browse or paste JSON below</p>
+              <input
+                id="import-file-input"
+                type="file"
+                accept=".json,application/json"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = (ev) => setImportJson((ev.target?.result as string) || "");
+                  reader.readAsText(file);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+
+            <div className="space-y-2 flex-1 min-h-0">
               <Label htmlFor="import-json">
                 Template JSON <span className="text-red-400">*</span>
               </Label>
@@ -462,11 +489,10 @@ export default function SequencesPage() {
                 value={importJson}
                 onChange={(e) => setImportJson(e.target.value)}
                 disabled={importSaving}
-                rows={10}
-                className="font-mono text-xs"
+                className="font-mono text-xs min-h-[120px] max-h-[250px] resize-none overflow-y-auto"
               />
             </div>
-            <DialogFooter>
+            <DialogFooter className="shrink-0 border-t pt-3">
               <Button
                 type="button"
                 variant="outline"
