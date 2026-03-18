@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import Link from "next/link";
 import {
   Activity,
   Pause,
@@ -148,6 +149,16 @@ function ExpandedRow({ instanceId }: ExpandedRowProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Nav links
+// ---------------------------------------------------------------------------
+
+const NAV_LINKS = [
+  { href: "/sequences", label: "Templates" },
+  { href: "/sequences/monitor", label: "Monitor" },
+  { href: "/sequences/analytics", label: "Analytics" },
+];
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -286,6 +297,22 @@ export default function EngagementMonitorPage() {
       <Header title="Engagement Monitor" />
       <PageTransition>
         <div className="space-y-6 p-6">
+          {/* Nav links */}
+          <div className="flex items-center gap-1 border-b border-border pb-3">
+            {NAV_LINKS.map((link) => (
+              <Link key={link.href} href={link.href}>
+                <Button
+                  variant={
+                    link.href === "/sequences/monitor" ? "secondary" : "ghost"
+                  }
+                  size="sm"
+                >
+                  {link.label}
+                </Button>
+              </Link>
+            ))}
+          </div>
+
           {/* Description + auto-refresh */}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-muted-foreground">
