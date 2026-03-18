@@ -313,7 +313,10 @@ async def list_templates(
     """List sequence templates for the current organisation."""
     base = select(SequenceTemplate).where(SequenceTemplate.org_id == org_id)
 
-    if is_active is not None:
+    # Default to showing only active templates (soft-deleted ones hidden)
+    if is_active is None:
+        base = base.where(SequenceTemplate.is_active == True)
+    elif is_active is not None:
         base = base.where(SequenceTemplate.is_active == is_active)
 
     if search:
