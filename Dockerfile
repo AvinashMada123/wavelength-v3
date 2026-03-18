@@ -16,6 +16,9 @@ COPY . .
 ENV PORT=8080
 EXPOSE 8080
 
-# 4 workers across 8 CPUs — distributes concurrent calls across separate event loops.
-# Each WebSocket connection stays on the worker that accepted it.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "4"]
+# Single worker — Pipecat pipelines are async and share one event loop.
+# Multiple workers cause issues with torch/onnxruntime cold load times
+# (gunicorn kills workers that take >30s to start).
+# Single worker handles 100+ concurrent WebSocket connections fine since
+# all heavy compute (LLM, TTS, STT) is offloaded to external APIs.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--timeout-keep-alive", "120"]
