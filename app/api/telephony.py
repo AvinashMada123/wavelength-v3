@@ -10,8 +10,11 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import update
+
 from app.auth.dependencies import get_current_user, get_current_org, require_role
 from app.database import get_db
+from app.models.bot_config import BotConfig
 from app.models.organization import Organization
 from app.models.phone_number import PhoneNumber
 from app.models.user import User
@@ -229,6 +232,13 @@ async def delete_phone_number(
     phone = result.scalar_one_or_none()
     if not phone:
         raise HTTPException(status_code=404, detail="Phone number not found")
+
+    # Nullify phone_number_id on any bots referencing this number
+    await db.execute(
+        update(BotConfig)
+        .where(BotConfig.phone_number_id == phone_id)
+        .values(phone_number_id=None)
+    )
 
     await db.delete(phone)
     await db.commit()
