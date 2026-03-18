@@ -83,6 +83,8 @@ export async function apiFetch<T>(url: string, options?: RequestInit): Promise<T
     const body = await res.text();
     throw new Error(extractErrorMessage(body, res.status));
   }
+  // 204 No Content — return undefined instead of trying to parse empty body
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 
