@@ -175,26 +175,15 @@ export function ImportExportDialog({
             />
           </div>
         ) : (
-          <div className="flex flex-col gap-4 min-h-0 flex-1">
+          <div className="flex flex-col gap-4 min-h-0 flex-1 overflow-hidden">
             {/* File upload */}
-            <div>
-              <Label className="text-sm text-muted-foreground mb-2 block">
-                Upload a .json file
-              </Label>
-              <div className="flex items-center gap-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="gap-2"
-                >
-                  <Upload className="h-4 w-4" />
-                  Choose File
-                </Button>
-                <span className="text-xs text-muted-foreground">
-                  or paste JSON below
-                </span>
-              </div>
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-muted-foreground/25 hover:border-violet-500/50 cursor-pointer p-4 transition-colors"
+            >
+              <Upload className="h-6 w-6 text-muted-foreground mb-1" />
+              <p className="text-sm font-medium">Upload .json file</p>
+              <p className="text-xs text-muted-foreground">Click to browse or paste JSON below</p>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -212,7 +201,7 @@ export function ImportExportDialog({
                 setPastedJson(e.target.value);
                 setPreviewResult(null);
               }}
-              className="font-mono text-xs min-h-[200px] resize-none bg-muted/30"
+              className="font-mono text-xs min-h-[120px] max-h-[300px] resize-none bg-muted/30 overflow-y-auto"
             />
 
             {/* Preview result */}
@@ -267,8 +256,8 @@ export function ImportExportDialog({
               </div>
             )}
 
-            {/* Actions */}
-            <div className="flex gap-2 justify-end pt-1">
+            {/* Actions — sticky at bottom */}
+            <div className="flex gap-2 justify-end pt-3 border-t shrink-0">
               <Button
                 variant="outline"
                 size="sm"
