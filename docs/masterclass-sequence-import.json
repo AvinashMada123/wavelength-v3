@@ -10,11 +10,11 @@
     {
       "step_order": 1,
       "name": "Gift Message (AI-personalized career gift)",
-      "channel": "whatsapp",
+      "channel": "whatsapp_template",
       "timing_type": "relative_to_signup",
       "timing_value": { "hours": 1 },
       "skip_conditions": null,
-      "content_type": "whatsapp_template",
+      "content_type": "static_template",
       "whatsapp_template_name": "ai_career_gift",
       "whatsapp_template_params": {
         "1": "{{contact_name}}",
@@ -30,14 +30,14 @@
     {
       "step_order": 2,
       "name": "Hope Question (personal motivation prompt)",
-      "channel": "whatsapp",
+      "channel": "whatsapp_template",
       "timing_type": "relative_to_event",
       "timing_value": { "days": -3, "time": "19:30" },
       "skip_conditions": {
         "min_days_to_event": 3,
         "skip_reason": "Less than 3 days to event — not enough time for hope arc"
       },
-      "content_type": "whatsapp_template",
+      "content_type": "static_template",
       "whatsapp_template_name": "ai_hope_question",
       "whatsapp_template_params": {
         "1": "{{contact_name}}"
@@ -55,14 +55,14 @@
     {
       "step_order": 3,
       "name": "Proof Stories (success stories from past attendees)",
-      "channel": "whatsapp",
+      "channel": "whatsapp_template",
       "timing_type": "relative_to_event",
       "timing_value": { "days": -2, "time": "10:00" },
       "skip_conditions": {
         "min_days_to_event": 4,
         "skip_reason": "Less than 4 days to event — proof stories skipped"
       },
-      "content_type": "whatsapp_template",
+      "content_type": "static_template",
       "whatsapp_template_name": "ai_proof_stories",
       "whatsapp_template_params": {
         "1": "{{contact_name}}"
@@ -75,14 +75,14 @@
     {
       "step_order": 4,
       "name": "Eve Reminder (night-before excitement builder)",
-      "channel": "whatsapp",
+      "channel": "whatsapp_template",
       "timing_type": "relative_to_event",
       "timing_value": { "days": -1, "time": "20:00" },
       "skip_conditions": {
         "min_days_to_event": 1,
         "skip_reason": "Same-day signup — skip eve reminder"
       },
-      "content_type": "whatsapp_template",
+      "content_type": "static_template",
       "whatsapp_template_name": "ai_eve_reminder",
       "whatsapp_template_params": {
         "1": "{{contact_name}}",
@@ -96,7 +96,7 @@
     {
       "step_order": 5,
       "name": "Call 2 (pre-event excitement call)",
-      "channel": "voice",
+      "channel": "voice_call",
       "timing_type": "relative_to_event",
       "timing_value": { "days": 0, "time": "11:00" },
       "skip_conditions": null,
@@ -111,11 +111,11 @@
     {
       "step_order": 6,
       "name": "Go Live (masterclass starting now)",
-      "channel": "whatsapp",
+      "channel": "whatsapp_template",
       "timing_type": "relative_to_event",
       "timing_value": { "days": 0, "time": "19:25" },
       "skip_conditions": null,
-      "content_type": "whatsapp_template",
+      "content_type": "static_template",
       "whatsapp_template_name": "ai_golive",
       "whatsapp_template_params": {
         "1": "{{contact_name}}",
@@ -129,14 +129,14 @@
     {
       "step_order": 7,
       "name": "No-Show Recovery (Sunday morning re-engage)",
-      "channel": "whatsapp",
+      "channel": "whatsapp_template",
       "timing_type": "relative_to_event",
       "timing_value": { "days": 1, "time": "10:00" },
       "skip_conditions": {
         "attended": true,
         "skip_reason": "Lead attended — no recovery needed"
       },
-      "content_type": "whatsapp_template",
+      "content_type": "static_template",
       "whatsapp_template_name": "ai_noshow_recovery",
       "whatsapp_template_params": {
         "1": "{{contact_name}}",
