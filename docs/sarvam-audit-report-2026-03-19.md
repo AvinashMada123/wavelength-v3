@@ -2,8 +2,9 @@
 **Date:** March 19, 2026
 **Platform:** Wavelength Voice AI (Pipecat 0.0.104 + Plivo)
 **Sarvam Models:** saaras:v3 (STT), bulbul:v3 (TTS)
-**Sample Size:** 11 calls analyzed (6 STT transcript audit + 5 TTS audio audit)
-**Period:** March 19, 2026 (last 24 hours)
+**Sample Size:** 16 calls analyzed (11 STT transcript audit + 5 TTS audio audit)
+**Languages:** English (en-IN), Tamil (ta-IN), Kannada (kn-IN), Auto-detect
+**Period:** March 18-19, 2026
 
 ---
 
@@ -45,6 +46,19 @@ The user did NOT say "ok" 126 times. The STT model entered a runaway repetition 
 
 ---
 
+### Issue 1b: Complete STT Failure — Zero Transcripts (CRITICAL)
+
+**Call:** Smita (+919422521813) | 105s | Language: en-IN | Call ID: d83242ec
+**Recording:** [Listen](https://aps1.media.plivo.com/v1/Account/MAYME0YWZKODUWMWJINJ/Recording/48998289-3d4f-4001-93de-a3f00657c17b.mp3)
+
+105 seconds of call with **zero transcript turns**. The recording confirms the user spoke (audible in the recording) but Sarvam returned no transcripts at all. The bot played the greeting and silence watchdog messages, but never received any user speech.
+
+Similarly affected: Preeti (+918977919651, 123s, 0 turns), Sindhuri (+917799533633, 52s, 0 turns).
+
+**Impact:** Three calls with complete STT failure — users spoke but the bot never heard them.
+
+---
+
 ### Issue 2: Transcript Drops — END_SPEECH with No Output (HIGH)
 
 **Total:** 31 timeout events across 6 calls
@@ -77,7 +91,43 @@ User turn 14: "They're giving insulin injections."
 
 This was one continuous sentence: "No tablets, they're giving insulin injections." Sarvam's VAD detected a brief pause (natural breath) and split it into two separate transcripts with an `END_SPEECH` between them.
 
-**Pattern:** Fragmentation scales with call length. Short calls (11-25s) had zero fragmentation. Calls > 120s had 4-5 fragmentation instances each.
+**English example — Keerthi (+916309454017, 197s, en-IN):**
+**Recording:** [Listen](https://aps1.media.plivo.com/v1/Account/MAMDLMNDE3MMUTM2QYZC/Recording/3169ac03-303f-43c9-b3ad-a4c3ed5ebfc0.mp3)
+
+User's single thought split across 3 turns:
+```
+User turn 9:  "Hmm."
+User turn 10: "mainly"
+User turn 11: "Nana Nani."   ← garbled hallucination; user likely said their health concern
+```
+
+Later in the same call:
+```
+User turn 13: "Hello."        ← phantom word during bot speech
+User turn 14: "Yeah, it's about 2 years now."
+User turn 15: "It's been really affecting me."   ← continuation split into separate turn
+```
+
+**English example — Harini (+919538584904, 253s, en-IN):**
+**Recording:** [Listen](https://aps1.media.plivo.com/v1/Account/MAYME0YWZKODUWMWJINJ/Recording/570070e3-3114-481b-beeb-da4d0e3802e0.mp3)
+
+```
+User turn 4: "Yeah, correct."
+User turn 5: "Yeah correct correct"   ← same utterance split into two turns
+```
+
+Later, English transcribed as Kannada:
+```
+User turn 7:  "ಓಕೆ."                    ← user said "okay" in English, transcribed as Kannada
+User turn 17: "ಮೊಬೈಲ್ ನಂಬರ್ � ゴット."    ← "mobile number I got" transcribed as Kannada
+```
+
+And a word hallucination:
+```
+User turn 13: "Massage"    ← user said "message", transcribed as "Massage"
+```
+
+**Pattern:** Fragmentation scales with call length. Short calls (11-25s) had zero fragmentation. Calls > 120s had 4-5 fragmentation instances each. **This affects both Tamil and English calls equally.**
 
 **Impact:** The LLM sees fragmented user turns and makes wrong judgments — treating incomplete fragments as complete responses, or interpreting context-free fragments as "irrelevant answers."
 
@@ -94,7 +144,10 @@ When using `language=unknown` (auto-detect mode), Sarvam misidentified English s
 
 The user was speaking English throughout. The bot responded: "I understand! Let me have a colleague who speaks your language call you back."
 
-**Impact:** Call terminated because the system thought the user spoke a different language.
+**Also observed in Harini's call** (en-IN mode, not auto-detect):
+Even when language is explicitly set to `en-IN`, Sarvam occasionally transcribes English as Kannada script. User said "okay" → transcribed as `"ಓಕೆ."`. User said "mobile number I got" → transcribed as `"ಮೊಬೈಲ್ ನಂಬರ್ � ゴット."`.
+
+**Impact:** Call terminated (on auto-detect) or bot confused (on en-IN) because the system received non-English text from an English speaker.
 
 ---
 
@@ -221,6 +274,11 @@ Full architecture details in the companion document: `sarvam-architecture-overvi
 | 9aeef8be | Yashwanth | +917842584025 | STT: Truncated transcript | [Recording](https://aps1.media.plivo.com/v1/Account/MAMDLMNDE3MMUTM2QYZC/Recording/b49dc2ce-a2b0-407d-87c4-06053de8d0a4.mp3) |
 | 4817d2e0 | Falguni | +919606206785 | TTS: 14.1s stall, 71% silence | [Recording](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/99ec9c6e-ec8c-4d65-85a4-5aa154fabf05.mp3) |
 | 2cfcf730 | SNA | +917875787518 | TTS: 41% silence, 6.9s gap | [Recording](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/b8e1a810-68fb-4c89-9623-60d6428e4a80.mp3) |
+| f350ec8b | Keerthi | +916309454017 | STT: English fragmentation, hallucination ("Nana Nani") | [Recording](https://aps1.media.plivo.com/v1/Account/MAMDLMNDE3MMUTM2QYZC/Recording/3169ac03-303f-43c9-b3ad-a4c3ed5ebfc0.mp3) |
+| cf593e46 | Harini | +919538584904 | STT: English→Kannada misidentification, "Massage" hallucination | [Recording](https://aps1.media.plivo.com/v1/Account/MAYME0YWZKODUWMWJINJ/Recording/570070e3-3114-481b-beeb-da4d0e3802e0.mp3) |
+| d83242ec | Smita | +919422521813 | STT: Complete failure — 105s, 0 transcripts | [Recording](https://aps1.media.plivo.com/v1/Account/MAYME0YWZKODUWMWJINJ/Recording/48998289-3d4f-4001-93de-a3f00657c17b.mp3) |
+| 354e018b | Preeti | +918977919651 | STT: Complete failure — 123s, 0 transcripts | [Recording](https://aps1.media.plivo.com/v1/Account/MAYME0YWZKODUWMWJINJ/Recording/df15a4c0-0911-481d-a46c-5e0c5d5a280e.mp3) |
+| 1eeb61b0 | Sindhuri | +917799533633 | STT: Complete failure — 52s, 0 transcripts | [Recording](https://aps1.media.plivo.com/v1/Account/MAYME0YWZKODUWMWJINJ/Recording/a8057e80-d8bc-4d9b-8c52-6e421056aed6.mp3) |
 | c63e7dd6 | Sahil | +919817562070 | TTS: 23.5% silence, clipping | [Recording](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/217413ae-4db7-4a5f-bbfd-b4c88b102aae.mp3) |
 | a55b8d9f | Dinesh | +918637451203 | TTS: 47% silence, 40 gaps | [Recording](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/dc9faa97-2156-43f7-a4c5-d4f7deed26f8.mp3) |
 | ed4bd290 | Pramoth | +919952711053 | TTS: 44.5% silence, 35 gaps | [Recording](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/0c625466-fbd8-42bd-b385-f2b9c8da94cf.mp3) |
