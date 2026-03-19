@@ -651,6 +651,7 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         if getattr(bot_config, "sequence_template_id", None) and existing_log:
             try:
                 from app.services import sequence_engine
+                from app.services.sequence_engine import parse_bot_event_date
                 from app.models.lead import Lead
                 async with get_db_session() as seq_db:
                     lead_result = await seq_db.execute(
@@ -661,21 +662,29 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
                     )
                     lead = lead_result.scalar_one_or_none()
                     if lead and analysis:
+                        ctx_data = {
+                            "contact_name": lead.contact_name or "",
+                            "contact_phone": lead.phone_number or "",
+                            "interest_level": getattr(analysis, "interest_level", ""),
+                            "goal_outcome": getattr(analysis, "goal_outcome", ""),
+                            "sentiment": getattr(analysis, "sentiment", ""),
+                            "call_summary": summary or "",
+                        }
+                        # Pass bot config event date as ISO string if available
+                        if getattr(bot_config, "event_date", None):
+                            iso_dt = parse_bot_event_date(
+                                bot_config.event_date,
+                                getattr(bot_config, "event_time", "") or "",
+                            )
+                            if iso_dt:
+                                ctx_data["event_date"] = iso_dt
                         instance = await sequence_engine.create_instance(
                             seq_db,
                             template_id=str(bot_config.sequence_template_id),
                             org_id=bot_config.org_id,
                             lead_id=lead.id,
                             trigger_call_id=existing_log.id,
-                            context_data={
-                                "contact_name": lead.contact_name or "",
-                                "contact_phone": lead.phone_number or "",
-                                "interest_level": getattr(analysis, "interest_level", ""),
-                                "goal_outcome": getattr(analysis, "goal_outcome", ""),
-                                "sentiment": getattr(analysis, "sentiment", ""),
-                                "call_summary": summary or "",
-                            },
-                            bot_config_id=bot_config.id,
+                            context_data=ctx_data,
                         )
                         if instance:
                             await seq_db.commit()
