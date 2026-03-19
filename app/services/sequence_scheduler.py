@@ -64,7 +64,7 @@ async def _scheduler_loop():
 
 async def _process_batch():
     """Find and process all due touchpoints."""
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
 
     async with get_db_session() as db:
         # Find due touchpoints: pending/scheduled and scheduled_at in the past

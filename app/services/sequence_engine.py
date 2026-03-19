@@ -1,6 +1,7 @@
 """Core sequence engine — trigger evaluation, instance creation, touchpoint processing, reply handling."""
 
 import json
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -14,6 +15,7 @@ from app.models.sequence import (
     SequenceTemplate,
     SequenceTouchpoint,
 )
+from app.models.bot_config import BotConfig
 from app.models.messaging_provider import MessagingProvider
 from app.models.call_queue import QueuedCall
 from app.services import anthropic_client, messaging_client
@@ -237,20 +239,54 @@ async def create_instance(
         logger.warning("sequence_create_no_steps", template_id=str(template_id))
         return None
 
-    # Validate event_date if any step needs it
+    # Resolve event_date from bot config (single source of truth)
     event_date = None
-    if context_data.get("event_date"):
-        try:
-            ed = context_data["event_date"]
-            if isinstance(ed, str):
-                event_date = datetime.fromisoformat(ed.replace("Z", "+00:00"))
-                if event_date.tzinfo is None:
-                    event_date = event_date.replace(tzinfo=timezone.utc)
-        except (ValueError, TypeError):
-            pass
+    has_event_steps = any(s.timing_type == "relative_to_event" for s in steps)
+    if has_event_steps:
+        # Load template to get bot_id, then bot config for event_date
+        tmpl_result = await db.execute(
+            select(SequenceTemplate).where(SequenceTemplate.id == template_id)
+        )
+        template = tmpl_result.scalar_one_or_none()
+        bot_cfg = None
+        if template and template.bot_id:
+            bot_result = await db.execute(
+                select(BotConfig).where(BotConfig.id == template.bot_id)
+            )
+            bot_cfg = bot_result.scalar_one_or_none()
 
-    for step in steps:
-        if step.timing_type == "relative_to_event" and not event_date:
+        if bot_cfg and getattr(bot_cfg, "event_date", None):
+            try:
+                ed_str = bot_cfg.event_date
+                et_str = getattr(bot_cfg, "event_time", "") or ""
+                # Strip ordinal suffixes: "7th March 2026" -> "7 March 2026"
+                clean_date = re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", ed_str)
+                # Try common formats
+                for fmt in ("%d %B %Y", "%B %d %Y", "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y"):
+                    try:
+                        event_date = datetime.strptime(clean_date.strip(), fmt)
+                        break
+                    except ValueError:
+                        continue
+                # Apply event_time if parsed successfully (e.g. "7:30 PM")
+                if event_date and et_str:
+                    for tfmt in ("%I:%M %p", "%H:%M", "%I %p"):
+                        try:
+                            t = datetime.strptime(et_str.strip(), tfmt)
+                            event_date = event_date.replace(hour=t.hour, minute=t.minute)
+                            break
+                        except ValueError:
+                            continue
+                if event_date and event_date.tzinfo is None:
+                    event_date = event_date.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                logger.error(
+                    "sequence_create_unparseable_event_date",
+                    template_id=str(template_id),
+                    event_date=getattr(bot_cfg, "event_date", None),
+                )
+
+        if not event_date:
             logger.error("sequence_create_missing_event_date", template_id=str(template_id))
             return None
 
