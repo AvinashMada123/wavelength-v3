@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # ElevenLabs TTS
     ELEVENLABS_API_KEY: str = ""
 
+    # Smallest AI (Pulse STT)
+    SMALLEST_API_KEY: str = ""
+
     # Groq (OpenAI-compatible LLM)
     GROQ_API_KEY: str = ""
 

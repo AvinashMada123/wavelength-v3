@@ -1194,6 +1194,24 @@ async def build_pipeline(
                 min_volume=0.5,
             )),
         )
+    elif stt_provider == "smallest":
+        # Smallest Pulse: use local Silero VAD + SmartTurn (same as Deepgram)
+        transport_params = FastAPIWebsocketParams(
+            audio_out_enabled=True,
+            audio_out_sample_rate=16000,
+            audio_out_10ms_chunks=10,
+            add_wav_header=False,
+            serializer=serializer,
+            vad_enabled=True,
+            vad_audio_passthrough=True,
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(
+                stop_secs=0.2,
+                min_volume=0.5,
+            )),
+            turn_analyzer=LocalSmartTurnAnalyzerV3(
+                params=SmartTurnParams(stop_secs=0.3),
+            ),
+        )
     else:
         # Deepgram: use local Silero VAD + SmartTurn for turn detection.
         transport_params = FastAPIWebsocketParams(
@@ -1458,6 +1476,15 @@ async def build_pipeline(
             mode="transcribe",
             language=stt_language,
         )
+    elif stt_provider == "smallest":
+        from app.services.smallest_stt import SmallestSTTService
+        smallest_language = "multi" if stt_language in ("unknown", "multi") else stt_language.split("-")[0]
+        stt = SmallestSTTService(
+            api_key=settings.SMALLEST_API_KEY,
+            language=smallest_language,
+            sample_rate=16000,
+        )
+        logger.info("stt_provider_selected", provider="smallest", model="pulse", language=smallest_language)
     else:
         # nova-3: "unknown" → "multi" (auto-detect), otherwise respect user's choice
         deepgram_language = "multi" if stt_language == "unknown" else stt_language

@@ -145,6 +145,7 @@ export const ALL_VOICES: VoiceOption[] = GEMINI_VOICE_GROUPS.flatMap((g) => g.vo
 export const STT_PROVIDER_OPTIONS = [
   { value: "deepgram", label: "Deepgram" },
   { value: "sarvam", label: "Sarvam AI" },
+  { value: "smallest", label: "Smallest AI (Pulse)" },
 ] as const;
 
 // Client-facing labels (no vendor names)

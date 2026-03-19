@@ -69,7 +69,7 @@ interface BotForm {
   event_time: string;
   greeting_template: string;
   callback_greeting_template: string;
-  stt_provider: "deepgram" | "sarvam";
+  stt_provider: "deepgram" | "sarvam" | "smallest";
   tts_provider: "gemini" | "sarvam" | "elevenlabs";
   tts_voice: string;
   tts_style_prompt: string;
@@ -961,9 +961,9 @@ export default function BotEditorPage() {
                               <Select
                                 value={form.stt_provider}
                                 onValueChange={(v) => {
-                                  setField("stt_provider", v as "deepgram" | "sarvam");
+                                  setField("stt_provider", v as "deepgram" | "sarvam" | "smallest");
                                   // Reset language to provider default
-                                  setField("language", v === "deepgram" ? "multi" : "unknown");
+                                  setField("language", v === "deepgram" ? "multi" : v === "smallest" ? "en" : "unknown");
                                 }}
                               >
                                 <SelectTrigger>
