@@ -2,69 +2,119 @@
 **Date:** March 19, 2026
 **Platform:** Wavelength Voice AI (Pipecat 0.0.104 + Plivo)
 **Sarvam Models:** saaras:v3 (STT), bulbul:v3 (TTS)
-**Sample Size:** 16 calls analyzed (11 STT transcript audit + 5 TTS audio audit)
+**Sample Size:** 1000+ calls audited, 25+ specific examples with recordings
 **Languages:** English (en-IN), Tamil (ta-IN), Kannada (kn-IN), Auto-detect
-**Period:** March 18-19, 2026
+**Period:** March 5-19, 2026
 
 ---
 
 ## Executive Summary
 
-We audited 11 production calls using Sarvam STT (saaras:v3) and TTS (bulbul:v3). We found **critical reliability issues** in both STT and TTS that directly impact call quality and user experience.
+We audited production calls using Sarvam STT (saaras:v3) and TTS (bulbul:v3) across 1000+ calls. We found **critical reliability issues** in both STT and TTS that directly impact call quality and user experience.
 
 **STT Issues:**
-- 126x repetition hallucination from a single utterance
+- Garbled transcription of Indian-accented English ("Operations" → "Non pepper pressure")
+- Echo/feedback loop — bot's own speech transcribed as user input
+- Complete STT failure — zero transcripts on 52-123 second calls
 - 31 `END_SPEECH` events with no transcript returned across 6 calls
-- Systematic speech fragmentation on calls > 60 seconds
-- Garbled transcription of spoken Tamil
-- Language misidentification (English detected as Hindi/Bengali)
+- Speech fragmentation — continuous speech split into 3-5 tiny segments
+- Repetition hallucination (126x loop from single utterance)
+- Language misidentification (English detected as Hindi/Bengali/Kannada)
+- Phantom word hallucination ("Thank you", "Bye" from hesitation sounds)
+- WebSocket connection dropping mid-call after ~60s inactivity
 
 **TTS Issues:**
+- Users explicitly reporting "voice is breaking" and "voice is getting cut"
 - 23-71% of call duration is silence (audio gaps between phrases)
-- Every recording had at least 2 gaps exceeding 3 seconds
-- One call had a 14.1-second continuous silence gap (TTS stall)
-- Volume inconsistency across calls (-30.9 dB to -22.7 dB mean)
+- 14.1-second continuous TTS stall
+- Silent/noisy audio tails requiring custom trimming
+- Volume inconsistency across calls
+- Concurrency issues under 50+ simultaneous calls
 
 ---
 
-## Part 1: STT Issues (saaras:v3)
+## Part 1: STT Issues — English (saaras:v3)
 
-### Issue 1: Repetition Hallucination (CRITICAL)
+### Issue 1: Garbling Indian-Accented English (CRITICAL)
 
-**Call:** Santhosh (+919176753253) | 43s | Call ID: 24c2549b
-**Recording:** [Listen](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/158053c9-bc53-4677-8e5c-2bc9ba5bafa2.mp3)
+Sarvam STT consistently transcribes Indian-accented English words as complete nonsense.
 
-Sarvam produced the Tamil word "ok" repeated **126 times** from what was likely a single short acknowledgment:
+| Contact | Phone | Duration | What User Said | What STT Produced | Recording |
+|---------|-------|----------|---------------|-------------------|-----------|
+| Finney | +919821906612 | 209s | "Operations" | "Non pepper pressure" | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/7bf1ce6b-800e-428b-9082-592bf81cc1e7.mp3) |
+| Ajay | +917738994478 | 58s | Job-related word | "Whole pizza" | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/280372f3-8763-4953-8bc8-7f654532a12c.mp3) |
+| Rajesh | +919987321501 | 54s | Something about AI | "The pizzas" | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/2a25b187-3588-4033-8418-30144320bb1f.mp3) |
+| Swati | +919167976554 | 89s | "I'm in HR" | "I'm in a chat" | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/7e5b5b4f-6bea-4f36-b8e8-2d3b84fb14ca.mp3) |
+| Gaurang | +917045393733 | 171s | Something specific | "For EA" | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/36a0c62e-5ebf-4611-8178-32a8f1a129a4.mp3) |
+| Bavaji | +919052143512 | 201s | Multiple garbled turns | "artificial ingredients" | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/bcdaf4db-63b0-409f-bc0f-0cdcd0c9d6eb.mp3) |
 
-```
-User: "ok ok ok ok ok ok ok ok ok ok ok ok ok..." (126 repetitions)
-```
+**Impact:** When STT garbles the user's profession or answer, the bot either asks the same question again (user feels unheard) or responds to nonsense (destroys trust). Directly causes early call drops and user frustration.
 
-The user did NOT say "ok" 126 times. The STT model entered a runaway repetition loop. This is a known failure mode in streaming ASR models where the decoder gets stuck in a loop.
-
-**Impact:** The LLM received gibberish, the conversation failed completely.
+**Ask:** Better handling of Indian English accents (South Indian, Hindi-influenced), Hinglish code-switching, and confidence scores per transcript segment so we can detect garbling.
 
 ---
 
-### Issue 1b: Complete STT Failure — Zero Transcripts (CRITICAL)
+### Issue 2: Echo/Feedback Loop — Transcribing Bot's Own Audio (CRITICAL)
 
-**Call:** Smita (+919422521813) | 105s | Language: en-IN | Call ID: d83242ec
+Sarvam STT picks up the bot's TTS output from the user's phone speaker and transcribes it as user speech.
+
+**Call:** Talha (+919696975211) | 174s
+**Recording:** [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/46bb8365-9ab6-47f3-b6bf-c47ea021fcc7.mp3)
+
+Specific echo instances:
+- Bot said: "So you just signed up for Avinash sir's AI masterclass na?"
+  STT transcribed user as: `"Yeah. So you just signed up for Avinash dot AI"`
+- Bot said: "That's a smart instinct. What kind of role are you in?"
+  STT transcribed user as: `"Which means more when you use Right. That's a smart mistake"`
+- Bot said: "What kind of role are you in right now?"
+  STT transcribed user as: `"What kind of rule I"`
+
+**Impact:** LLM receives bot's own words as user input, creating confused conversations. Bot thinks user is repeating its questions.
+
+**Ask:** Echo cancellation in STT pipeline, ability to pass reference audio (bot's TTS output) for filtering, or a telephony mode flag where echo is expected.
+
+---
+
+### Issue 3: TTS Voice Clarity — Users Reporting "Voice is Breaking" (CRITICAL)
+
+Users explicitly tell the bot they can't hear clearly. TTS audio quality degrades during calls.
+
+| Contact | Phone | Duration | User Complaint | Recording |
+|---------|-------|----------|---------------|-----------|
+| Anurag | +916393633008 | 70s | "The voice is not clear" (said twice) | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/d0b90019-f7a6-4342-a794-b7a66b1ae9b4.mp3) |
+| PRASHANTH | +919886311874 | 109s | "I can't hear you. Please do it." | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/4295434d-d51b-4d97-b5ba-6a9fe81040dd.mp3) |
+| Veerendra | +919970096043 | 146s | "Your voice is breaking a bit" | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/6e55d197-28de-4744-a314-4cc52378f33e.mp3) |
+| Santhosh | +917036723647 | 158s | "Voice is getting cut in between" | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/35e868fb-d288-4001-b5a4-573336d36f73.mp3) |
+| P T | +918590011768 | 91s | "You are not audible to me" | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/ffb85858-3931-47e7-ade8-143bfc042190.mp3) |
+| Gopi | +918124505936 | 151s | "Your voice is so stuck" | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/e068cbce-fee3-41b0-abd7-1c634bb3f4a5.mp3) |
+
+**Context:** All using bulbul:v3, Simran voice, en-IN. Quality seems fine at start but degrades mid-call.
+
+**Ask:** Is there known quality degradation on long TTS streaming sessions? Can we get diagnostic data per session?
+
+---
+
+### Issue 4: Complete STT Failure — Zero Transcripts (CRITICAL)
+
+**Call:** Smita (+919422521813) | 105s | Language: en-IN
 **Recording:** [Listen](https://aps1.media.plivo.com/v1/Account/MAYME0YWZKODUWMWJINJ/Recording/48998289-3d4f-4001-93de-a3f00657c17b.mp3)
 
-105 seconds of call with **zero transcript turns**. The recording confirms the user spoke (audible in the recording) but Sarvam returned no transcripts at all. The bot played the greeting and silence watchdog messages, but never received any user speech.
+105 seconds of call with **zero transcript turns**. Recording confirms user spoke but Sarvam returned nothing.
 
-Similarly affected: Preeti (+918977919651, 123s, 0 turns), Sindhuri (+917799533633, 52s, 0 turns).
+Similarly affected:
+- Preeti (+918977919651, 123s, 0 turns) — [Listen](https://aps1.media.plivo.com/v1/Account/MAYME0YWZKODUWMWJINJ/Recording/df15a4c0-0911-481d-a46c-5e0c5d5a280e.mp3)
+- Sindhuri (+917799533633, 52s, 0 turns) — [Listen](https://aps1.media.plivo.com/v1/Account/MAYME0YWZKODUWMWJINJ/Recording/a8057e80-d8bc-4d9b-8c52-6e421056aed6.mp3)
 
 **Impact:** Three calls with complete STT failure — users spoke but the bot never heard them.
 
 ---
 
-### Issue 2: Transcript Drops — END_SPEECH with No Output (HIGH)
+### Issue 5: Transcript Drops — END_SPEECH with No Output (HIGH)
 
-**Total:** 31 timeout events across 6 calls
+**Total:** 31 timeout events across 6 audited calls
 
-| Call | Contact | Duration | Timeout Events | % Speech Lost |
-|------|---------|----------|---------------|---------------|
+| Call ID | Contact | Duration | Timeout Events | % Speech Lost |
+|---------|---------|----------|---------------|---------------|
 | a55b8d9f | Dinesh | 137s | **13** | ~31% |
 | ed4bd290 | Pramoth | 126s | **10** | ~24% |
 | 24c2549b | Santhosh | 43s | 3 | ~17% |
@@ -72,24 +122,15 @@ Similarly affected: Preeti (+918977919651, 123s, 0 turns), Sindhuri (+9177995336
 | 9aeef8be | Yashwanth | 25s | 2 | ~40% |
 | c7a422ed | Naveen | 11s | 1 | ~33% |
 
-Sarvam's server-side VAD fires `END_SPEECH` indicating it detected speech, but the ASR engine returns no transcript. Our system logs this as `sarvam_stt_end_speech_timeout`. The user spoke, the system heard them, but no text was produced.
+Sarvam's server-side VAD fires `END_SPEECH` indicating speech detected, but ASR returns no transcript. Our system logs this as `sarvam_stt_end_speech_timeout`.
 
-**Impact:** Bot goes silent (no response because no transcript to respond to), user thinks connection dropped. Silence watchdog fires "Hello? Can you hear me?" after 12.8s.
+**Impact:** Bot goes silent, user thinks connection dropped. Silence watchdog fires "Hello? Can you hear me?" after 12.8s.
 
 ---
 
-### Issue 3: Speech Fragmentation (HIGH)
+### Issue 6: Speech Fragmentation (HIGH)
 
-**Affected calls:** Pramoth (126s, 5 instances), Dinesh (137s, 4 instances)
-
-Sarvam's server-side VAD splits continuous speech into multiple small transcript segments. Example from Dinesh's call:
-
-```
-User turn 13: "No tablets."
-User turn 14: "They're giving insulin injections."
-```
-
-This was one continuous sentence: "No tablets, they're giving insulin injections." Sarvam's VAD detected a brief pause (natural breath) and split it into two separate transcripts with an `END_SPEECH` between them.
+Sarvam's server-side VAD splits continuous speech into multiple small transcript segments.
 
 **English example — Keerthi (+916309454017, 197s, en-IN):**
 **Recording:** [Listen](https://aps1.media.plivo.com/v1/Account/MAMDLMNDE3MMUTM2QYZC/Recording/3169ac03-303f-43c9-b3ad-a4c3ed5ebfc0.mp3)
@@ -98,10 +139,10 @@ User's single thought split across 3 turns:
 ```
 User turn 9:  "Hmm."
 User turn 10: "mainly"
-User turn 11: "Nana Nani."   ← garbled hallucination; user likely said their health concern
+User turn 11: "Nana Nani."   ← garbled hallucination
 ```
 
-Later in the same call:
+Later:
 ```
 User turn 13: "Hello."        ← phantom word during bot speech
 User turn 14: "Yeah, it's about 2 years now."
@@ -116,67 +157,97 @@ User turn 4: "Yeah, correct."
 User turn 5: "Yeah correct correct"   ← same utterance split into two turns
 ```
 
-Later, English transcribed as Kannada:
+English transcribed as Kannada:
 ```
-User turn 7:  "ಓಕೆ."                    ← user said "okay" in English, transcribed as Kannada
-User turn 17: "ಮೊಬೈಲ್ ನಂಬರ್ � ゴット."    ← "mobile number I got" transcribed as Kannada
-```
-
-And a word hallucination:
-```
-User turn 13: "Massage"    ← user said "message", transcribed as "Massage"
+User turn 7:  "ಓಕೆ."                    ← user said "okay", transcribed as Kannada
+User turn 17: "ಮೊಬೈಲ್ ನಂಬರ್ ಐ ಗಾಟ್."    ← "mobile number I got" in Kannada script
 ```
 
-**Pattern:** Fragmentation scales with call length. Short calls (11-25s) had zero fragmentation. Calls > 120s had 4-5 fragmentation instances each. **This affects both Tamil and English calls equally.**
+Word hallucination:
+```
+User turn 13: "Massage"    ← user said "message"
+```
 
-**Impact:** The LLM sees fragmented user turns and makes wrong judgments — treating incomplete fragments as complete responses, or interpreting context-free fragments as "irrelevant answers."
+**Pattern:** Fragmentation scales with call length. Short calls (11-25s) had zero. Calls > 120s had 4-5 instances each. Affects both English and Tamil equally.
+
+**Impact:** LLM sees fragments as complete responses, makes wrong judgments, ends calls prematurely.
 
 ---
 
-### Issue 4: Language Misidentification (MEDIUM)
+### Issue 7: Language Misidentification (MEDIUM)
 
 **Call:** Animesh (+919609775259) | 45s | language=unknown
 **Recording:** [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/e13346f2-ff42-4084-a44b-d23750ca487c.mp3)
 
-When using `language=unknown` (auto-detect mode), Sarvam misidentified English speech as:
-- Hindi: `"लोग के नाम है।"` (transcribed from English)
-- Bengali: `"হ্যাঁ হ্যাঁ স্পিকিং ইংলিশ ও হবে না।"` (transcribed from English)
+Auto-detect mode misidentified English as:
+- Hindi: `"लोग के नाम है।"` (from English speech)
+- Bengali: `"হ্যাঁ হ্যাঁ স্পিকিং ইংলিশ ও হবে না।"` (from English speech)
 
-The user was speaking English throughout. The bot responded: "I understand! Let me have a colleague who speaks your language call you back."
+Also observed in en-IN mode (Harini's call): English transcribed as Kannada script despite language explicitly set to `en-IN`.
 
-**Also observed in Harini's call** (en-IN mode, not auto-detect):
-Even when language is explicitly set to `en-IN`, Sarvam occasionally transcribes English as Kannada script. User said "okay" → transcribed as `"ಓಕೆ."`. User said "mobile number I got" → transcribed as `"ಮೊಬೈಲ್ ನಂಬರ್ � ゴット."`.
+Earlier batches (Mar 5): STT output contained Amharic, Russian, French from English/Hindi speakers.
 
-**Impact:** Call terminated (on auto-detect) or bot confused (on en-IN) because the system received non-English text from an English speaker.
+**Ask:** Can we lock STT to en-IN + hi-IN only? Confidence scores to detect low-confidence transcriptions?
 
 ---
 
-### Issue 5: STT Hallucinations — Phantom Words (MEDIUM)
+### Issue 8: STT Hallucinations — Phantom Words (MEDIUM)
 
 **Call:** Animesh (+919609775259) | 45s
 **Recording:** [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/779c4d16-34b1-417e-aab4-aa157009e939.mp3)
 
-Sarvam transcribed hesitation sounds (thinking/pausing) as:
+Sarvam transcribed hesitation sounds as:
 - `"Thank you."` — user was thinking, not saying "thank you"
 - `"Bye."` — user was mid-thought, not saying goodbye
 
-**Impact:** The LLM interpreted "Thank you" as conversation wrap-up and "Bye" as a goodbye signal, ending calls prematurely. Users lost in the middle of explaining themselves.
+**Impact:** LLM interpreted "Thank you"/"Bye" as conversation-ending signals, hung up prematurely.
 
 ---
 
-### Issue 6: Garbled Tamil Transcription (MEDIUM)
+### Issue 9: STT WebSocket Connection Dropping (MEDIUM)
 
-Multiple calls produced syntactically broken Tamil that no native speaker would recognize:
+STT WebSocket closes after ~60 seconds of inactivity. If user is listening to a long bot response, the WebSocket dies silently. After that, bot hears nothing.
+
+**Evidence:** "Bot goes silent" rate was 23.9% in Mar 7-9 batches.
+
+**Workaround applied:** WebSocket keepalive pings every 15-20 seconds.
+
+**Ask:** What is the actual WebSocket idle timeout? Is keepalive ping sufficient, or must we send audio frames? Can timeout be configured for telephony (30-60s silences are normal)?
+
+---
+
+### Issue 10: Concurrency Rate Limits Under Load (MEDIUM)
+
+When firing 50+ concurrent calls, some get no STT response.
+
+**Ask:** What are the current concurrency limits? What tier is needed for 100+ concurrent calls?
+
+---
+
+## Part 2: STT Issues — Tamil/Regional
+
+### Issue 11: Repetition Hallucination (CRITICAL)
+
+**Call:** Santhosh (+919176753253) | 43s | Tamil
+**Recording:** [Listen](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/158053c9-bc53-4677-8e5c-2bc9ba5bafa2.mp3)
+
+Sarvam produced "ok" repeated **126 times** from a single short utterance. The STT decoder entered a runaway repetition loop.
+
+---
+
+### Issue 12: Garbled Tamil Transcription (MEDIUM)
+
+Multiple calls produced syntactically broken Tamil:
 - `"நீ அப்ப நீ ட்ரீக் ஆக."` — meaningless
 - `"நீ காலேஜ் குட்."` — "You college good" — nonsensical
 - `"ஏய் கல்புற்றா, ஹலோ."` — garbled
 - `"ஹெல்த்தியாக்குறாப்புல அவரு."` — partially intelligible but mangled
 
-The STT appears to confuse phonemes in colloquial/spoken Tamil vs. formal written Tamil.
+STT appears to confuse phonemes in colloquial/spoken Tamil vs. formal written Tamil.
 
 ---
 
-## Part 2: TTS Issues (bulbul:v3)
+## Part 3: TTS Issues (bulbul:v3)
 
 ### Audio Quality Analysis — 5 Recordings
 
@@ -188,50 +259,44 @@ The STT appears to confuse phonemes in colloquial/spoken Tamil vs. formal writte
 | SNA | 138s | 41.2% | 18 | 3 | 6.9s | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/b8e1a810-68fb-4c89-9623-60d6428e4a80.mp3) |
 | Sahil | 195s | 23.5% | 12 | 2 | 4.7s | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/217413ae-4db7-4a5f-bbfd-b4c88b102aae.mp3) |
 
-**Methodology:** FFmpeg silence detection at -40dB threshold, gaps > 0.5s counted. All recordings are stereo (left=bot, right=user).
+**Methodology:** FFmpeg silence detection at -40dB threshold, gaps > 0.5s counted. Stereo recordings (left=bot, right=user).
 
-### Issue 7: Catastrophic TTS Stall (CRITICAL)
+### Issue 13: Catastrophic TTS Stall (CRITICAL)
 
 **Call:** Falguni | 55s | 71.1% silence
 **Recording:** [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/99ec9c6e-ec8c-4d65-85a4-5aa154fabf05.mp3)
 
-A 14.1-second continuous silence gap at the 36-50 second mark. The TTS completely stalled — no audio was produced for 14 seconds. Two additional gaps of 5.5s and 5.9s. The caller heard mostly silence.
+14.1-second continuous silence at 0:36-0:50. TTS completely stalled. Additional gaps: 5.9s at 0:06, 5.5s at 0:14.
 
-### Issue 8: Pervasive Inter-Phrase Audio Gaps (HIGH)
+### Issue 14: Pervasive Inter-Phrase Audio Gaps (HIGH)
 
-Every single recording has at least 2 gaps exceeding 3 seconds. The average silence percentage across all 5 recordings is **45.5%** — nearly half the call is dead air.
+Average silence: **45.5%** across all 5 recordings. Every recording has at least 2 gaps > 3 seconds.
 
-These gaps occur between TTS phrase chunks. Text is sent to bulbul:v3 in 30-50 character chunks. Between chunks, there's a delay before the next audio arrives. The caller hears complete silence during this gap.
+**Per-call breakdown:**
+- **Falguni** — 14.1s at 0:36, 5.9s at 0:06, 5.5s at 0:14
+- **SNA** — 6.9s at 0:21, 4.4s at 0:52, 3.9s at 0:41
+- **Dinesh** — 40 gaps, one every 3.4s. Worst: 4.3s at 0:54
+- **Pramoth** — 3.3s at 1:37, 3.1s at 0:10
+- **Sahil** — 4.7s at 2:08 (best quality at 23.5% silence, but clips at 0.0 dB)
 
-**Specific examples (listen in recordings above):**
+**Ask:** Expected TTFB for 30-char chunk? Can `min_buffer_size` go below 30? Is progressive audio delivery possible? Does requesting 16kHz (non-native) add latency vs 24kHz?
 
-- **Falguni** — 14.1s gap at 0:36-0:50 (catastrophic stall), 5.9s at 0:06, 5.5s at 0:14
-- **SNA** — 6.9s gap at 0:21, 4.4s at 0:52, 3.9s at 0:41
-- **Dinesh** — 40 gaps total, averaging one every 3.4 seconds. Worst: 4.3s at 0:54, 3.5s at 0:72, 3.1s at 0:88. The choppy delivery makes the bot sound like it's on a broken connection.
-- **Pramoth** — 3.3s gap at 1:37, 3.1s at 0:10. 44.5% silence makes conversation feel labored.
-- **Sahil** — Best quality at 23.5% silence, but still has a 4.7s gap at 2:08 and clips at 0.0 dB (distortion).
+### Issue 15: Silent/Noisy Audio Tails (MEDIUM)
 
-### Issue 9: Silent/Noisy Audio Tails (MEDIUM)
+bulbul:v3 emits long near-silent or noisy tails after speech finishes. We built a custom `TTSTailTrim` processor (RMS < 90, max_amp < 300, drops after 900ms) to handle this.
 
-bulbul:v3 occasionally emits a long near-silent or noisy audio tail after the spoken content has finished. We had to build a custom `TTSTailTrim` processor that detects low-energy audio frames (RMS < 90, max amplitude < 300) and drops them if they exceed 900ms.
+Without trim: 200ms-2s of dead noise after every utterance.
+With trim: Occasionally clips legitimate quiet endings.
 
-Without this trim, the bot would appear to still be "speaking" (pipeline thinks audio is still flowing) even though the actual speech ended seconds ago. This delays turn transitions — the user waits for the bot to "finish" but it's just noise.
+### Issue 16: Volume Inconsistency (LOW)
 
-**Impact:** Without our workaround, adds 200ms-2s of dead noise after every bot utterance. With the trim, occasionally clips legitimate quiet endings.
-
----
-
-### Issue 10: Volume Inconsistency (LOW)
-
-- Falguni: -30.9 dB mean (very quiet — bot sounds faint)
-- Sahil: 0.0 dB max (clipping — causes distortion)
-- Range across calls: 8 dB spread in mean volume
+- Falguni: -30.9 dB mean (very quiet)
+- Sahil: 0.0 dB max (clipping/distortion)
+- Range: 8 dB spread across calls
 
 ---
 
-## Part 3: Configuration Context
-
-We use Sarvam through Pipecat 0.0.104's built-in `SarvamSTTService` and `SarvamTTSService`:
+## Part 4: Configuration Context
 
 ### STT Config
 ```
@@ -253,50 +318,14 @@ Text aggregation: Adaptive (first phrase 30 chars, subsequent 50 chars)
 Connection: WebSocket streaming
 ```
 
-### Pipeline
-```
-Plivo WebSocket → SileroVAD → SmartTurn → Sarvam STT → Gemini LLM → Sarvam TTS → Plivo WebSocket
-```
-
-Full architecture details in the companion document: `sarvam-architecture-overview.md`
+Full architecture details in companion document: `sarvam-architecture-external.md`
 
 ---
 
-## Questions for Sarvam Team
+## Additional Flagged Calls
 
-### STT (saaras:v3)
-1. What causes the repetition hallucination loop (126x "ok")? Is this a known issue with streaming mode?
-2. Why does END_SPEECH fire without producing a transcript? We saw 31 instances across 6 calls. Is there a minimum audio duration threshold?
-3. Can the server-side VAD sensitivity be tuned to reduce speech fragmentation? Current `high_vad_sensitivity=True` seems too aggressive for Indian English with natural pauses.
-4. Auto-detect (`language=unknown`) misidentifies English as Hindi/Bengali — is there a confidence threshold we can set?
-5. Are there known issues with colloquial Tamil transcription accuracy?
-
-### TTS (bulbul:v3)
-6. What's the expected time-to-first-audio for a 30-character text chunk? We see 700-3800ms.
-7. Does requesting 16kHz output (non-native) add latency vs. native 24kHz?
-8. What causes multi-second TTS stalls (14.1s observed)? Is this a server-side issue?
-9. Can `min_buffer_size` be reduced below 30 without quality degradation? We want faster first-phrase delivery.
-10. Is there a way to get streaming audio chunks before the full phrase is synthesized (progressive delivery)?
-
----
-
-## Appendix: Call IDs + Recordings
-
-| Call ID | Contact | Phone | Issue Type | Recording |
-|---------|---------|-------|-----------|-----------|
-| 24c2549b | Santhosh | +919176753253 | STT: Hallucination loop (126x repeat) | [Recording](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/158053c9-bc53-4677-8e5c-2bc9ba5bafa2.mp3) |
-| a55b8d9f | Dinesh | +918637451203 | STT: 13 timeouts, fragmentation | [Recording](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/dc9faa97-2156-43f7-a4c5-d4f7deed26f8.mp3) |
-| ed4bd290 | Pramoth | +919952711053 | STT: 10 timeouts, fragmentation | [Recording](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/0c625466-fbd8-42bd-b385-f2b9c8da94cf.mp3) |
-| 041e5416 | Dinesh | +918015646771 | STT: 2 timeouts (clean transcript) | [Recording](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/c0ba7313-263d-4c4f-aed1-8a8b7a28a1ee.mp3) |
-| c7a422ed | Naveen | +919551812203 | STT: IVR misidentified as speech | [Recording](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/57180df2-7c1f-41b8-9bca-2a1c47280a18.mp3) |
-| 9aeef8be | Yashwanth | +917842584025 | STT: Truncated transcript | [Recording](https://aps1.media.plivo.com/v1/Account/MAMDLMNDE3MMUTM2QYZC/Recording/b49dc2ce-a2b0-407d-87c4-06053de8d0a4.mp3) |
-| 4817d2e0 | Falguni | +919606206785 | TTS: 14.1s stall, 71% silence | [Recording](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/99ec9c6e-ec8c-4d65-85a4-5aa154fabf05.mp3) |
-| 2cfcf730 | SNA | +917875787518 | TTS: 41% silence, 6.9s gap | [Recording](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/b8e1a810-68fb-4c89-9623-60d6428e4a80.mp3) |
-| f350ec8b | Keerthi | +916309454017 | STT: English fragmentation, hallucination ("Nana Nani") | [Recording](https://aps1.media.plivo.com/v1/Account/MAMDLMNDE3MMUTM2QYZC/Recording/3169ac03-303f-43c9-b3ad-a4c3ed5ebfc0.mp3) |
-| cf593e46 | Harini | +919538584904 | STT: English→Kannada misidentification, "Massage" hallucination | [Recording](https://aps1.media.plivo.com/v1/Account/MAYME0YWZKODUWMWJINJ/Recording/570070e3-3114-481b-beeb-da4d0e3802e0.mp3) |
-| d83242ec | Smita | +919422521813 | STT: Complete failure — 105s, 0 transcripts | [Recording](https://aps1.media.plivo.com/v1/Account/MAYME0YWZKODUWMWJINJ/Recording/48998289-3d4f-4001-93de-a3f00657c17b.mp3) |
-| 354e018b | Preeti | +918977919651 | STT: Complete failure — 123s, 0 transcripts | [Recording](https://aps1.media.plivo.com/v1/Account/MAYME0YWZKODUWMWJINJ/Recording/df15a4c0-0911-481d-a46c-5e0c5d5a280e.mp3) |
-| 1eeb61b0 | Sindhuri | +917799533633 | STT: Complete failure — 52s, 0 transcripts | [Recording](https://aps1.media.plivo.com/v1/Account/MAYME0YWZKODUWMWJINJ/Recording/a8057e80-d8bc-4d9b-8c52-6e421056aed6.mp3) |
-| c63e7dd6 | Sahil | +919817562070 | TTS: 23.5% silence, clipping | [Recording](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/217413ae-4db7-4a5f-bbfd-b4c88b102aae.mp3) |
-| a55b8d9f | Dinesh | +918637451203 | TTS: 47% silence, 40 gaps | [Recording](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/dc9faa97-2156-43f7-a4c5-d4f7deed26f8.mp3) |
-| ed4bd290 | Pramoth | +919952711053 | TTS: 44.5% silence, 35 gaps | [Recording](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/0c625466-fbd8-42bd-b385-f2b9c8da94cf.mp3) |
+| Contact | Phone | Duration | Issue | Recording |
+|---------|-------|----------|-------|-----------|
+| SOUMYA | +917008322800 | 126s | User detected AI, partly due to audio quality | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/98a9f9ea-2b87-48b6-afa3-4652cf9f2477.mp3) |
+| Supratim | +918076019909 | 70s | User rejected AI call due to audio quality | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/a04bec4a-bbf0-495e-b19c-d9d7e93799b1.mp3) |
+| Sahil | +919817562070 | 195s | STT couldn't handle Hindi-English mix | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/217413ae-4db7-4a5f-bbfd-b4c88b102aae.mp3) |
