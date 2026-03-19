@@ -49,17 +49,14 @@ class SmallestSTTService(STTService):
         self._last_audio_time: float = 0
         self._connected = False
 
-    async def start(self, frame: StartFrame):
-        await super().start(frame)
-        await self._connect()
+    async def process_frame(self, frame, direction):
+        """Override to connect on StartFrame and disconnect on End/Cancel."""
+        if isinstance(frame, StartFrame):
+            await self._connect()
+        elif isinstance(frame, (EndFrame, CancelFrame)):
+            await self._disconnect()
 
-    async def stop(self, frame: EndFrame):
-        await self._disconnect()
-        await super().stop(frame)
-
-    async def cancel(self, frame: CancelFrame):
-        await self._disconnect()
-        await super().cancel(frame)
+        await super().process_frame(frame, direction)
 
     async def _connect(self):
         """Open WebSocket connection to Smallest AI Pulse."""
