@@ -131,6 +131,11 @@ class SmallestSTTService(STTService):
         try:
             await self._ws.send(audio)
             self._last_audio_time = time.monotonic()
+            if not hasattr(self, '_audio_sent_count'):
+                self._audio_sent_count = 0
+            self._audio_sent_count += 1
+            if self._audio_sent_count % 50 == 1:  # Log every 50th chunk (~5s)
+                logger.info("smallest_stt_audio_sent", chunks=self._audio_sent_count, bytes=len(audio))
         except websockets.ConnectionClosed:
             logger.warning("smallest_stt_connection_closed_during_send")
             self._connected = False
@@ -146,6 +151,7 @@ class SmallestSTTService(STTService):
         while self._connected and self._ws:
             try:
                 msg = await self._ws.recv()
+                logger.info("smallest_stt_recv", type=type(msg).__name__, length=len(msg) if msg else 0, preview=str(msg)[:200] if isinstance(msg, str) else "binary")
                 if isinstance(msg, str):
                     data = json.loads(msg)
                     await self._handle_message(data)
