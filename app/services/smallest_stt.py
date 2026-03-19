@@ -23,9 +23,10 @@ from pipecat.utils.time import time_now_iso8601
 
 logger = structlog.get_logger(__name__)
 
-SMALLEST_WS_URL = "wss://waves-api.smallest.ai/api/v1/pulse/get_text"
+SMALLEST_WS_URL = "wss://api.smallest.ai/waves/v1/pulse/get_text"
 KEEPALIVE_INTERVAL = 5.0  # seconds
 KEEPALIVE_SILENCE_DURATION = 0.1  # 100ms of silence
+CHUNK_SIZE = 4096  # recommended by Smallest docs
 
 
 class SmallestSTTService(STTService):
@@ -63,8 +64,8 @@ class SmallestSTTService(STTService):
         try:
             url = (
                 f"{SMALLEST_WS_URL}"
-                f"?model=pulse"
-                f"&language={self._language}"
+                f"?language={self._language}"
+                f"&encoding=linear16"
                 f"&sample_rate={self._sample_rate}"
             )
             headers = {"Authorization": f"Bearer {self._api_key}"}
@@ -162,8 +163,12 @@ class SmallestSTTService(STTService):
 
     async def _handle_message(self, data: dict):
         """Process a transcript message from Pulse."""
-        text = data.get("text", "").strip()
-        is_final = data.get("is_final", True)
+        msg_type = data.get("type", "")
+        if msg_type != "transcription":
+            return
+
+        text = data.get("transcript", "").strip()
+        is_final = data.get("is_final", False)
 
         if not text:
             return
@@ -176,6 +181,7 @@ class SmallestSTTService(STTService):
                     timestamp=time_now_iso8601(),
                 )
             )
+            logger.info("smallest_stt_final", text=text[:100])
         else:
             await self.push_frame(
                 InterimTranscriptionFrame(
