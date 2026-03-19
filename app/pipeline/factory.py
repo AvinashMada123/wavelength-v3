@@ -1051,7 +1051,11 @@ def _build_switch_bot_tool(bot_config: BotConfig, call_context: CallContext):
                 call_log = log_result.scalar_one_or_none()
                 contact_phone = call_log.contact_phone if call_log else ""
 
-                # Create immediate queue entry for target bot
+                # Create queue entry for target bot with 2min delay
+                # so the current call fully ends before the new bot calls
+                from datetime import datetime, timedelta, timezone as tz
+                switch_delay = datetime.now(tz.utc) + timedelta(minutes=2)
+
                 queued_call = QueuedCall(
                     org_id=bot_config.org_id,
                     bot_id=target_bot_id,
@@ -1060,7 +1064,8 @@ def _build_switch_bot_tool(bot_config: BotConfig, call_context: CallContext):
                     ghl_contact_id=call_context.ghl_contact_id,
                     source="bot_switch",
                     status="queued",
-                    priority=2,  # Highest priority — immediate pickup
+                    priority=2,
+                    scheduled_at=switch_delay,
                     extra_vars={
                         "switched_from_bot": str(bot_config.id),
                         "switch_reason": reason,

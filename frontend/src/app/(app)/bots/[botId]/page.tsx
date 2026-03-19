@@ -1014,7 +1014,10 @@ export default function BotEditorPage() {
                                   <SelectValue placeholder="Select voice..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {(form.tts_provider === "elevenlabs" ? ELEVENLABS_VOICE_GROUPS : form.tts_provider === "gemini" ? GEMINI_VOICE_GROUPS : SARVAM_VOICE_GROUPS).map((group) => (
+                                  {(isSuperAdmin
+                                    ? (form.tts_provider === "elevenlabs" ? ELEVENLABS_VOICE_GROUPS : form.tts_provider === "gemini" ? GEMINI_VOICE_GROUPS : SARVAM_VOICE_GROUPS)
+                                    : SARVAM_VOICE_GROUPS
+                                  ).map((group) => (
                                     <SelectGroup key={group.label}>
                                       <SelectLabel>{group.label}</SelectLabel>
                                       {group.voices.map((v) => (
