@@ -92,12 +92,13 @@ function timingSummary(step: SequenceStep): string {
     const val = step.timing_value as Record<string, number | string>;
     const days = Number(val?.days ?? 0);
     const time = val?.time;
+    const varName = val?.event_variable || "event_date";
     if (days < 0) {
-      return `${Math.abs(days)}d before event${time ? ` at ${time}` : ""}`;
+      return `${Math.abs(days)}d before ${varName}${time ? ` at ${time}` : ""}`;
     } else if (days === 0) {
-      return `Event day${time ? ` at ${time}` : ""}`;
+      return `${varName} day${time ? ` at ${time}` : ""}`;
     }
-    return `${days}d after event${time ? ` at ${time}` : ""}`;
+    return `${days}d after ${varName}${time ? ` at ${time}` : ""}`;
   }
   if (step.timing_type === "relative_to_signup") {
     const val = step.timing_value as Record<string, number | string>;
@@ -124,9 +125,11 @@ function timingSummary(step: SequenceStep): string {
 export interface StepCardProps {
   step: SequenceStep;
   bots: { id: string; name: string }[];
+  variables: Array<{ key: string; default_value: string; description: string; type?: string }>;
   onUpdate: (stepId: string, data: Partial<SequenceStep>) => void;
   onDelete: (stepId: string) => void;
   onTestPrompt: (prompt: string, model: string) => void;
+  onAddVariable: (variable: { key: string; default_value: string; description: string; type: string }) => void;
   isExpanded: boolean;
   onToggleExpand: () => void;
 }
@@ -138,9 +141,11 @@ export interface StepCardProps {
 export function StepCard({
   step,
   bots,
+  variables,
   onUpdate,
   onDelete,
   onTestPrompt,
+  onAddVariable,
   isExpanded,
   onToggleExpand,
 }: StepCardProps) {
@@ -343,7 +348,20 @@ export function StepCard({
               value={timingType}
               onValueChange={(val) => {
                 setTimingType(val);
-                const newTv = val === "immediate" ? {} : timingValue;
+                let newTv = val === "immediate" ? {} : timingValue;
+                if (val === "relative_to_event") {
+                  const dtVars = variables.filter((v) => v.type === "datetime");
+                  if (dtVars.length === 0) {
+                    onAddVariable({
+                      key: "event_date",
+                      type: "datetime",
+                      default_value: "",
+                      description: "Event date and time",
+                    });
+                  }
+                  const selectedVar = dtVars.length > 0 ? dtVars[0].key : "event_date";
+                  newTv = { ...newTv, event_variable: selectedVar };
+                }
                 setTimingValue(newTv);
                 onUpdate(step.id, { timing_type: val, timing_value: newTv });
               }}
@@ -399,21 +417,44 @@ export function StepCard({
             )}
 
             {timingType === "relative_to_event" && (
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  placeholder="Days"
-                  value={timingValue.days ?? ""}
-                  onChange={(e) => {
-                    const tv = { ...timingValue, days: Number(e.target.value) };
+              <>
+                <Select
+                  value={timingValue.event_variable || "event_date"}
+                  onValueChange={(val) => {
+                    const tv = { ...timingValue, event_variable: val };
                     setTimingValue(tv);
                     updateField({ timing_value: tv });
                   }}
-                  onBlur={flush}
-                  className="w-full"
-                />
-                <span className="text-xs text-muted-foreground whitespace-nowrap">days (- = before)</span>
-              </div>
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select variable" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {variables
+                      .filter((v) => v.type === "datetime")
+                      .map((v) => (
+                        <SelectItem key={v.key} value={v.key}>
+                          {v.key}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    placeholder="Days"
+                    value={timingValue.days ?? ""}
+                    onChange={(e) => {
+                      const tv = { ...timingValue, days: Number(e.target.value) };
+                      setTimingValue(tv);
+                      updateField({ timing_value: tv });
+                    }}
+                    onBlur={flush}
+                    className="w-full"
+                  />
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">days (- = before)</span>
+                </div>
+              </>
             )}
 
             {(timingType === "delay" || timingType === "fixed_time" || timingType === "relative_to_event" || timingType === "relative_to_signup") && (

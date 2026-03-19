@@ -145,6 +145,16 @@ export default function TemplateBuilderPage() {
     [template, templateId],
   );
 
+  const handleAddVariable = useCallback(
+    (variable: { key: string; default_value: string; description: string; type: string }) => {
+      if (variables.some((v) => v.key === variable.key)) return;
+      const updated = [...variables, variable];
+      setVariables(updated);
+      saveHeader({ variables: updated });
+    },
+    [variables, saveHeader],
+  );
+
   // -----------------------------------------------------------------------
   // Step operations
   // -----------------------------------------------------------------------
@@ -412,9 +422,23 @@ export default function TemplateBuilderPage() {
                           placeholder="event_date"
                           value={v.key}
                           onChange={(e) => {
+                            const oldKey = variables[i].key;
+                            const newKey = e.target.value;
                             const updated = [...variables];
-                            updated[i] = { ...updated[i], key: e.target.value };
+                            updated[i] = { ...updated[i], key: newKey };
                             setVariables(updated);
+                            if (oldKey && oldKey !== newKey) {
+                              steps.forEach((s) => {
+                                if (
+                                  s.timing_type === "relative_to_event" &&
+                                  (s.timing_value as any)?.event_variable === oldKey
+                                ) {
+                                  handleUpdateStep(s.id, {
+                                    timing_value: { ...s.timing_value, event_variable: newKey },
+                                  });
+                                }
+                              });
+                            }
                           }}
                           onBlur={() => saveHeader({ variables })}
                         />
@@ -503,6 +527,23 @@ export default function TemplateBuilderPage() {
                           size="sm"
                           className="h-8 w-8 p-0 text-muted-foreground hover:text-red-400"
                           onClick={() => {
+                            const varKey = variables[i].key;
+                            const referencingSteps = steps.filter(
+                              (s) =>
+                                s.timing_type === "relative_to_event" &&
+                                ((s.timing_value as any)?.event_variable === varKey ||
+                                  (!((s.timing_value as any)?.event_variable) && varKey === "event_date")),
+                            );
+                            if (referencingSteps.length > 0) {
+                              const confirm = window.confirm(
+                                `This variable is used by ${referencingSteps.length} step(s) for event timing. Deleting it will break their scheduling. Continue?`,
+                              );
+                              if (!confirm) return;
+                              referencingSteps.forEach((s) => {
+                                const { event_variable, ...rest } = s.timing_value as any;
+                                handleUpdateStep(s.id, { timing_value: rest });
+                              });
+                            }
                             const updated = variables.filter((_, idx) => idx !== i);
                             setVariables(updated);
                             saveHeader({ variables: updated });
@@ -556,9 +597,11 @@ export default function TemplateBuilderPage() {
                     <StepCard
                       step={step}
                       bots={bots}
+                      variables={variables}
                       onUpdate={handleUpdateStep}
                       onDelete={handleDeleteStep}
                       onTestPrompt={handleTestPrompt}
+                      onAddVariable={handleAddVariable}
                       isExpanded={expandedStepId === step.id}
                       onToggleExpand={() =>
                         setExpandedStepId(
