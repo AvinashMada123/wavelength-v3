@@ -1478,7 +1478,8 @@ async def build_pipeline(
         )
     elif stt_provider == "smallest":
         from app.services.smallest_stt import SmallestSTTService
-        smallest_language = "multi" if stt_language in ("unknown", "multi") else stt_language.split("-")[0]
+        # Pulse "multi" is unreliable — default to "en" for Indian English
+        smallest_language = "en" if stt_language in ("unknown", "multi") else stt_language.split("-")[0]
         stt = SmallestSTTService(
             api_key=settings.SMALLEST_API_KEY,
             language=smallest_language,
