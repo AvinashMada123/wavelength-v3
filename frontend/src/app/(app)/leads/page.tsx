@@ -58,6 +58,7 @@ import {
   createLead,
   updateLead,
   deleteLead,
+  importLeads,
   type Lead,
 } from "@/lib/api";
 import { LEAD_STATUS_COLORS, LEAD_QUALIFICATION_COLORS } from "@/lib/status-config";
@@ -102,6 +103,7 @@ export default function LeadsPage() {
     email: "",
     company: "",
     location: "",
+    tags: "",
   });
 
   // Edit dialog
@@ -115,6 +117,7 @@ export default function LeadsPage() {
     company: "",
     location: "",
     status: "",
+    tags: "",
   });
 
   // Delete confirmation
@@ -123,6 +126,10 @@ export default function LeadsPage() {
 
   // Mobile expanded rows
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+
+  // CSV Import
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   function toggleRow(id: string, e: React.MouseEvent) {
     e.stopPropagation();
@@ -171,6 +178,7 @@ export default function LeadsPage() {
       email: "",
       company: "",
       location: "",
+      tags: "",
     });
   }
 
@@ -188,6 +196,7 @@ export default function LeadsPage() {
         email: addForm.email.trim() || undefined,
         company: addForm.company.trim() || undefined,
         location: addForm.location.trim() || undefined,
+        tags: addForm.tags.trim() ? addForm.tags.split(",").map((t) => t.trim()).filter(Boolean) : undefined,
       });
       toast.success("Lead created successfully");
       setAddOpen(false);
@@ -212,6 +221,7 @@ export default function LeadsPage() {
       company: lead.company || "",
       location: lead.location || "",
       status: lead.status,
+      tags: (lead.tags || []).join(", "),
     });
     setEditOpen(true);
   }
@@ -232,6 +242,7 @@ export default function LeadsPage() {
         company: editForm.company.trim() || null,
         location: editForm.location.trim() || null,
         status: editForm.status,
+        tags: editForm.tags.trim() ? editForm.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
       });
       toast.success("Lead updated successfully");
       setEditOpen(false);
@@ -263,6 +274,76 @@ export default function LeadsPage() {
       toast.error(message);
     } finally {
       setDeleting(false);
+    }
+  }
+
+  // --- CSV Import ---
+  async function handleCsvImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+      if (lines.length < 2) {
+        toast.error("CSV file must have a header row and at least one data row");
+        return;
+      }
+      const headers = lines[0].split(",").map((h) => h.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_"));
+      const nameIdx = headers.findIndex((h) => h.includes("name"));
+      const phoneIdx = headers.findIndex((h) => h.includes("phone"));
+      const emailIdx = headers.findIndex((h) => h.includes("email"));
+      const companyIdx = headers.findIndex((h) => h.includes("company"));
+      const locationIdx = headers.findIndex((h) => h.includes("location") || h.includes("city"));
+      const tagsIdx = headers.findIndex((h) => h.includes("tag"));
+
+      if (nameIdx === -1 || phoneIdx === -1) {
+        toast.error("CSV must have columns containing 'name' and 'phone' in headers");
+        return;
+      }
+
+      const leads = [];
+      for (let i = 1; i < lines.length; i++) {
+        // Simple CSV parsing (handles quoted fields)
+        const cols = lines[i].match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g)?.map((c) =>
+          c.replace(/^"|"$/g, "").trim()
+        ) || lines[i].split(",").map((c) => c.trim());
+
+        const name = cols[nameIdx] || "";
+        const phone = cols[phoneIdx] || "";
+        if (!name || !phone) continue;
+
+        const lead: any = {
+          contact_name: name,
+          phone_number: phone,
+          source: "import",
+        };
+        if (emailIdx !== -1 && cols[emailIdx]) lead.email = cols[emailIdx];
+        if (companyIdx !== -1 && cols[companyIdx]) lead.company = cols[companyIdx];
+        if (locationIdx !== -1 && cols[locationIdx]) lead.location = cols[locationIdx];
+        if (tagsIdx !== -1 && cols[tagsIdx]) {
+          lead.tags = cols[tagsIdx].split(";").map((t: string) => t.trim()).filter(Boolean);
+        }
+        leads.push(lead);
+      }
+
+      if (leads.length === 0) {
+        toast.error("No valid leads found in CSV");
+        return;
+      }
+
+      const result = await importLeads(leads);
+      toast.success(`Imported ${result.imported} leads (${result.skipped} skipped)`);
+      if (result.errors.length > 0) {
+        toast.error(`${result.errors.length} errors during import`);
+      }
+      loadLeads();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to import CSV";
+      toast.error(message);
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
@@ -306,21 +387,25 @@ export default function LeadsPage() {
               <DateRangePicker value={dateRange} onChange={setDateRange} />
             </div>
             <div className="flex items-center gap-2">
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span tabIndex={0}>
-                      <Button variant="outline" disabled>
-                        <Upload className="h-4 w-4" />
-                        Import CSV
-                      </Button>
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Coming soon</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={handleCsvImport}
+              />
+              <Button
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={importing}
+              >
+                {importing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="h-4 w-4" />
+                )}
+                {importing ? "Importing..." : "Import CSV"}
+              </Button>
               <Button
                 onClick={() => {
                   resetAddForm();
@@ -378,6 +463,9 @@ export default function LeadsPage() {
                       <TableHead className="hidden lg:table-cell">
                         Company
                       </TableHead>
+                      <TableHead className="hidden xl:table-cell">
+                        Tags
+                      </TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="hidden md:table-cell">
                         Qualification
@@ -425,6 +513,24 @@ export default function LeadsPage() {
                         </TableCell>
                         <TableCell className="hidden lg:table-cell text-muted-foreground">
                           {lead.company || "\u2014"}
+                        </TableCell>
+                        <TableCell className="hidden xl:table-cell">
+                          {lead.tags && lead.tags.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {lead.tags.slice(0, 2).map((tag: string) => (
+                                <Badge key={tag} variant="secondary" className="text-xs px-1.5 py-0">
+                                  {tag}
+                                </Badge>
+                              ))}
+                              {lead.tags.length > 2 && (
+                                <Badge variant="secondary" className="text-xs px-1.5 py-0">
+                                  +{lead.tags.length - 2}
+                                </Badge>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">{"\u2014"}</span>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Badge
@@ -632,6 +738,19 @@ export default function LeadsPage() {
                 disabled={addSaving}
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="add-tags">Tags</Label>
+              <Input
+                id="add-tags"
+                placeholder="tag1, tag2, tag3"
+                value={addForm.tags}
+                onChange={(e) =>
+                  setAddForm((f) => ({ ...f, tags: e.target.value }))
+                }
+                disabled={addSaving}
+              />
+              <p className="text-xs text-muted-foreground">Separate with commas</p>
+            </div>
             <DialogFooter>
               <Button
                 type="button"
@@ -755,6 +874,19 @@ export default function LeadsPage() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-tags">Tags</Label>
+              <Input
+                id="edit-tags"
+                placeholder="tag1, tag2, tag3"
+                value={editForm.tags}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, tags: e.target.value }))
+                }
+                disabled={editSaving}
+              />
+              <p className="text-xs text-muted-foreground">Separate with commas</p>
             </div>
             <DialogFooter className="sm:justify-between">
               <Button

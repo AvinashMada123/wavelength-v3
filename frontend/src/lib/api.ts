@@ -388,6 +388,7 @@ export function createLead(data: {
   company?: string;
   location?: string;
   source?: string;
+  tags?: string[];
 }): Promise<Lead> {
   return apiFetch("/api/leads", {
     method: "POST",
@@ -412,6 +413,20 @@ export function fetchLeadCalls(leadId: string): Promise<CallLog[]> {
 
 export function deleteLead(id: string): Promise<void> {
   return apiFetch(`/api/leads/${id}`, { method: "DELETE" });
+}
+
+export function importLeads(leads: Array<{
+  phone_number: string;
+  contact_name: string;
+  email?: string;
+  company?: string;
+  location?: string;
+  tags?: string[];
+}>): Promise<{ imported: number; skipped: number; errors: string[] }> {
+  return apiFetch("/api/leads/import", {
+    method: "POST",
+    body: JSON.stringify({ leads }),
+  });
 }
 
 // --- Campaigns ---
