@@ -9,8 +9,16 @@ from __future__ import annotations
 import asyncio
 import time
 
+import pipecat.transports.base_output as _base_output
 import structlog
 from deepgram import LiveOptions
+
+# Widen bot-stop window to tolerate Sarvam TTS inter-phrase gaps (~700-1500ms).
+# Without this, Pipecat's default 0.35s triggers false "bot stopped speaking"
+# mid-sentence, clearing audio buffers and causing audible drops.
+# Safe because interruptions use MinWordsInterruptionStrategy (transcript-based),
+# not bot-speaking state. EchoGate is NOT in the pipeline.
+_base_output.BOT_VAD_STOP_SECS = 1.5
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
