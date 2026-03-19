@@ -307,11 +307,17 @@ export default function LeadsPage() {
   }
 
   function toggleSelectAll() {
-    if (selectedLeads.size === filteredLeadsByDate.length) {
-      setSelectedLeads(new Set());
-    } else {
-      setSelectedLeads(new Set(filteredLeadsByDate.map((l) => l.id)));
-    }
+    const pageIds = filteredLeadsByDate.map((l) => l.id);
+    const allPageSelected = pageIds.every((id) => selectedLeads.has(id));
+    setSelectedLeads((prev) => {
+      const next = new Set(prev);
+      if (allPageSelected) {
+        pageIds.forEach((id) => next.delete(id));
+      } else {
+        pageIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
   }
 
   function openAction(type: "campaign" | "call") {
@@ -549,7 +555,7 @@ export default function LeadsPage() {
                       <TableHead className="w-10">
                         <input
                           type="checkbox"
-                          checked={selectedLeads.size === filteredLeadsByDate.length && filteredLeadsByDate.length > 0}
+                          checked={filteredLeadsByDate.length > 0 && filteredLeadsByDate.every((l) => selectedLeads.has(l.id))}
                           onChange={toggleSelectAll}
                           className="rounded border-muted-foreground/50"
                         />
