@@ -23,6 +23,11 @@ async def make_outbound_call(
     Returns the Twilio Call SID on success, or None on failure.
     """
     url = f"{TWILIO_API_BASE}/{account_sid}/Calls.json"
+    # Derive recording callback URL from status_callback_url pattern
+    # status_callback_url is like .../twilio/event/{call_sid}
+    # recording_url should be .../twilio/recording/{call_sid}
+    recording_callback = status_callback_url.replace("/twilio/event/", "/twilio/recording/")
+
     payload = {
         "To": to_number,
         "From": from_number,
@@ -30,6 +35,9 @@ async def make_outbound_call(
         "StatusCallback": status_callback_url,
         "StatusCallbackMethod": "POST",
         "StatusCallbackEvent": "initiated ringing answered completed",
+        "Record": "true",
+        "RecordingStatusCallback": recording_callback,
+        "RecordingStatusCallbackMethod": "POST",
     }
 
     try:

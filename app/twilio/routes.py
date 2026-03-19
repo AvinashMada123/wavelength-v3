@@ -331,6 +331,41 @@ async def twilio_event(call_sid: str, request: Request):
     return {"status": "ok"}
 
 
+@router.post("/recording/{call_sid}")
+async def twilio_recording_callback(call_sid: str, request: Request):
+    """Twilio recording callback — receives recording URL when recording is ready."""
+    form = await request.form()
+    recording_url = form.get("RecordingUrl")
+    recording_sid = form.get("RecordingSid")
+    recording_duration = form.get("RecordingDuration")
+
+    logger.info(
+        "twilio_recording_callback",
+        call_sid=call_sid,
+        recording_url=recording_url,
+        recording_sid=recording_sid,
+        duration=recording_duration,
+    )
+
+    if not recording_url:
+        logger.warning("twilio_recording_callback_no_url", call_sid=call_sid)
+        return {"status": "ok"}
+
+    # Twilio recording URLs need .mp3 appended for direct playback
+    if not recording_url.endswith(".mp3"):
+        recording_url = recording_url + ".mp3"
+
+    recording_meta: dict = {
+        "recording_url": recording_url,
+        "recording_sid": recording_sid,
+    }
+    if recording_duration:
+        recording_meta["recording_duration_ms"] = int(float(recording_duration) * 1000)
+
+    await _update_call_status(call_sid, metadata=recording_meta)
+    return {"status": "ok"}
+
+
 def _map_twilio_status(twilio_status: str) -> str:
     """Map Twilio call status to internal status."""
     mapping = {
