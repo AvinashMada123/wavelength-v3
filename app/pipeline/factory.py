@@ -1477,7 +1477,7 @@ async def build_pipeline(
             input_audio_codec="wav",
             params=SarvamSTTService.InputParams(
                 language=sarvam_lang,
-                mode="transcribe",
+                mode="translate",
                 vad_signals=True,
                 high_vad_sensitivity=True,
             ),
