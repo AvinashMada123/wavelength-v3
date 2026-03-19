@@ -1238,11 +1238,11 @@ async def build_pipeline(
             vad_enabled=True,
             vad_audio_passthrough=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(
-                stop_secs=0.2,
+                stop_secs=0.5,
                 min_volume=0.5,
             )),
             turn_analyzer=LocalSmartTurnAnalyzerV3(
-                params=SmartTurnParams(stop_secs=0.3),
+                params=SmartTurnParams(stop_secs=1.0),
             ),
         )
 
