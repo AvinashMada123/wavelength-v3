@@ -15,6 +15,11 @@ from app.bot_config.loader import BotConfigLoader
 from app.database import get_db
 from app.models.bot_config import BotConfig
 from app.models.schemas import BotConfigResponse, CreateBotConfigRequest, GoalConfig, UpdateBotConfigRequest
+from app.models.user import User
+
+# Providers restricted to super_admin only
+ADMIN_ONLY_TTS = {"gemini", "elevenlabs"}
+ADMIN_ONLY_STT = {"smallest"}
 
 logger = structlog.get_logger(__name__)
 
@@ -34,7 +39,15 @@ async def create_bot(
     req: CreateBotConfigRequest,
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_current_org),
+    user: User = Depends(get_current_user),
 ):
+    # Enforce provider restrictions for non-super-admins
+    if user.role != "super_admin":
+        if req.tts_provider in ADMIN_ONLY_TTS:
+            req.tts_provider = "sarvam"
+        if req.stt_provider in ADMIN_ONLY_STT:
+            req.stt_provider = "deepgram"
+
     bot = BotConfig(
         org_id=org_id,
         agent_name=req.agent_name,
@@ -98,6 +111,7 @@ async def update_bot(
     req: UpdateBotConfigRequest,
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_current_org),
+    user: User = Depends(get_current_user),
 ):
     result = await db.execute(select(BotConfig).where(BotConfig.id == bot_id, BotConfig.org_id == org_id))
     bot = result.scalar_one_or_none()
@@ -105,6 +119,13 @@ async def update_bot(
         raise HTTPException(status_code=404, detail="Bot config not found")
 
     update_data = req.model_dump(exclude_unset=True)
+
+    # Enforce provider restrictions for non-super-admins
+    if user.role != "super_admin":
+        if update_data.get("tts_provider") in ADMIN_ONLY_TTS:
+            update_data["tts_provider"] = "sarvam"
+        if update_data.get("stt_provider") in ADMIN_ONLY_STT:
+            update_data["stt_provider"] = "deepgram"
 
     # Validate goal_config if provided as raw dict (PATCH may send raw JSON)
     if "goal_config" in update_data and update_data["goal_config"] is not None:
