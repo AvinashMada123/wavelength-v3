@@ -279,6 +279,30 @@ Average silence: **45.5%** across all 5 recordings. Every recording has at least
 - **Pramoth** — 3.3s at 1:37, 3.1s at 0:10
 - **Sahil** — 4.7s at 2:08 (best quality at 23.5% silence, but clips at 0.0 dB)
 
+**Live-debugged example — Animesh (+919609775259, 153s):**
+**Recording:** [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/e13346f2-ff42-4084-a44b-d23750ca487c.mp3)
+
+We did detailed audio analysis on this call with FFmpeg silence detection:
+- **36% of the call is silence** (55s of silence in 153s)
+- **13 gaps > 2 seconds**, worst being **10.3 seconds** at 1:51-2:01
+- **5.1 second gap** at 1:23-1:28
+- Gaps are **evenly distributed** throughout the entire call — not just at the start
+
+We also captured per-turn TTS latency from our pipeline logs:
+
+| Turn | TTS Time-to-First-Byte | End-to-End Latency |
+|------|----------------------|-------------------|
+| Turn 9 | **3,850ms** | 4,537ms |
+| Turn 11 | 964ms | 1,675ms |
+| Turn 12 | 955ms | 958ms |
+| Turn 13 | 795ms | 1,482ms |
+
+Turn 9 had a 3.85-second wait before first audio — the user heard nearly 4 seconds of silence mid-conversation. The bot's response was: *"Right right, the problem with self-learning is you end up watching more than doing..."* — a longer sentence where the first TTS chunk took 3.85s to synthesize.
+
+**Additional test calls with audible breaking:**
+- [80s call](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/779c4d16-34b1-417e-aab4-aa157009e939.mp3) — mid-sentence audio drops throughout, STT hallucination "Thank you"
+- [154s call](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/8fa2ff8f-d4e1-48aa-b96a-f32e9ca7ddd9.mp3) — 22% silence, 11-second STT gap from Deepgram latency spike
+
 **Ask:** Expected TTFB for 30-char chunk? Can `min_buffer_size` go below 30? Is progressive audio delivery possible? Does requesting 16kHz (non-native) add latency vs 24kHz?
 
 ### Issue 15: Silent/Noisy Audio Tails (MEDIUM)
