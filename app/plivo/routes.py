@@ -456,7 +456,7 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
 
         # If voicemail or hold/IVR detected, short-circuit post-call processing
         if end_reason in ("voicemail", "hold_ivr"):
-            await _update_call_status(call_sid, outcome=end_reason, metadata={"end_reason": end_reason})
+            await _update_call_status(call_sid, status="completed", outcome=end_reason, metadata={"end_reason": end_reason})
             await _post_ghl_outcome(ctx, outcome=end_reason)
             return
 
