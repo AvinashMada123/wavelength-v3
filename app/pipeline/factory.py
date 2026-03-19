@@ -1112,11 +1112,14 @@ def _build_end_call_tool():
             "'bye'/'okay bye'/'thanks bye', call end_call IMMEDIATELY without saying anything else. "
             "Do NOT say goodbye twice.\n\n"
             "NEVER end the call if:\n"
-            "- The customer only said 'yeah', 'yes', 'okay', 'thank you', or 'hmm' after your goodbye — "
-            "these are acknowledgments, NOT goodbyes. Wait for them to finish or say an actual goodbye word.\n"
+            "- The customer only said 'yeah', 'yes', 'okay', 'thank you', 'good', 'fine', 'hmm', or any short acknowledgment — "
+            "these are NOT signs of disinterest. Many Indian users give brief replies but are still engaged. Continue the conversation.\n"
+            "- The customer is giving one-word or short answers — this is normal phone behavior, NOT rejection. "
+            "Keep asking questions and progressing through your flow.\n"
             "- The customer is still mid-sentence, stuttering, or starting a new question.\n"
             "- The customer is hesitant but has NOT explicitly said goodbye or rejected.\n"
-            "- You are unsure whether the customer wants to end — keep the conversation going instead."
+            "- You are unsure whether the customer wants to end — keep the conversation going instead.\n"
+            "- You have NOT completed your full conversation flow — finish all required steps first."
         ),
         properties={
             "reason": {
