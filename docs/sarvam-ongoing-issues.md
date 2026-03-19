@@ -23,4 +23,4 @@
 
 **Impact:** Bot went silent for ~8 seconds during the timeout gaps. User said "Hello, hello" repeatedly. Bot then restarted the introduction from scratch, thinking the conversation had reset.
 
-**Recording:** Available in call logs (Call ID: b160d8ca-5e9a-45fc-ae9f-bc9e5a64584a)
+**Recording:** [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/cf2094ea-cab3-4411-993b-581fcb5d2fe0.mp3)
