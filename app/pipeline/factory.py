@@ -1190,6 +1190,9 @@ async def build_pipeline(
         # but we do NOT flush Sarvam on vad_stopped (see _SafeSarvamSTT) to avoid
         # hallucinated transcripts from short utterance fragments.
         # SmartTurn prevents premature interruptions by predicting if user is done.
+        # stop_secs=1.0 gives SmartTurn's INCOMPLETE verdict time to hold —
+        # Sarvam fragments speech into tiny segments, so 0.3s was overriding
+        # SmartTurn and forcing turn completion on every fragment.
         transport_params = FastAPIWebsocketParams(
             audio_out_enabled=True,
             audio_out_sample_rate=16000,
@@ -1199,15 +1202,15 @@ async def build_pipeline(
             vad_enabled=True,
             vad_audio_passthrough=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(
-                stop_secs=0.3,
+                stop_secs=0.5,
                 min_volume=0.5,
             )),
             turn_analyzer=LocalSmartTurnAnalyzerV3(
-                params=SmartTurnParams(stop_secs=0.3),
+                params=SmartTurnParams(stop_secs=1.0),
             ),
         )
     elif stt_provider == "smallest":
-        # Smallest Pulse: use local Silero VAD + SmartTurn (same as Deepgram)
+        # Smallest Pulse: use local Silero VAD + SmartTurn
         transport_params = FastAPIWebsocketParams(
             audio_out_enabled=True,
             audio_out_sample_rate=16000,
@@ -1217,11 +1220,11 @@ async def build_pipeline(
             vad_enabled=True,
             vad_audio_passthrough=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(
-                stop_secs=0.2,
+                stop_secs=0.5,
                 min_volume=0.5,
             )),
             turn_analyzer=LocalSmartTurnAnalyzerV3(
-                params=SmartTurnParams(stop_secs=0.3),
+                params=SmartTurnParams(stop_secs=1.0),
             ),
         )
     else:
