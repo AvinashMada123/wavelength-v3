@@ -187,18 +187,15 @@ export default function CampaignDetailPage() {
     );
   }
 
+  const resolvedLeads = campaign.completed_leads + campaign.failed_leads;
   const progressPct =
     campaign.total_leads > 0
-      ? Math.round((campaign.completed_leads / campaign.total_leads) * 100)
+      ? Math.round((resolvedLeads / campaign.total_leads) * 100)
       : 0;
 
   const connectedPct =
     campaign.total_leads > 0
-      ? Math.round(
-          ((campaign.completed_leads - campaign.failed_leads) /
-            campaign.total_leads) *
-            100
-        )
+      ? Math.round((campaign.completed_leads / campaign.total_leads) * 100)
       : 0;
 
   // Build funnel data from lead_status_breakdown
@@ -207,7 +204,7 @@ export default function CampaignDetailPage() {
     { name: "Total", value: campaign.total_leads },
     {
       name: "Connected",
-      value: campaign.completed_leads - campaign.failed_leads,
+      value: campaign.completed_leads,
     },
     { name: "Qualified", value: breakdown["qualified"] || 0 },
     { name: "Converted", value: breakdown["converted"] || 0 },
@@ -362,7 +359,7 @@ export default function CampaignDetailPage() {
               <div className="flex items-center justify-between mb-2">
                 <p className="text-sm font-medium">Campaign Progress</p>
                 <p className="text-sm text-muted-foreground">
-                  {campaign.completed_leads}/{campaign.total_leads} leads (
+                  {resolvedLeads}/{campaign.total_leads} leads (
                   {progressPct}%)
                 </p>
               </div>

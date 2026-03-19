@@ -558,10 +558,11 @@ export default function CampaignsPage() {
           ) : (
             <div className="space-y-3">
               {filteredCampaigns.map((campaign, i) => {
+                const resolvedLeads = campaign.completed_leads + campaign.failed_leads;
                 const progressPct =
                   campaign.total_leads > 0
                     ? Math.round(
-                        (campaign.completed_leads / campaign.total_leads) * 100
+                        (resolvedLeads / campaign.total_leads) * 100
                       )
                     : 0;
                 const isSelected = selectedCampaign?.id === campaign.id;
@@ -590,13 +591,13 @@ export default function CampaignsPage() {
                             </div>
                             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                               <span>
-                                {campaign.completed_leads}/{campaign.total_leads}{" "}
-                                leads completed
+                                {resolvedLeads}/{campaign.total_leads}{" "}
+                                leads processed
                               </span>
                               {campaign.total_leads > 0 && (
                                 <span className="text-blue-400">
                                   {Math.round(
-                                    ((campaign.completed_leads - campaign.failed_leads) /
+                                    (campaign.completed_leads /
                                       campaign.total_leads) *
                                       100
                                   )}% connected
@@ -764,7 +765,7 @@ export default function CampaignsPage() {
                                   <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
                                     <span>Progress</span>
                                     <span>
-                                      {selectedCampaign.completed_leads}/
+                                      {resolvedLeads}/
                                       {selectedCampaign.total_leads} (
                                       {progressPct}%)
                                     </span>

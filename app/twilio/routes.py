@@ -371,6 +371,11 @@ async def twilio_event(call_sid: str, request: Request):
                 reported_duration_seconds=duration_val,
             )
 
+    # Finalize campaign call if applicable
+    if call_log:
+        from app.services.queue_processor import finalize_campaign_call
+        await finalize_campaign_call(call_log.id, mapped_status)
+
     # Backup GHL outcome posting (if pipeline didn't post)
     if call_log and call_log.context_data and not call_log.outcome:
         bot_config = await bot_config_loader.get(call_log.context_data["bot_id"])

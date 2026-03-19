@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import structlog
 from sqlalchemy import func, select, update
@@ -664,8 +664,17 @@ async def _handle_campaign_call_result(
             )
             return
 
-        campaign_lead.status = "completed" if success else "failed"
         campaign_lead.call_log_id = call_log_id
+
+        if success:
+            # Call was initiated successfully — keep status as "processing" until
+            # the call actually ends (finalize_campaign_call will update it then).
+            # Don't increment any counters yet.
+            await db.commit()
+            return
+
+        # Call initiation failed — mark as failed now.
+        campaign_lead.status = "failed"
         campaign_lead.processed_at = datetime.now(timezone.utc)
 
         # Update Campaign counters with row lock
@@ -680,10 +689,7 @@ async def _handle_campaign_call_result(
             await db.commit()
             return
 
-        if success:
-            campaign.completed_leads += 1
-        else:
-            campaign.failed_leads += 1
+        campaign.failed_leads += 1
 
         # Check if campaign is still running (could have been paused/cancelled)
         if campaign.status != "running":
@@ -801,3 +807,159 @@ async def _handle_campaign_call_result(
             await db.rollback()
         except Exception:
             pass
+
+
+async def finalize_campaign_call(call_log_id: UUID, call_status: str):
+    """Update CampaignLead and Campaign when a campaign call actually ends.
+
+    Called from plivo_event/twilio_event webhook when call outcome is known.
+    """
+    try:
+        async with get_db_session() as db:
+            # Find QueuedCall by call_log_id to get campaign references
+            qc_result = await db.execute(
+                select(QueuedCall).where(
+                    QueuedCall.call_log_id == call_log_id,
+                    QueuedCall.campaign_id.isnot(None),
+                )
+            )
+            queued_call = qc_result.scalar_one_or_none()
+            if not queued_call:
+                return  # Not a campaign call
+
+            # Update CampaignLead
+            cl_result = await db.execute(
+                select(CampaignLead)
+                .where(CampaignLead.id == queued_call.campaign_lead_id)
+                .with_for_update()
+            )
+            campaign_lead = cl_result.scalar_one_or_none()
+            if not campaign_lead or campaign_lead.status != "processing":
+                return  # Already finalized or not in expected state
+
+            # Determine outcome: "completed" = actually answered, "failed" = not answered
+            answered = call_status in ("completed", "in_progress")
+            campaign_lead.status = "completed" if answered else "failed"
+            campaign_lead.processed_at = datetime.now(timezone.utc)
+
+            # Update Campaign counters
+            camp_result = await db.execute(
+                select(Campaign)
+                .where(Campaign.id == queued_call.campaign_id)
+                .with_for_update()
+            )
+            campaign = camp_result.scalar_one_or_none()
+            if not campaign:
+                await db.commit()
+                return
+
+            if answered:
+                campaign.completed_leads += 1
+            else:
+                campaign.failed_leads += 1
+
+            # Check if campaign is done
+            if campaign.status == "running":
+                remaining_result = await db.execute(
+                    select(func.count())
+                    .select_from(CampaignLead)
+                    .where(
+                        CampaignLead.campaign_id == campaign.id,
+                        CampaignLead.status.in_(["queued", "processing"]),
+                    )
+                )
+                remaining = remaining_result.scalar_one()
+
+                if remaining == 0:
+                    campaign.status = "completed"
+                    campaign.completed_at = datetime.now(timezone.utc)
+                    await db.commit()
+                    logger.info(
+                        "campaign_completed",
+                        campaign_id=str(campaign.id),
+                        completed=campaign.completed_leads,
+                        failed=campaign.failed_leads,
+                    )
+                    return
+
+                # Enqueue next batch to fill available concurrency slots
+                processing_result = await db.execute(
+                    select(func.count())
+                    .select_from(CampaignLead)
+                    .where(
+                        CampaignLead.campaign_id == campaign.id,
+                        CampaignLead.status == "processing",
+                    )
+                )
+                currently_processing = processing_result.scalar_one()
+                slots = max(0, campaign.concurrency_limit - currently_processing)
+
+                if slots > 0:
+                    next_leads_result = await db.execute(
+                        select(CampaignLead)
+                        .where(
+                            CampaignLead.campaign_id == campaign.id,
+                            CampaignLead.status == "queued",
+                        )
+                        .order_by(CampaignLead.position.asc())
+                        .limit(slots)
+                        .with_for_update(skip_locked=True)
+                    )
+                    next_leads = next_leads_result.scalars().all()
+
+                    if next_leads:
+                        lead_ids = [cl.lead_id for cl in next_leads]
+                        lead_result = await db.execute(
+                            select(Lead).where(Lead.id.in_(lead_ids))
+                        )
+                        lead_map = {ld.id: ld for ld in lead_result.scalars().all()}
+
+                        enqueued = 0
+                        for cl in next_leads:
+                            lead = lead_map.get(cl.lead_id)
+                            if not lead:
+                                cl.status = "failed"
+                                cl.processed_at = datetime.now(timezone.utc)
+                                campaign.failed_leads += 1
+                                continue
+
+                            normalized_phone = normalize_phone_india(lead.phone_number)
+                            queued_call_new = QueuedCall(
+                                org_id=campaign.org_id,
+                                bot_id=campaign.bot_config_id,
+                                contact_name=lead.contact_name,
+                                contact_phone=normalized_phone,
+                                source="campaign",
+                                status="queued",
+                                priority=0,
+                                campaign_id=campaign.id,
+                                campaign_lead_id=cl.id,
+                                extra_vars={
+                                    "campaign_id": str(campaign.id),
+                                    "campaign_lead_id": str(cl.id),
+                                },
+                            )
+                            db.add(queued_call_new)
+                            cl.status = "processing"
+                            enqueued += 1
+
+                        if enqueued:
+                            logger.info(
+                                "campaign_next_batch_enqueued",
+                                campaign_id=str(campaign.id),
+                                enqueued=enqueued,
+                            )
+
+            await db.commit()
+            logger.info(
+                "campaign_call_finalized",
+                campaign_id=str(queued_call.campaign_id),
+                campaign_lead_id=str(queued_call.campaign_lead_id),
+                call_status=call_status,
+                outcome="completed" if answered else "failed",
+            )
+    except Exception:
+        logger.exception(
+            "campaign_call_finalize_error",
+            call_log_id=str(call_log_id),
+        )
