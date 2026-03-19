@@ -211,7 +211,17 @@ These gaps occur between TTS phrase chunks. Text is sent to bulbul:v3 in 30-50 c
 - **Pramoth** — 3.3s gap at 1:37, 3.1s at 0:10. 44.5% silence makes conversation feel labored.
 - **Sahil** — Best quality at 23.5% silence, but still has a 4.7s gap at 2:08 and clips at 0.0 dB (distortion).
 
-### Issue 9: Volume Inconsistency (LOW)
+### Issue 9: Silent/Noisy Audio Tails (MEDIUM)
+
+bulbul:v3 occasionally emits a long near-silent or noisy audio tail after the spoken content has finished. We had to build a custom `TTSTailTrim` processor that detects low-energy audio frames (RMS < 90, max amplitude < 300) and drops them if they exceed 900ms.
+
+Without this trim, the bot would appear to still be "speaking" (pipeline thinks audio is still flowing) even though the actual speech ended seconds ago. This delays turn transitions — the user waits for the bot to "finish" but it's just noise.
+
+**Impact:** Without our workaround, adds 200ms-2s of dead noise after every bot utterance. With the trim, occasionally clips legitimate quiet endings.
+
+---
+
+### Issue 10: Volume Inconsistency (LOW)
 
 - Falguni: -30.9 dB mean (very quiet — bot sounds faint)
 - Sahil: 0.0 dB max (clipping — causes distortion)
