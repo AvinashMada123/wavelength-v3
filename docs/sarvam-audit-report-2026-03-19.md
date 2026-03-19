@@ -180,15 +180,15 @@ The STT appears to confuse phonemes in colloquial/spoken Tamil vs. formal writte
 
 ### Audio Quality Analysis — 5 Recordings
 
-| Recording | Duration | Total Silence | Silence % | Gaps > 1.5s | Gaps > 3s | Worst Gap |
-|-----------|----------|---------------|-----------|-------------|-----------|-----------|
-| **Falguni** | 55s | 39.1s | **71.1%** | 8 | 3 | **14.1s** |
-| **Dinesh** | 136s | 64.4s | **47.2%** | 20 | 3 | 4.3s |
-| Pramoth | 126s | 55.9s | 44.5% | 19 | 3 | 4.0s |
-| SNA | 138s | 57.0s | 41.2% | 18 | 3 | 6.9s |
-| Sahil | 195s | 45.9s | 23.5% | 12 | 2 | 4.7s |
+| Recording | Duration | Silence % | Gaps > 1.5s | Gaps > 3s | Worst Gap | Recording |
+|-----------|----------|-----------|-------------|-----------|-----------|-----------|
+| **Falguni** | 55s | **71.1%** | 8 | 3 | **14.1s** | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/99ec9c6e-ec8c-4d65-85a4-5aa154fabf05.mp3) |
+| **Dinesh** | 136s | **47.2%** | 20 | 3 | 4.3s | [Listen](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/dc9faa97-2156-43f7-a4c5-d4f7deed26f8.mp3) |
+| Pramoth | 126s | 44.5% | 19 | 3 | 4.0s | [Listen](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/0c625466-fbd8-42bd-b385-f2b9c8da94cf.mp3) |
+| SNA | 138s | 41.2% | 18 | 3 | 6.9s | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/b8e1a810-68fb-4c89-9623-60d6428e4a80.mp3) |
+| Sahil | 195s | 23.5% | 12 | 2 | 4.7s | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/217413ae-4db7-4a5f-bbfd-b4c88b102aae.mp3) |
 
-**Methodology:** FFmpeg silence detection at -40dB threshold, gaps > 0.5s counted.
+**Methodology:** FFmpeg silence detection at -40dB threshold, gaps > 0.5s counted. All recordings are stereo (left=bot, right=user).
 
 ### Issue 7: Catastrophic TTS Stall (CRITICAL)
 
@@ -201,7 +201,15 @@ A 14.1-second continuous silence gap at the 36-50 second mark. The TTS completel
 
 Every single recording has at least 2 gaps exceeding 3 seconds. The average silence percentage across all 5 recordings is **45.5%** — nearly half the call is dead air.
 
-These gaps occur between TTS phrase chunks. When the PhraseTextAggregator sends text to bulbul:v3, there is a delay before the next phrase's audio arrives. During this delay, the caller hears complete silence.
+These gaps occur between TTS phrase chunks. Text is sent to bulbul:v3 in 30-50 character chunks. Between chunks, there's a delay before the next audio arrives. The caller hears complete silence during this gap.
+
+**Specific examples (listen in recordings above):**
+
+- **Falguni** — 14.1s gap at 0:36-0:50 (catastrophic stall), 5.9s at 0:06, 5.5s at 0:14
+- **SNA** — 6.9s gap at 0:21, 4.4s at 0:52, 3.9s at 0:41
+- **Dinesh** — 40 gaps total, averaging one every 3.4 seconds. Worst: 4.3s at 0:54, 3.5s at 0:72, 3.1s at 0:88. The choppy delivery makes the bot sound like it's on a broken connection.
+- **Pramoth** — 3.3s gap at 1:37, 3.1s at 0:10. 44.5% silence makes conversation feel labored.
+- **Sahil** — Best quality at 23.5% silence, but still has a 4.7s gap at 2:08 and clips at 0.0 dB (distortion).
 
 ### Issue 9: Volume Inconsistency (LOW)
 
