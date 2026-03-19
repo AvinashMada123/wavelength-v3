@@ -90,6 +90,16 @@ Users explicitly tell the bot they can't hear clearly. TTS audio quality degrade
 
 **Context:** All using bulbul:v3, Simran voice, en-IN. Quality seems fine at start but degrades mid-call.
 
+**Scale of the problem:** Our red flag system detected **173 audio_failure events** across 14 days of production calls. Additional user quotes from flagged calls:
+
+| Contact | User's Exact Words | Recording |
+|---------|-------------------|-----------|
+| Vedavathi (+919908206476) | "I'm not able to hear your voice. I'm getting so much gap for every word, I'm not able to hear you." | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/2d5e942e-5e77-46bb-bf5c-1b300df5006b.mp3) |
+| Neetu (+919515788390) | "Your voice is still breaking." | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/ed509903-d669-465f-9a41-267a2d7b02b2.mp3) |
+| Tanvi (+919560446849) | "I can't hear you." | [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/f33b03bc-6575-468d-8024-6d368a6592ae.mp3) |
+
+Vedavathi's quote perfectly describes the inter-phrase gap problem: *"so much gap for every word"*.
+
 **Ask:** Is there known quality degradation on long TTS streaming sessions? Can we get diagnostic data per session?
 
 ---
