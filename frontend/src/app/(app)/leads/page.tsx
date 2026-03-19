@@ -13,6 +13,8 @@ import {
   ChevronDown,
   Upload,
   Pencil,
+  Phone,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -59,7 +61,11 @@ import {
   updateLead,
   deleteLead,
   importLeads,
+  enqueueCall,
+  createCampaign,
+  fetchBots,
   type Lead,
+  type BotConfig,
 } from "@/lib/api";
 import { LEAD_STATUS_COLORS, LEAD_QUALIFICATION_COLORS } from "@/lib/status-config";
 import { DateRangePicker, type DateRange } from "@/components/date-range-picker";
@@ -127,6 +133,15 @@ export default function LeadsPage() {
   // Mobile expanded rows
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
+  // Lead selection
+  const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
+  const [bots, setBots] = useState<BotConfig[]>([]);
+  const [actionDialogOpen, setActionDialogOpen] = useState(false);
+  const [actionType, setActionType] = useState<"campaign" | "call">("campaign");
+  const [selectedBotId, setSelectedBotId] = useState("");
+  const [campaignName, setCampaignName] = useState("");
+  const [actionSaving, setActionSaving] = useState(false);
+
   // CSV Import
   const [importing, setImporting] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -162,6 +177,10 @@ export default function LeadsPage() {
   useEffect(() => {
     loadLeads();
   }, [loadLeads]);
+
+  useEffect(() => {
+    fetchBots().then(setBots).catch(() => {});
+  }, []);
 
   // Debounced search: reset page when search/filter changes
   useEffect(() => {
@@ -274,6 +293,78 @@ export default function LeadsPage() {
       toast.error(message);
     } finally {
       setDeleting(false);
+    }
+  }
+
+  // --- Lead Selection ---
+  function toggleSelectLead(id: string) {
+    setSelectedLeads((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (selectedLeads.size === filteredLeadsByDate.length) {
+      setSelectedLeads(new Set());
+    } else {
+      setSelectedLeads(new Set(filteredLeadsByDate.map((l) => l.id)));
+    }
+  }
+
+  function openAction(type: "campaign" | "call") {
+    setActionType(type);
+    setSelectedBotId(bots[0]?.id || "");
+    setCampaignName("");
+    setActionDialogOpen(true);
+  }
+
+  async function handleAction() {
+    if (!selectedBotId) {
+      toast.error("Please select a bot");
+      return;
+    }
+    setActionSaving(true);
+    try {
+      if (actionType === "campaign") {
+        if (!campaignName.trim()) {
+          toast.error("Please enter a campaign name");
+          setActionSaving(false);
+          return;
+        }
+        await createCampaign({
+          name: campaignName.trim(),
+          bot_config_id: selectedBotId,
+          lead_ids: Array.from(selectedLeads),
+        });
+        toast.success(`Campaign created with ${selectedLeads.size} leads`);
+      } else {
+        // Single call - enqueue each selected lead
+        const selectedLeadData = leads.filter((l) => selectedLeads.has(l.id));
+        let queued = 0;
+        for (const lead of selectedLeadData) {
+          try {
+            await enqueueCall({
+              bot_id: selectedBotId,
+              contact_name: lead.contact_name,
+              contact_phone: lead.phone_number,
+            });
+            queued++;
+          } catch {
+            toast.error(`Failed to queue call for ${lead.contact_name}`);
+          }
+        }
+        toast.success(`${queued} call(s) queued`);
+      }
+      setActionDialogOpen(false);
+      setSelectedLeads(new Set());
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Action failed";
+      toast.error(message);
+    } finally {
+      setActionSaving(false);
     }
   }
 
@@ -455,6 +546,14 @@ export default function LeadsPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-10">
+                        <input
+                          type="checkbox"
+                          checked={selectedLeads.size === filteredLeadsByDate.length && filteredLeadsByDate.length > 0}
+                          onChange={toggleSelectAll}
+                          className="rounded border-muted-foreground/50"
+                        />
+                      </TableHead>
                       <TableHead>Name</TableHead>
                       <TableHead>Phone</TableHead>
                       <TableHead className="hidden md:table-cell">
@@ -491,6 +590,14 @@ export default function LeadsPage() {
                         className="cursor-pointer hover:bg-muted/50"
                         onClick={() => router.push(`/leads/${lead.id}`)}
                       >
+                        <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={selectedLeads.has(lead.id)}
+                            onChange={() => toggleSelectLead(lead.id)}
+                            className="rounded border-muted-foreground/50"
+                          />
+                        </TableCell>
                         <TableCell className="font-medium">
                           <div className="flex items-center gap-1">
                             <button
@@ -627,6 +734,36 @@ export default function LeadsPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Selection Action Bar */}
+          {selectedLeads.size > 0 && (
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-background border rounded-lg shadow-lg px-4 py-3 flex items-center gap-3">
+              <span className="text-sm font-medium">{selectedLeads.size} lead{selectedLeads.size > 1 ? "s" : ""} selected</span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => openAction("campaign")}
+              >
+                <Users className="h-4 w-4 mr-1" />
+                Start Campaign
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => openAction("call")}
+              >
+                <Phone className="h-4 w-4 mr-1" />
+                Call Now
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setSelectedLeads(new Set())}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
 
           {/* Pagination */}
           {!loading && leads.length > 0 && (
@@ -960,6 +1097,71 @@ export default function LeadsPage() {
                 </>
               ) : (
                 "Delete Lead"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Action Dialog (Campaign / Call) */}
+      <Dialog open={actionDialogOpen} onOpenChange={setActionDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {actionType === "campaign" ? "Start Campaign" : "Queue Calls"}
+            </DialogTitle>
+            <DialogDescription>
+              {actionType === "campaign"
+                ? `Create a campaign with ${selectedLeads.size} selected lead(s)`
+                : `Queue calls for ${selectedLeads.size} selected lead(s)`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {actionType === "campaign" && (
+              <div className="space-y-2">
+                <Label>Campaign Name</Label>
+                <Input
+                  placeholder="e.g. March Outreach"
+                  value={campaignName}
+                  onChange={(e) => setCampaignName(e.target.value)}
+                  disabled={actionSaving}
+                />
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label>Select Bot</Label>
+              <Select value={selectedBotId} onValueChange={setSelectedBotId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Choose a bot" />
+                </SelectTrigger>
+                <SelectContent>
+                  {bots.map((bot) => (
+                    <SelectItem key={bot.id} value={bot.id}>
+                      {bot.agent_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setActionDialogOpen(false)} disabled={actionSaving}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAction}
+              disabled={actionSaving}
+              className="bg-gradient-to-r from-violet-500 to-indigo-600 text-white hover:from-violet-600 hover:to-indigo-700"
+            >
+              {actionSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Processing...
+                </>
+              ) : actionType === "campaign" ? (
+                "Create Campaign"
+              ) : (
+                "Queue Calls"
               )}
             </Button>
           </DialogFooter>

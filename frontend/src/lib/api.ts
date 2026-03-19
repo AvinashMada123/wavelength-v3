@@ -16,6 +16,8 @@ import type {
   CapturedDataFieldSummary,
 } from "@/types/api";
 
+export type { BotConfig };
+
 async function tryRefreshToken(): Promise<boolean> {
   const refreshToken = localStorage.getItem("refresh_token");
   if (!refreshToken) return false;
@@ -426,6 +428,17 @@ export function importLeads(leads: Array<{
   return apiFetch("/api/leads/import", {
     method: "POST",
     body: JSON.stringify({ leads }),
+  });
+}
+
+export function enqueueCall(data: {
+  bot_id: string;
+  contact_name: string;
+  contact_phone: string;
+}): Promise<{ status: string; queue_id: string }> {
+  return apiFetch("/api/queue/enqueue", {
+    method: "POST",
+    body: JSON.stringify(data),
   });
 }
 

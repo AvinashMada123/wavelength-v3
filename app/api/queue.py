@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +25,12 @@ from app.services import circuit_breaker
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/queue", tags=["queue"])
+
+
+class EnqueueCallRequest(BaseModel):
+    bot_id: uuid.UUID
+    contact_name: str
+    contact_phone: str
 
 
 # ---- Queue endpoints ----
@@ -144,6 +151,38 @@ async def trigger_queued_call(
     asyncio.create_task(_process_single_call(_loader, call.id, call.bot_id))
     logger.info("queue_call_manually_triggered", queue_id=str(queue_id), contact=call.contact_name)
     return {"status": "triggered", "queue_id": str(queue_id)}
+
+
+@router.post("/enqueue")
+async def enqueue_call(
+    body: EnqueueCallRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
+    """Enqueue a single call for a bot."""
+    # Validate bot belongs to org
+    bot_result = await db.execute(
+        select(BotConfig).where(BotConfig.id == body.bot_id, BotConfig.org_id == org_id)
+    )
+    bot = bot_result.scalar_one_or_none()
+    if not bot:
+        raise HTTPException(status_code=404, detail="Bot not found")
+
+    call = QueuedCall(
+        org_id=org_id,
+        bot_id=body.bot_id,
+        contact_name=body.contact_name,
+        contact_phone=body.contact_phone,
+        source="api",
+        status="queued",
+        priority=0,
+    )
+    db.add(call)
+    await db.commit()
+    await db.refresh(call)
+    logger.info("call_enqueued_manual", queue_id=str(call.id), contact=body.contact_name)
+    return {"status": "queued", "queue_id": str(call.id)}
 
 
 @router.post("/bulk-cancel")
