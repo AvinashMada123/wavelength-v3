@@ -10,6 +10,7 @@ import {
   Download,
   Loader2,
   Workflow,
+  Save,
   Trash2,
   Variable,
 } from "lucide-react";
@@ -78,6 +79,7 @@ export default function TemplateBuilderPage() {
   const [triggerType, setTriggerType] = useState("post_call");
   const [isActive, setIsActive] = useState(false);
   const [variables, setVariables] = useState<Array<{ key: string; default_value: string; description: string; type?: string }>>([]);
+  const [variablesDirty, setVariablesDirty] = useState(false);
 
   // UI state
   const [expandedStepId, setExpandedStepId] = useState<string | null>(null);
@@ -150,10 +152,15 @@ export default function TemplateBuilderPage() {
       if (variables.some((v) => v.key === variable.key)) return;
       const updated = [...variables, variable];
       setVariables(updated);
-      saveHeader({ variables: updated });
+      setVariablesDirty(true);
     },
-    [variables, saveHeader],
+    [variables],
   );
+
+  const handleSaveVariables = useCallback(() => {
+    saveHeader({ variables });
+    setVariablesDirty(false);
+  }, [variables, saveHeader]);
 
   // -----------------------------------------------------------------------
   // Step operations
@@ -388,17 +395,36 @@ export default function TemplateBuilderPage() {
                     Use as {"{{variable_name}}"} in templates
                   </span>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-xs gap-1"
-                  onClick={() => {
-                    const updated = [...variables, { key: "", default_value: "", description: "", type: "text" }];
-                    setVariables(updated);
-                  }}
-                >
-                  <Plus className="h-3 w-3" /> Add Variable
-                </Button>
+                <div className="flex items-center gap-2">
+                  {variablesDirty && (
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="h-7 text-xs gap-1"
+                      onClick={handleSaveVariables}
+                      disabled={savingHeader}
+                    >
+                      {savingHeader ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Save className="h-3 w-3" />
+                      )}
+                      Save
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs gap-1"
+                    onClick={() => {
+                      const updated = [...variables, { key: "", default_value: "", description: "", type: "text" }];
+                      setVariables(updated);
+                      setVariablesDirty(true);
+                    }}
+                  >
+                    <Plus className="h-3 w-3" /> Add Variable
+                  </Button>
+                </div>
               </div>
               {variables.length === 0 ? (
                 <p className="text-xs text-muted-foreground py-2">
@@ -427,6 +453,7 @@ export default function TemplateBuilderPage() {
                             const updated = [...variables];
                             updated[i] = { ...updated[i], key: newKey };
                             setVariables(updated);
+                            setVariablesDirty(true);
                             if (oldKey && oldKey !== newKey) {
                               steps.forEach((s) => {
                                 if (
@@ -440,7 +467,6 @@ export default function TemplateBuilderPage() {
                               });
                             }
                           }}
-                          onBlur={() => saveHeader({ variables })}
                         />
                         <Select
                           value={varType}
@@ -448,7 +474,7 @@ export default function TemplateBuilderPage() {
                             const updated = [...variables];
                             updated[i] = { ...updated[i], type: val as any, default_value: "" };
                             setVariables(updated);
-                            saveHeader({ variables: updated });
+                            setVariablesDirty(true);
                           }}
                         >
                           <SelectTrigger className="h-8 text-xs">
@@ -471,8 +497,8 @@ export default function TemplateBuilderPage() {
                               const updated = [...variables];
                               updated[i] = { ...updated[i], default_value: e.target.value };
                               setVariables(updated);
+                              setVariablesDirty(true);
                             }}
-                            onBlur={() => saveHeader({ variables })}
                           />
                         ) : varType === "time" ? (
                           <Input
@@ -483,8 +509,8 @@ export default function TemplateBuilderPage() {
                               const updated = [...variables];
                               updated[i] = { ...updated[i], default_value: e.target.value };
                               setVariables(updated);
+                              setVariablesDirty(true);
                             }}
-                            onBlur={() => saveHeader({ variables })}
                           />
                         ) : varType === "datetime" ? (
                           <Input
@@ -495,8 +521,8 @@ export default function TemplateBuilderPage() {
                               const updated = [...variables];
                               updated[i] = { ...updated[i], default_value: e.target.value };
                               setVariables(updated);
+                              setVariablesDirty(true);
                             }}
-                            onBlur={() => saveHeader({ variables })}
                           />
                         ) : (
                           <Input
@@ -507,8 +533,8 @@ export default function TemplateBuilderPage() {
                               const updated = [...variables];
                               updated[i] = { ...updated[i], default_value: e.target.value };
                               setVariables(updated);
+                              setVariablesDirty(true);
                             }}
-                            onBlur={() => saveHeader({ variables })}
                           />
                         )}
                         <Input
@@ -519,8 +545,8 @@ export default function TemplateBuilderPage() {
                             const updated = [...variables];
                             updated[i] = { ...updated[i], description: e.target.value };
                             setVariables(updated);
+                            setVariablesDirty(true);
                           }}
-                          onBlur={() => saveHeader({ variables })}
                         />
                         <Button
                           variant="ghost"
