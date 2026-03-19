@@ -675,6 +675,7 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
                                 "sentiment": getattr(analysis, "sentiment", ""),
                                 "call_summary": summary or "",
                             },
+                            bot_config_id=bot_config.id,
                         )
                         if instance:
                             await seq_db.commit()

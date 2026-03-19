@@ -226,6 +226,7 @@ async def create_instance(
     lead_id: uuid.UUID,
     trigger_call_id: uuid.UUID | None,
     context_data: dict,
+    bot_config_id: uuid.UUID | None = None,
 ) -> SequenceInstance | None:
     """Create a sequence instance + all touchpoints with calculated times."""
     # Load steps
@@ -243,15 +244,18 @@ async def create_instance(
     event_date = None
     has_event_steps = any(s.timing_type == "relative_to_event" for s in steps)
     if has_event_steps:
-        # Load template to get bot_id, then bot config for event_date
-        tmpl_result = await db.execute(
-            select(SequenceTemplate).where(SequenceTemplate.id == template_id)
-        )
-        template = tmpl_result.scalar_one_or_none()
+        # Resolve bot config: prefer explicit bot_config_id, fall back to template.bot_id
+        resolve_id = bot_config_id
+        if not resolve_id:
+            tmpl_result = await db.execute(
+                select(SequenceTemplate).where(SequenceTemplate.id == template_id)
+            )
+            template = tmpl_result.scalar_one_or_none()
+            resolve_id = template.bot_id if template else None
         bot_cfg = None
-        if template and template.bot_id:
+        if resolve_id:
             bot_result = await db.execute(
-                select(BotConfig).where(BotConfig.id == template.bot_id)
+                select(BotConfig).where(BotConfig.id == resolve_id)
             )
             bot_cfg = bot_result.scalar_one_or_none()
 
