@@ -1,7 +1,6 @@
 """Core sequence engine — trigger evaluation, instance creation, touchpoint processing, reply handling."""
 
 import json
-import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -23,6 +22,34 @@ from app.services import anthropic_client, messaging_client
 logger = structlog.get_logger(__name__)
 
 INTEREST_LEVELS = {"low": 1, "medium": 2, "high": 3}
+
+
+def parse_bot_event_date(event_date_str: str, event_time_str: str = "") -> str | None:
+    """Convert bot config free-text event_date + event_time to ISO string.
+
+    Handles formats like "7th March 2026" + "7:30 PM".
+    Returns ISO string or None if unparseable.
+    """
+    import re as _re
+    clean = _re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", event_date_str)
+    parsed = None
+    for fmt in ("%d %B %Y", "%B %d %Y", "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y"):
+        try:
+            parsed = datetime.strptime(clean.strip(), fmt)
+            break
+        except ValueError:
+            continue
+    if not parsed:
+        return None
+    if event_time_str:
+        for tfmt in ("%I:%M %p", "%H:%M", "%I %p"):
+            try:
+                t = datetime.strptime(event_time_str.strip(), tfmt)
+                parsed = parsed.replace(hour=t.hour, minute=t.minute)
+                break
+            except ValueError:
+                continue
+    return parsed.isoformat()
 
 
 # ---------------------------------------------------------------------------
