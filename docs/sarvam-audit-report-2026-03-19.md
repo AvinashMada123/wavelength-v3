@@ -31,6 +31,7 @@ We audited 11 production calls using Sarvam STT (saaras:v3) and TTS (bulbul:v3).
 ### Issue 1: Repetition Hallucination (CRITICAL)
 
 **Call:** Santhosh (+919176753253) | 43s | Call ID: 24c2549b
+**Recording:** [Listen](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/158053c9-bc53-4677-8e5c-2bc9ba5bafa2.mp3)
 
 Sarvam produced the Tamil word "ok" repeated **126 times** from what was likely a single short acknowledgment:
 
@@ -85,6 +86,7 @@ This was one continuous sentence: "No tablets, they're giving insulin injections
 ### Issue 4: Language Misidentification (MEDIUM)
 
 **Call:** Animesh (+919609775259) | 45s | language=unknown
+**Recording:** [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/e13346f2-ff42-4084-a44b-d23750ca487c.mp3)
 
 When using `language=unknown` (auto-detect mode), Sarvam misidentified English speech as:
 - Hindi: `"लोग के नाम है।"` (transcribed from English)
@@ -99,6 +101,7 @@ The user was speaking English throughout. The bot responded: "I understand! Let 
 ### Issue 5: STT Hallucinations — Phantom Words (MEDIUM)
 
 **Call:** Animesh (+919609775259) | 45s
+**Recording:** [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/779c4d16-34b1-417e-aab4-aa157009e939.mp3)
 
 Sarvam transcribed hesitation sounds (thinking/pausing) as:
 - `"Thank you."` — user was thinking, not saying "thank you"
@@ -137,6 +140,7 @@ The STT appears to confuse phonemes in colloquial/spoken Tamil vs. formal writte
 ### Issue 7: Catastrophic TTS Stall (CRITICAL)
 
 **Call:** Falguni | 55s | 71.1% silence
+**Recording:** [Listen](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/99ec9c6e-ec8c-4d65-85a4-5aa154fabf05.mp3)
 
 A 14.1-second continuous silence gap at the 36-50 second mark. The TTS completely stalled — no audio was produced for 14 seconds. Two additional gaps of 5.5s and 5.9s. The caller heard mostly silence.
 
@@ -205,13 +209,18 @@ Full architecture details in the companion document: `sarvam-architecture-overvi
 
 ---
 
-## Appendix: Call IDs for Reference
+## Appendix: Call IDs + Recordings
 
-| Call ID | Contact | Phone | Issue Type |
-|---------|---------|-------|-----------|
-| 24c2549b | Santhosh | +919176753253 | Hallucination loop |
-| a55b8d9f | Dinesh | +918637451203 | 13 timeouts, fragmentation |
-| ed4bd290 | Pramoth | +919952711053 | 10 timeouts, fragmentation |
-| Animesh test | Animesh | +919609775259 | Language misidentification, phantom words |
-| 4817d2e0 | Falguni | +919606206785 | 14.1s TTS stall, 71% silence |
-| 2cfcf730 | SNA | +917875787518 | 41% silence, 6.9s gap |
+| Call ID | Contact | Phone | Issue Type | Recording |
+|---------|---------|-------|-----------|-----------|
+| 24c2549b | Santhosh | +919176753253 | STT: Hallucination loop (126x repeat) | [Recording](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/158053c9-bc53-4677-8e5c-2bc9ba5bafa2.mp3) |
+| a55b8d9f | Dinesh | +918637451203 | STT: 13 timeouts, fragmentation | [Recording](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/dc9faa97-2156-43f7-a4c5-d4f7deed26f8.mp3) |
+| ed4bd290 | Pramoth | +919952711053 | STT: 10 timeouts, fragmentation | [Recording](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/0c625466-fbd8-42bd-b385-f2b9c8da94cf.mp3) |
+| 041e5416 | Dinesh | +918015646771 | STT: 2 timeouts (clean transcript) | [Recording](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/c0ba7313-263d-4c4f-aed1-8a8b7a28a1ee.mp3) |
+| c7a422ed | Naveen | +919551812203 | STT: IVR misidentified as speech | [Recording](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/57180df2-7c1f-41b8-9bca-2a1c47280a18.mp3) |
+| 9aeef8be | Yashwanth | +917842584025 | STT: Truncated transcript | [Recording](https://aps1.media.plivo.com/v1/Account/MAMDLMNDE3MMUTM2QYZC/Recording/b49dc2ce-a2b0-407d-87c4-06053de8d0a4.mp3) |
+| 4817d2e0 | Falguni | +919606206785 | TTS: 14.1s stall, 71% silence | [Recording](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/99ec9c6e-ec8c-4d65-85a4-5aa154fabf05.mp3) |
+| 2cfcf730 | SNA | +917875787518 | TTS: 41% silence, 6.9s gap | [Recording](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/b8e1a810-68fb-4c89-9623-60d6428e4a80.mp3) |
+| c63e7dd6 | Sahil | +919817562070 | TTS: 23.5% silence, clipping | [Recording](https://aps1.media.plivo.com/v1/Account/MAOWZHNJRJMTKWNZVKZJ/Recording/217413ae-4db7-4a5f-bbfd-b4c88b102aae.mp3) |
+| a55b8d9f | Dinesh | +918637451203 | TTS: 47% silence, 40 gaps | [Recording](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/dc9faa97-2156-43f7-a4c5-d4f7deed26f8.mp3) |
+| ed4bd290 | Pramoth | +919952711053 | TTS: 44.5% silence, 35 gaps | [Recording](https://aps1.media.plivo.com/v1/Account/MAYJNIZJDLYZUTMGJLNS/Recording/0c625466-fbd8-42bd-b385-f2b9c8da94cf.mp3) |
