@@ -1189,6 +1189,7 @@ async def build_pipeline(
         # Local SileroVAD is needed so the pipeline knows when the user speaks,
         # but we do NOT flush Sarvam on vad_stopped (see _SafeSarvamSTT) to avoid
         # hallucinated transcripts from short utterance fragments.
+        # SmartTurn prevents premature interruptions by predicting if user is done.
         transport_params = FastAPIWebsocketParams(
             audio_out_enabled=True,
             audio_out_sample_rate=16000,
@@ -1201,6 +1202,9 @@ async def build_pipeline(
                 stop_secs=0.3,
                 min_volume=0.5,
             )),
+            turn_analyzer=LocalSmartTurnAnalyzerV3(
+                params=SmartTurnParams(stop_secs=0.3),
+            ),
         )
     elif stt_provider == "smallest":
         # Smallest Pulse: use local Silero VAD + SmartTurn (same as Deepgram)
