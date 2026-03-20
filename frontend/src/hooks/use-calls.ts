@@ -20,7 +20,7 @@ export const callKeys = {
 export function useCallLogs(filters?: { botId?: string; goalOutcome?: string }) {
   return useQuery({
     queryKey: callKeys.list(filters ?? {}),
-    queryFn: () => fetchCallLogs(filters?.botId, filters?.goalOutcome),
+    queryFn: () => fetchCallLogs(filters),
   });
 }
 
