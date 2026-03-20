@@ -210,12 +210,20 @@ async def get_recording(
         if not org or not org.twilio_account_sid or not org.twilio_auth_token:
             raise HTTPException(status_code=500, detail="Twilio credentials not configured")
 
+        twilio_auth = (org.twilio_account_sid, org.twilio_auth_token)
+
+        # HEAD request first to get Content-Length for proper audio duration
+        async with httpx.AsyncClient() as client:
+            head_resp = await client.head(recording_url, auth=twilio_auth, follow_redirects=True)
+            head_resp.raise_for_status()
+            content_length = head_resp.headers.get("content-length")
+
         async def _stream_twilio():
             async with httpx.AsyncClient() as client:
                 async with client.stream(
                     "GET",
                     recording_url,
-                    auth=(org.twilio_account_sid, org.twilio_auth_token),
+                    auth=twilio_auth,
                     follow_redirects=True,
                 ) as resp:
                     resp.raise_for_status()
@@ -223,6 +231,10 @@ async def get_recording(
                         yield chunk
 
         content_type = "audio/mpeg" if recording_url.endswith(".mp3") else "audio/wav"
-        return StreamingResponse(_stream_twilio(), media_type=content_type)
+        headers = {}
+        if content_length:
+            headers["content-length"] = content_length
+            headers["accept-ranges"] = "bytes"
+        return StreamingResponse(_stream_twilio(), media_type=content_type, headers=headers)
 
     return RedirectResponse(url=recording_url)
