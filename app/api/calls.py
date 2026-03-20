@@ -5,8 +5,9 @@ from __future__ import annotations
 import uuid
 
 import structlog
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user, get_current_org
@@ -14,6 +15,7 @@ from app.bot_config.loader import BotConfigLoader
 from app.database import get_db
 from app.services.billing import check_org_credits
 from app.models.call_log import CallLog
+from app.models.organization import Organization
 from app.models.call_analytics import CallAnalytics
 from app.models.call_queue import QueuedCall
 from app.models.schemas import CallAnalyticsResponse, CallLogListResponse, CallLogResponse, QueueEnqueueResponse, TriggerCallRequest
@@ -200,5 +202,27 @@ async def get_recording(
     recording_url = (call_log.metadata_ or {}).get("recording_url")
     if not recording_url:
         raise HTTPException(status_code=404, detail="Recording not available")
+
+    # Twilio recording URLs require HTTP Basic Auth — proxy them server-side
+    if "api.twilio.com" in recording_url or "twilio.com" in recording_url:
+        result = await db.execute(select(Organization).where(Organization.id == org_id))
+        org = result.scalar_one_or_none()
+        if not org or not org.twilio_account_sid or not org.twilio_auth_token:
+            raise HTTPException(status_code=500, detail="Twilio credentials not configured")
+
+        async def _stream_twilio():
+            async with httpx.AsyncClient() as client:
+                async with client.stream(
+                    "GET",
+                    recording_url,
+                    auth=(org.twilio_account_sid, org.twilio_auth_token),
+                    follow_redirects=True,
+                ) as resp:
+                    resp.raise_for_status()
+                    async for chunk in resp.aiter_bytes(chunk_size=65536):
+                        yield chunk
+
+        content_type = "audio/mpeg" if recording_url.endswith(".mp3") else "audio/wav"
+        return StreamingResponse(_stream_twilio(), media_type=content_type)
 
     return RedirectResponse(url=recording_url)
