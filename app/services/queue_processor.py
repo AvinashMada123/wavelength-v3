@@ -138,7 +138,7 @@ def _normalize_template_vars(template_vars: dict[str, str]) -> dict[str, str]:
             "customer_profession",
             "customerProfessionName",
         ),
-        "customer_name": ("name", "contactName", "customerName"),
+        "customer_name": ("name", "contact_name", "contactName", "customerName"),
     }
 
     def canonical(key: str) -> str:
