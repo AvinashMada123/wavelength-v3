@@ -10,6 +10,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.call_queue import QueuedCall
+from app.models.lead import Lead
 
 logger = structlog.get_logger(__name__)
 
@@ -136,6 +137,25 @@ async def create_scheduled_callback(
         scheduled = scheduled.replace(tzinfo=tz)
     scheduled_utc = scheduled.astimezone(timezone.utc)
 
+    # Pull saved lead custom_fields so callbacks retain all original context
+    # (event_name, location, etc.) from the initial GHL trigger
+    callback_vars: dict = {}
+    try:
+        from sqlalchemy import select
+        result = await db.execute(
+            select(Lead).where(Lead.org_id == org_id, Lead.phone_number == contact_phone)
+        )
+        lead = result.scalar_one_or_none()
+        if lead and lead.custom_fields:
+            callback_vars.update(lead.custom_fields)
+    except Exception:
+        pass  # Non-fatal — proceed without lead vars
+    callback_vars.update(
+        callback_reason=reason,
+        original_call_sid=call_sid,
+        retry_count=retry_count,
+    )
+
     queued_call = QueuedCall(
         org_id=org_id,
         bot_id=bot_id,
@@ -148,11 +168,7 @@ async def create_scheduled_callback(
         scheduled_at=scheduled_utc,
         retry_count=retry_count,
         original_call_sid=call_sid,
-        extra_vars={
-            "callback_reason": reason,
-            "original_call_sid": call_sid,
-            "retry_count": retry_count,
-        },
+        extra_vars=callback_vars,
     )
     db.add(queued_call)
     await db.flush()

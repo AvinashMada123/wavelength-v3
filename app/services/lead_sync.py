@@ -20,8 +20,12 @@ async def find_or_create_lead(
     contact_name: str,
     ghl_contact_id: str | None = None,
     source: str = "auto_call",
+    extra_vars: dict[str, str] | None = None,
 ) -> Lead:
     """Find an existing lead by (org_id, phone_number) or create one.
+
+    Saves extra_vars (event_name, location, etc.) into custom_fields so they
+    persist across callbacks and manual re-calls.
 
     Returns the Lead instance (already flushed with an ID).
     """
@@ -37,6 +41,11 @@ async def find_or_create_lead(
         # Update ghl_contact_id if we have one and lead doesn't
         if ghl_contact_id and not lead.ghl_contact_id:
             lead.ghl_contact_id = ghl_contact_id
+        # Merge new extra_vars into existing custom_fields (new values win)
+        if extra_vars:
+            merged = dict(lead.custom_fields or {})
+            merged.update(extra_vars)
+            lead.custom_fields = merged
         logger.info(
             "lead_found",
             lead_id=str(lead.id),
@@ -50,6 +59,7 @@ async def find_or_create_lead(
         phone_number=phone_number,
         contact_name=contact_name,
         ghl_contact_id=ghl_contact_id,
+        custom_fields=extra_vars or {},
         source=source,
         status="new",
     )

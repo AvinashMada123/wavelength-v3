@@ -438,9 +438,35 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
                     )
                 return
 
+            # Auto-create or find lead for this contact (before prompt fill
+            # so saved lead vars are available as fallbacks)
+            lead_id = None
+            lead_custom_fields: dict = {}
+            try:
+                lead = await find_or_create_lead(
+                    db,
+                    org_id=bot_config.org_id,
+                    phone_number=queued_call.contact_phone,
+                    contact_name=queued_call.contact_name,
+                    ghl_contact_id=queued_call.ghl_contact_id,
+                    extra_vars=queued_call.extra_vars,
+                )
+                lead_id = lead.id
+                lead_custom_fields = dict(lead.custom_fields or {})
+            except Exception as e:
+                logger.error(
+                    "lead_auto_create_failed",
+                    queue_id=str(queue_id),
+                    error=str(e),
+                )
+                # Non-fatal — proceed without lead linkage
+
             # Fill prompt template — copy context_variables to avoid mutating cached bot_config
             ctx_vars = bot_config.context_variables or {}
             template_vars = dict(ctx_vars) if isinstance(ctx_vars, dict) else {}
+            # Lead's saved custom_fields go in first as baseline
+            if lead_custom_fields:
+                template_vars.update(_normalize_template_vars(lead_custom_fields))
             template_vars.update(
                 contact_name=queued_call.contact_name,
                 agent_name=bot_config.agent_name,
@@ -462,6 +488,7 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
                 "queue_fill_prompt_debug",
                 queue_id=str(queue_id),
                 raw_extra_vars=raw_extras,
+                lead_custom_fields=lead_custom_fields,
                 normalized_extras={k: v for k, v in normalized_extras.items() if k != template_vars.get(k, v)},
                 event_host=template_vars.get("event_host"),
                 customer_profession=template_vars.get("customer_profession"),
@@ -495,25 +522,6 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
                         error=str(e),
                     )
                     # Non-fatal — proceed without memory
-
-            # Auto-create or find lead for this contact
-            lead_id = None
-            try:
-                lead = await find_or_create_lead(
-                    db,
-                    org_id=bot_config.org_id,
-                    phone_number=queued_call.contact_phone,
-                    contact_name=queued_call.contact_name,
-                    ghl_contact_id=queued_call.ghl_contact_id,
-                )
-                lead_id = lead.id
-            except Exception as e:
-                logger.error(
-                    "lead_auto_create_failed",
-                    queue_id=str(queue_id),
-                    error=str(e),
-                )
-                # Non-fatal — proceed without lead linkage
 
             # Create call log
             call_sid = str(uuid4())
