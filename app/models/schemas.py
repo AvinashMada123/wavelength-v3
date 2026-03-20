@@ -294,8 +294,20 @@ class BotConfigResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CallLogListAnalytics(BaseModel):
+    """Lightweight analytics for list view."""
+    goal_outcome: str | None = None
+    sentiment: str | None = None
+    sentiment_score: int | None = None
+    lead_temperature: str | None = None
+    captured_data: dict | None = None
+    has_red_flags: bool = False
+
+    model_config = {"from_attributes": True}
+
+
 class CallLogListResponse(BaseModel):
-    """Light response for list endpoints — no metadata/transcript."""
+    """Light response for list endpoints — includes key analytics."""
     id: uuid.UUID
     bot_id: uuid.UUID
     call_sid: str
@@ -306,6 +318,8 @@ class CallLogListResponse(BaseModel):
     outcome: str | None
     call_duration: int | None
     summary: str | None
+    metadata: dict | None = None
+    analytics: CallLogListAnalytics | None = None
     started_at: datetime | None
     ended_at: datetime | None
     created_at: datetime

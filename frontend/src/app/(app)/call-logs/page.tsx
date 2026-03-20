@@ -193,17 +193,20 @@ function CallLogsPageInner() {
 
   const loadCalls = useCallback(async () => {
     try {
-      const data = await fetchCallLogs(
-        filterBotId !== "all" ? filterBotId : undefined,
-        filterGoalOutcome !== "all" ? filterGoalOutcome : undefined
-      );
+      const data = await fetchCallLogs({
+        botId: filterBotId !== "all" ? filterBotId : undefined,
+        goalOutcome: filterGoalOutcome !== "all" ? filterGoalOutcome : undefined,
+        status: filterStatus !== "all" ? filterStatus : undefined,
+        dateFrom: dateRange.from ? new Date(dateRange.from).toISOString() : undefined,
+        dateTo: dateRange.to ? new Date(dateRange.to).toISOString() : undefined,
+      });
       setCalls(data);
     } catch {
       // silent
     } finally {
       setLoading(false);
     }
-  }, [filterBotId, filterGoalOutcome]);
+  }, [filterBotId, filterGoalOutcome, filterStatus, dateRange]);
 
   useEffect(() => {
     fetchBots().then(setBots).catch(() => {});
@@ -284,9 +287,7 @@ function CallLogsPageInner() {
   const filteredCalls = useMemo(() => {
     let result = calls;
 
-    if (filterStatus !== "all") {
-      result = result.filter((c) => c.status === filterStatus);
-    }
+    // Status and date filters are now server-side
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -296,18 +297,6 @@ function CallLogsPageInner() {
           c.contact_phone.includes(q) ||
           (c.summary && c.summary.toLowerCase().includes(q))
       );
-    }
-
-    if (dateRange.from) {
-      const from = new Date(dateRange.from);
-      from.setHours(0, 0, 0, 0);
-      result = result.filter((c) => new Date(c.created_at) >= from);
-    }
-
-    if (dateRange.to) {
-      const to = new Date(dateRange.to);
-      to.setHours(23, 59, 59, 999);
-      result = result.filter((c) => new Date(c.created_at) <= to);
     }
 
     // Transcript content search

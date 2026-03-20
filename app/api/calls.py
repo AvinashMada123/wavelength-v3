@@ -18,7 +18,7 @@ from app.models.call_log import CallLog
 from app.models.organization import Organization
 from app.models.call_analytics import CallAnalytics
 from app.models.call_queue import QueuedCall
-from app.models.schemas import CallAnalyticsResponse, CallLogListResponse, CallLogResponse, QueueEnqueueResponse, TriggerCallRequest
+from app.models.schemas import CallAnalyticsResponse, CallLogListAnalytics, CallLogListResponse, CallLogResponse, QueueEnqueueResponse, TriggerCallRequest
 from app.utils import normalize_phone_india
 from sqlalchemy import select
 
@@ -41,30 +41,60 @@ async def list_calls(
     status: str | None = None,
     goal_outcome: str | None = None,
     contact_phone: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     limit: int = 10000,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_current_org),
 ):
-    if goal_outcome:
-        # Join with call_analytics to filter by goal_outcome
-        query = (
-            select(CallLog)
-            .join(CallAnalytics, CallAnalytics.call_log_id == CallLog.id)
-            .where(CallAnalytics.goal_outcome == goal_outcome, CallLog.org_id == org_id)
-            .order_by(CallLog.created_at.desc())
-        )
-    else:
-        query = select(CallLog).where(CallLog.org_id == org_id).order_by(CallLog.created_at.desc())
+    from datetime import datetime as dt
+
+    # Always left-join analytics so we can return sentiment/score/interest
+    query = (
+        select(CallLog, CallAnalytics)
+        .outerjoin(CallAnalytics, CallAnalytics.call_log_id == CallLog.id)
+        .where(CallLog.org_id == org_id)
+        .order_by(CallLog.created_at.desc())
+    )
     if bot_id:
         query = query.where(CallLog.bot_id == bot_id)
     if status:
         query = query.where(CallLog.status == status)
+    if goal_outcome:
+        query = query.where(CallAnalytics.goal_outcome == goal_outcome)
     if contact_phone:
         query = query.where(CallLog.contact_phone == contact_phone)
+    if date_from:
+        try:
+            query = query.where(CallLog.created_at >= dt.fromisoformat(date_from))
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            query = query.where(CallLog.created_at <= dt.fromisoformat(date_to))
+        except ValueError:
+            pass
     query = query.offset(offset).limit(limit)
     result = await db.execute(query)
-    return result.scalars().all()
+    rows = result.all()
+
+    # Build response with analytics attached
+    response = []
+    for call_log, analytics in rows:
+        data = CallLogListResponse.model_validate(call_log)
+        data.metadata = call_log.metadata_
+        if analytics:
+            data.analytics = CallLogListAnalytics(
+                goal_outcome=analytics.goal_outcome,
+                sentiment=analytics.sentiment,
+                sentiment_score=analytics.sentiment_score,
+                lead_temperature=analytics.lead_temperature,
+                captured_data=analytics.captured_data,
+                has_red_flags=analytics.has_red_flags,
+            )
+        response.append(data)
+    return response
 
 
 @router.get("/export", response_model=list[CallLogResponse])
