@@ -76,6 +76,14 @@ class SequenceInstance(Base):
         Index("ix_seqinst_lead", "lead_id"),
         Index("ix_seqinst_org_status", "org_id", "status"),
         Index("ix_seqinst_template_status", "template_id", "status"),
+        # Partial unique index: only one active instance per lead per template
+        Index(
+            "uq_seqinst_template_lead_active",
+            "template_id",
+            "lead_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

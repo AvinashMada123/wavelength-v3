@@ -21,6 +21,7 @@ from app.models.sequence import (
     SequenceTemplate,
     SequenceTouchpoint,
 )
+from app.models.bot_config import BotConfig
 from app.models.user import User
 from app.services import anthropic_client
 
@@ -499,6 +500,14 @@ async def add_step(
     if result.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="Template not found")
 
+    # Validate voice_bot_id exists and belongs to same org
+    if body.voice_bot_id:
+        bot_result = await db.execute(
+            select(BotConfig).where(BotConfig.id == body.voice_bot_id, BotConfig.org_id == org_id)
+        )
+        if bot_result.scalar_one_or_none() is None:
+            raise HTTPException(status_code=400, detail="Voice bot not found or does not belong to this organization")
+
     step = SequenceStep(
         template_id=template_id,
         step_order=body.step_order,
@@ -542,6 +551,15 @@ async def update_step(
         raise HTTPException(status_code=404, detail="Step not found")
 
     update_data = body.model_dump(exclude_unset=True)
+
+    # Validate voice_bot_id if being updated
+    if "voice_bot_id" in update_data and update_data["voice_bot_id"]:
+        bot_result = await db.execute(
+            select(BotConfig).where(BotConfig.id == update_data["voice_bot_id"], BotConfig.org_id == org_id)
+        )
+        if bot_result.scalar_one_or_none() is None:
+            raise HTTPException(status_code=400, detail="Voice bot not found or does not belong to this organization")
+
     for field, value in update_data.items():
         setattr(step, field, value)
 

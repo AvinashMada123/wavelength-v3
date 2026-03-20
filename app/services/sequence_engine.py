@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import structlog
 from sqlalchemy import select, and_, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.sequence import (
@@ -275,7 +276,7 @@ async def create_instance(
             if var.get("key") and var.get("default_value"):
                 context_data.setdefault(var["key"], var["default_value"])
 
-    # Create instance
+    # Create instance (unique index prevents duplicate active enrollments)
     now = datetime.now(timezone.utc)
     instance = SequenceInstance(
         org_id=org_id,
@@ -287,7 +288,16 @@ async def create_instance(
         started_at=now,
     )
     db.add(instance)
-    await db.flush()  # Get instance.id
+    try:
+        await db.flush()  # Get instance.id
+    except IntegrityError:
+        await db.rollback()
+        logger.info(
+            "sequence_duplicate_enrollment_blocked",
+            template_id=str(template_id),
+            lead_id=str(lead_id),
+        )
+        return None
 
     # Resolve default messaging provider for this org
     provider_result = await db.execute(
@@ -630,8 +640,11 @@ async def _check_instance_completion(db: AsyncSession, instance_id: uuid.UUID) -
     )
     remaining = result.scalar() or 0
     if remaining == 0:
+        # Row-level lock prevents two concurrent touchpoints from both completing
         inst_result = await db.execute(
-            select(SequenceInstance).where(SequenceInstance.id == instance_id)
+            select(SequenceInstance)
+            .where(SequenceInstance.id == instance_id)
+            .with_for_update(skip_locked=True)
         )
         instance = inst_result.scalar_one_or_none()
         if instance and instance.status == "active":
