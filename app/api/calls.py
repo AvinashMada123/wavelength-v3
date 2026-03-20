@@ -83,7 +83,6 @@ async def list_calls(
     response = []
     for call_log, analytics in rows:
         data = CallLogListResponse.model_validate(call_log)
-        data.metadata = call_log.metadata_
         if analytics:
             data.analytics = CallLogListAnalytics(
                 goal_outcome=analytics.goal_outcome,

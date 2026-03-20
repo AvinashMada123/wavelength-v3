@@ -318,7 +318,7 @@ class CallLogListResponse(BaseModel):
     outcome: str | None
     call_duration: int | None
     summary: str | None
-    metadata: dict | None = None
+    metadata: dict | None = Field(default=None, validation_alias="metadata_")
     analytics: CallLogListAnalytics | None = None
     started_at: datetime | None
     ended_at: datetime | None
