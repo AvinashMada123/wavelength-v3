@@ -7,7 +7,7 @@ import uuid
 import structlog
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user, get_current_org
@@ -212,29 +212,16 @@ async def get_recording(
 
         twilio_auth = (org.twilio_account_sid, org.twilio_auth_token)
 
-        # HEAD request first to get Content-Length for proper audio duration
-        async with httpx.AsyncClient() as client:
-            head_resp = await client.head(recording_url, auth=twilio_auth, follow_redirects=True)
-            head_resp.raise_for_status()
-            content_length = head_resp.headers.get("content-length")
-
-        async def _stream_twilio():
-            async with httpx.AsyncClient() as client:
-                async with client.stream(
-                    "GET",
-                    recording_url,
-                    auth=twilio_auth,
-                    follow_redirects=True,
-                ) as resp:
-                    resp.raise_for_status()
-                    async for chunk in resp.aiter_bytes(chunk_size=65536):
-                        yield chunk
+        # Fetch entire recording and return it (avoids Content-Length mismatch with streaming)
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            resp = await client.get(recording_url, auth=twilio_auth)
+            resp.raise_for_status()
 
         content_type = "audio/mpeg" if recording_url.endswith(".mp3") else "audio/wav"
-        headers = {}
-        if content_length:
-            headers["content-length"] = content_length
-            headers["accept-ranges"] = "bytes"
-        return StreamingResponse(_stream_twilio(), media_type=content_type, headers=headers)
+        return Response(
+            content=resp.content,
+            media_type=content_type,
+            headers={"content-length": str(len(resp.content))},
+        )
 
     return RedirectResponse(url=recording_url)
