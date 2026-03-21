@@ -84,7 +84,7 @@ function timingSummary(step: SequenceStep): string {
     const parts: string[] = [];
     if (days) parts.push(`${days}d`);
     if (hours) parts.push(`${hours}h`);
-    const time = val?.at_time;
+    const time = val?.at_time ?? val?.time;
     if (time) parts.push(`at ${time}`);
     return parts.length ? parts.join(" ") + " after prev" : "After previous";
   }
@@ -157,8 +157,11 @@ export function StepCard({
     if (timerRef.current) clearTimeout(timerRef.current);
     const data = pendingRef.current;
     if (Object.keys(data).length > 0) {
-      onUpdate(step.id, data);
       pendingRef.current = {};
+      Promise.resolve(onUpdate(step.id, data)).catch(() => {
+        // Restore failed data so next edit retries it
+        pendingRef.current = { ...data, ...pendingRef.current };
+      });
     }
   }, [onUpdate, step.id]);
 
@@ -204,6 +207,7 @@ export function StepCard({
     (step.reply_handler as Record<string, string>)?.save_field ?? "",
   );
   const [isActive, setIsActive] = useState(step.is_active);
+  const [jsonError, setJsonError] = useState(false);
 
   // Sync from props when step changes externally
   useEffect(() => {
@@ -546,20 +550,28 @@ export function StepCard({
               </Label>
               <Textarea
                 rows={3}
-                className="font-mono text-xs"
+                className={`font-mono text-xs ${jsonError ? "border-red-500 focus-visible:ring-red-500" : ""}`}
                 placeholder='["{{name}}", "{{date}}"]'
                 value={templateParams}
                 onChange={(e) => {
                   setTemplateParams(e.target.value);
+                  if (!e.target.value.trim()) {
+                    setJsonError(false);
+                    return;
+                  }
                   try {
                     const parsed = JSON.parse(e.target.value);
+                    setJsonError(false);
                     updateField({ whatsapp_template_params: parsed });
                   } catch {
-                    // wait for valid JSON
+                    setJsonError(true);
                   }
                 }}
                 onBlur={flush}
               />
+              {jsonError && (
+                <p className="text-[10px] text-red-500">Invalid JSON — changes won&apos;t save until fixed</p>
+              )}
             </div>
           </div>
         )}

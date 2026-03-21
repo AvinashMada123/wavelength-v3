@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Loader2,
   AlertTriangle,
+  SkipForward,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, formatDistanceToNow } from "date-fns";
@@ -48,6 +49,7 @@ import {
   pauseInstance,
   resumeInstance,
   cancelInstance,
+  advanceInstance,
   type SequenceInstance,
   type SequenceTouchpoint,
   type SequenceTemplate,
@@ -248,23 +250,34 @@ export default function EngagementMonitorPage() {
 
   async function handleAction(
     id: string,
-    action: "pause" | "resume" | "cancel"
+    action: "pause" | "resume" | "cancel" | "advance"
   ) {
     setActionLoading((prev) => ({ ...prev, [id]: true }));
     try {
       if (action === "pause") await pauseInstance(id);
       else if (action === "resume") await resumeInstance(id);
-      else await cancelInstance(id);
-      toast.success(
-        action === "pause"
-          ? "Instance paused"
-          : action === "resume"
-            ? "Instance resumed"
-            : "Instance cancelled"
-      );
+      else if (action === "advance") {
+        const result = await advanceInstance(id);
+        toast.success(`Advanced: Step ${result.step_order} "${result.step_name}" → ${result.status}`);
+        // Refresh expanded row if open
+        if (expandedId === id) {
+          setExpandedId(null);
+          setTimeout(() => setExpandedId(id), 100);
+        }
+      } else await cancelInstance(id);
+      if (action !== "advance") {
+        toast.success(
+          action === "pause"
+            ? "Instance paused"
+            : action === "resume"
+              ? "Instance resumed"
+              : "Instance cancelled"
+        );
+      }
       loadInstances();
-    } catch {
-      toast.error(`Failed to ${action} instance`);
+    } catch (err: any) {
+      const detail = err?.message || `Failed to ${action} instance`;
+      toast.error(detail);
     } finally {
       setActionLoading((prev) => ({ ...prev, [id]: false }));
     }
@@ -512,6 +525,24 @@ export default function EngagementMonitorPage() {
                                 className="flex items-center justify-end gap-1"
                                 onClick={(e) => e.stopPropagation()}
                               >
+                                {(instance.status === "active" || instance.status === "paused") && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 w-7 p-0 text-muted-foreground hover:text-violet-400"
+                                    disabled={isActing}
+                                    title="Advance to next step"
+                                    onClick={() =>
+                                      handleAction(instance.id, "advance")
+                                    }
+                                  >
+                                    {isActing ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <SkipForward className="h-3.5 w-3.5" />
+                                    )}
+                                  </Button>
+                                )}
                                 {instance.status === "active" && (
                                   <Button
                                     variant="ghost"

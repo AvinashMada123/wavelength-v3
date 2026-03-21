@@ -173,8 +173,9 @@ export default function TemplateBuilderPage() {
         setSteps((prev) =>
           prev.map((s) => (s.id === stepId ? { ...s, ...updated } : s)),
         );
-      } catch {
+      } catch (err) {
         toast.error("Failed to update step");
+        throw err;
       }
     },
     [],

@@ -150,6 +150,12 @@ export const resumeInstance = (id: string) =>
 export const cancelInstance = (id: string) =>
   apiFetch<void>(`/api/sequences/instances/${id}/cancel`, { method: "POST" });
 
+export const advanceInstance = (id: string) =>
+  apiFetch<{ ok: boolean; touchpoint_id: string; step_order: number; step_name: string; status: string }>(
+    `/api/sequences/instances/${id}/advance`,
+    { method: "POST" }
+  );
+
 // --- Step Testing ---
 export const testStep = (stepId: string, phone: string, variables?: Record<string, string>) =>
   apiFetch<{ success: boolean; message_id?: string; error?: string }>(
