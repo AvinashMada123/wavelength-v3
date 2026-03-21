@@ -1626,16 +1626,13 @@ async def build_pipeline(
         # SENTENCE mode (default) sends full sentences which always exceed
         # min_buffer_size, avoiding the deadlock.
         tts_lang = "en-IN" if stt_language in ("unknown", "multi") else stt_language
+        # TEMP: Disabled PhraseTextAggregator to test Sarvam's native chunking.
+        # Previous config: text_aggregator=PhraseTextAggregator(min=30, subsequent=50)
         tts = SarvamTTSService(
             api_key=settings.SARVAM_API_KEY,
             model="bulbul:v3",
             voice_id=call_context.tts_voice,
             sample_rate=16000,
-            text_aggregator=PhraseTextAggregator(
-                min_phrase_chars=30,
-                subsequent_phrase_chars=50,
-                adaptive=settings.ADAPTIVE_PHRASE_CHARS,
-            ),
             params=SarvamTTSService.InputParams(
                 language=tts_lang,
                 min_buffer_size=30,
@@ -1643,7 +1640,7 @@ async def build_pipeline(
                 temperature=0.7,
             ),
         )
-        logger.info("tts_sarvam_init", voice=call_context.tts_voice, model="bulbul:v3")
+        logger.info("tts_sarvam_init", voice=call_context.tts_voice, model="bulbul:v3", chunking="sarvam_native")
 
     elif tts_provider == "gemini":
         from pipecat.services.google.tts import GeminiTTSService
