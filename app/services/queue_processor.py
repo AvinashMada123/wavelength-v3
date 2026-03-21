@@ -971,3 +971,93 @@ async def finalize_campaign_call(call_log_id: UUID, call_status: str):
             "campaign_call_finalize_error",
             call_log_id=str(call_log_id),
         )
+
+
+async def schedule_auto_retry(call_log_id: UUID, bot_config_loader):
+    """Re-queue a no-answer call for automatic retry if callback is enabled.
+
+    Called from plivo_event / twilio_event when call status is 'no_answer'.
+    Checks bot config callback settings, finds the original queued call to
+    read retry_count, and creates a new scheduled QueuedCall.
+    """
+    try:
+        async with get_db_session() as db:
+            # Load call log
+            result = await db.execute(
+                select(CallLog).where(CallLog.id == call_log_id)
+            )
+            call_log = result.scalar_one_or_none()
+            if not call_log or not call_log.context_data:
+                return
+
+            # Skip campaign calls — campaigns have their own retry logic
+            qc_result = await db.execute(
+                select(QueuedCall).where(
+                    QueuedCall.call_log_id == call_log_id,
+                    QueuedCall.campaign_id.isnot(None),
+                )
+            )
+            if qc_result.scalar_one_or_none():
+                return
+
+            # Load bot config and check callback_enabled
+            bot_config = await bot_config_loader.get(call_log.context_data["bot_id"])
+            if not bot_config or not getattr(bot_config, "callback_enabled", False):
+                return
+
+            max_retries = getattr(bot_config, "callback_max_retries", 3)
+            delay_hours = getattr(bot_config, "callback_retry_delay_hours", 2.0)
+
+            # Find original queued call to get retry_count and extra_vars
+            orig_result = await db.execute(
+                select(QueuedCall)
+                .where(QueuedCall.call_log_id == call_log_id)
+                .order_by(QueuedCall.created_at.desc())
+                .limit(1)
+            )
+            original_qc = orig_result.scalar_one_or_none()
+
+            current_retry = (original_qc.retry_count if original_qc else 0)
+            if current_retry >= max_retries:
+                logger.info(
+                    "auto_retry_max_reached",
+                    call_log_id=str(call_log_id),
+                    retry_count=current_retry,
+                    max_retries=max_retries,
+                )
+                return
+
+            scheduled_at = datetime.now(timezone.utc) + timedelta(hours=delay_hours)
+
+            retry_call = QueuedCall(
+                org_id=call_log.org_id,
+                bot_id=call_log.bot_id,
+                contact_name=call_log.contact_name,
+                contact_phone=call_log.contact_phone,
+                ghl_contact_id=call_log.ghl_contact_id,
+                extra_vars=(original_qc.extra_vars if original_qc else {}),
+                source="auto_retry",
+                status="queued",
+                priority=0,
+                scheduled_at=scheduled_at,
+                retry_count=current_retry + 1,
+                original_call_sid=call_log.call_sid,
+            )
+            db.add(retry_call)
+            await db.commit()
+
+            logger.info(
+                "auto_retry_scheduled",
+                call_log_id=str(call_log_id),
+                phone=call_log.contact_phone,
+                retry_number=current_retry + 1,
+                max_retries=max_retries,
+                scheduled_at=scheduled_at.isoformat(),
+                delay_hours=delay_hours,
+            )
+
+    except Exception:
+        logger.exception(
+            "auto_retry_schedule_error",
+            call_log_id=str(call_log_id),
+        )

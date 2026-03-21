@@ -24,6 +24,7 @@ from app.models.sequence import (
 from app.models.bot_config import BotConfig
 from app.models.user import User
 from app.services import anthropic_client
+from app.services.sequence_engine import process_touchpoint
 
 logger = structlog.get_logger(__name__)
 
@@ -1068,6 +1069,67 @@ async def cancel_instance(
 
     logger.info("instance_cancelled", instance_id=str(instance_id))
     return {"ok": True, "status": "cancelled"}
+
+
+@router.post("/instances/{instance_id}/advance", status_code=200)
+async def advance_instance(
+    instance_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Force-execute the next pending touchpoint immediately (for testing)."""
+    result = await db.execute(
+        select(SequenceInstance).where(
+            SequenceInstance.id == instance_id, SequenceInstance.org_id == org_id
+        )
+    )
+    instance = result.scalar_one_or_none()
+    if instance is None:
+        raise HTTPException(status_code=404, detail="Instance not found")
+    if instance.status not in ("active", "paused"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot advance instance with status '{instance.status}'",
+        )
+
+    # Find next pending touchpoint by step_order
+    tp_result = await db.execute(
+        select(SequenceTouchpoint)
+        .where(
+            SequenceTouchpoint.instance_id == instance_id,
+            SequenceTouchpoint.status == "pending",
+        )
+        .order_by(SequenceTouchpoint.step_order)
+        .limit(1)
+    )
+    touchpoint = tp_result.scalar_one_or_none()
+    if touchpoint is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No pending touchpoints to advance — sequence may be complete or awaiting reply",
+        )
+
+    # Ensure instance is active for processing
+    if instance.status == "paused":
+        instance.status = "active"
+        await db.flush()
+
+    # Force-execute the touchpoint now
+    await process_touchpoint(db, touchpoint)
+
+    logger.info(
+        "instance_advanced",
+        instance_id=str(instance_id),
+        touchpoint_id=str(touchpoint.id),
+        step_order=touchpoint.step_order,
+    )
+    return {
+        "ok": True,
+        "touchpoint_id": str(touchpoint.id),
+        "step_order": touchpoint.step_order,
+        "step_name": (touchpoint.step_snapshot or {}).get("name", ""),
+        "status": touchpoint.status,
+    }
 
 
 # ---------------------------------------------------------------------------

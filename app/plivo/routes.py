@@ -680,7 +680,7 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
                                 ctx_data["event_date"] = iso_dt
                         instance = await sequence_engine.create_instance(
                             seq_db,
-                            template_id=str(bot_config.sequence_template_id),
+                            template_id=bot_config.sequence_template_id,
                             org_id=bot_config.org_id,
                             lead_id=lead.id,
                             trigger_call_id=existing_log.id,
@@ -692,7 +692,7 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
                                 "sequence_triggered_post_call",
                                 call_sid=call_sid,
                                 instance_id=str(instance.id),
-                                template_id=str(bot_config.sequence_template_id),
+                                template_id=bot_config.sequence_template_id,
                             )
             except Exception as e:
                 logger.error("sequence_trigger_post_call_failed", call_sid=call_sid, error=str(e))
@@ -779,6 +779,11 @@ async def plivo_event(call_sid: str, request: Request):
                     )
         except Exception:
             logger.exception("sequence_trigger_failed", call_sid=call_sid)
+
+    # Auto-retry if no_answer and callback is enabled on the bot
+    if call_log and mapped_status == "no_answer":
+        from app.services.queue_processor import schedule_auto_retry
+        await schedule_auto_retry(call_log.id, bot_config_loader)
 
     # Finalize campaign call if applicable
     if call_log:

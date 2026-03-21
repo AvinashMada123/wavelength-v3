@@ -371,6 +371,11 @@ async def twilio_event(call_sid: str, request: Request):
                 reported_duration_seconds=duration_val,
             )
 
+    # Auto-retry if no_answer and callback is enabled on the bot
+    if call_log and mapped_status == "no_answer":
+        from app.services.queue_processor import schedule_auto_retry
+        await schedule_auto_retry(call_log.id, bot_config_loader)
+
     # Finalize campaign call if applicable
     if call_log:
         from app.services.queue_processor import finalize_campaign_call

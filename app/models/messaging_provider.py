@@ -1,7 +1,7 @@
 """Messaging provider model — per-org WhatsApp/SMS credentials."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import ForeignKey, Index, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -34,4 +34,4 @@ class MessagingProvider(Base):
     credentials: Mapped[str] = mapped_column(Text, nullable=False)
     is_default: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(server_default=text("now()"))
-    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), onupdate=lambda: datetime.now(timezone.utc))

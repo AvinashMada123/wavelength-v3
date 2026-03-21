@@ -1,7 +1,7 @@
 """Sequence engine models — templates, steps, instances, touchpoints."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import ForeignKey, Index, Integer, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -34,7 +34,7 @@ class SequenceTemplate(Base):
     variables: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     is_active: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(server_default=text("now()"))
-    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), onupdate=lambda: datetime.now(timezone.utc))
 
 
 class SequenceStep(Base):
@@ -67,7 +67,7 @@ class SequenceStep(Base):
     expects_reply: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     reply_handler: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=text("now()"))
-    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), onupdate=lambda: datetime.now(timezone.utc))
 
 
 class SequenceInstance(Base):
@@ -106,7 +106,7 @@ class SequenceInstance(Base):
     started_at: Mapped[datetime] = mapped_column(server_default=text("now()"))
     completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=text("now()"))
-    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), onupdate=lambda: datetime.now(timezone.utc))
 
 
 class SequenceTouchpoint(Base):
@@ -151,4 +151,4 @@ class SequenceTouchpoint(Base):
         UUID(as_uuid=True), ForeignKey("call_queue.id"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(server_default=text("now()"))
-    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), onupdate=lambda: datetime.now(timezone.utc))

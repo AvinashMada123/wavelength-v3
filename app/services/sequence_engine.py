@@ -49,6 +49,10 @@ def parse_bot_event_date(event_date_str: str, event_time_str: str = "") -> str |
                 break
             except ValueError:
                 continue
+    # Always return timezone-aware ISO string (assume IST if no tz)
+    if parsed.tzinfo is None:
+        from zoneinfo import ZoneInfo
+        parsed = parsed.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
     return parsed.isoformat()
 
 
@@ -248,13 +252,16 @@ async def evaluate_trigger(
 
 async def create_instance(
     db: AsyncSession,
-    template_id: uuid.UUID,
+    template_id: uuid.UUID | str,
     org_id: uuid.UUID,
     lead_id: uuid.UUID,
     trigger_call_id: uuid.UUID | None,
     context_data: dict,
 ) -> SequenceInstance | None:
     """Create a sequence instance + all touchpoints with calculated times."""
+    # Normalize template_id to UUID
+    if isinstance(template_id, str):
+        template_id = uuid.UUID(template_id)
     # Load steps
     result = await db.execute(
         select(SequenceStep)
