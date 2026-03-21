@@ -89,6 +89,7 @@ interface BotForm {
   phone_number_id: string | null;
   plivo_caller_id: string;
   twilio_phone_number: string;
+  max_concurrent_calls: number;
   circuit_breaker_enabled: boolean;
   circuit_breaker_threshold: number;
   callback_enabled: boolean;
@@ -138,6 +139,7 @@ const EMPTY_FORM: BotForm = {
   phone_number_id: null,
   plivo_caller_id: "",
   twilio_phone_number: "",
+  max_concurrent_calls: 5,
   circuit_breaker_enabled: true,
   circuit_breaker_threshold: 3,
   callback_enabled: false,
@@ -222,6 +224,7 @@ function botToForm(bot: BotConfig): BotForm {
     phone_number_id: bot.phone_number_id || null,
     plivo_caller_id: bot.plivo_caller_id,
     twilio_phone_number: bot.twilio_phone_number || "",
+    max_concurrent_calls: bot.max_concurrent_calls ?? 5,
     circuit_breaker_enabled: bot.circuit_breaker_enabled ?? true,
     circuit_breaker_threshold: bot.circuit_breaker_threshold ?? 3,
     callback_enabled: bot.callback_enabled ?? false,
@@ -1976,6 +1979,43 @@ export default function BotEditorPage() {
                                 sec
                               </span>
                             </div>
+                          </div>
+                        </div>
+                      </Section>
+
+                      <Separator />
+
+                      <Section
+                        title="Concurrency"
+                        description="Maximum number of simultaneous active calls for this bot."
+                      >
+                        <div className="flex items-center justify-between rounded-lg border p-4">
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium">
+                              Max Concurrent Calls
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Limits how many calls can run at the same time.
+                              Lower this if you notice audio quality drops under load.
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type="number"
+                              value={form.max_concurrent_calls}
+                              onChange={(e) =>
+                                setField(
+                                  "max_concurrent_calls",
+                                  Math.max(1, Math.min(50, parseInt(e.target.value) || 5)),
+                                )
+                              }
+                              min={1}
+                              max={50}
+                              className="w-20 text-center"
+                            />
+                            <span className="text-sm text-muted-foreground">
+                              calls
+                            </span>
                           </div>
                         </div>
                       </Section>

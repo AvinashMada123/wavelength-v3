@@ -68,6 +68,7 @@ class BotConfig(Base):
     sequence_template_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("sequence_templates.id", ondelete="SET NULL"), nullable=True
     )
+    max_concurrent_calls: Mapped[int] = mapped_column(Integer, nullable=False, server_default="5")
     call_memory_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     call_memory_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="3")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")

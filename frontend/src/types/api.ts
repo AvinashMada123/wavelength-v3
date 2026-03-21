@@ -48,6 +48,7 @@ export interface BotConfig {
   callback_timezone: string;
   callback_window_start: number;
   callback_window_end: number;
+  max_concurrent_calls: number;
   call_memory_enabled: boolean;
   call_memory_count: number;
   bot_switch_targets: Array<{ id: string; target_bot_id: string; description: string }>;

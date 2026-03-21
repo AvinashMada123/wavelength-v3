@@ -290,16 +290,22 @@ async def _process_batch(loader: BotConfigLoader):
             if await circuit_breaker.is_open(db, bot_id):
                 continue
 
-            # Check how many are currently processing for this bot
+            # Check how many calls are actively running pipelines for this bot
+            # Count both queue "processing" AND call_logs "in_progress" to catch
+            # calls that connected but are still on a WebSocket pipeline
             result = await db.execute(
-                select(func.count()).select_from(QueuedCall).where(
-                    QueuedCall.bot_id == bot_id,
-                    QueuedCall.status == "processing",
+                select(func.count()).select_from(CallLog).where(
+                    CallLog.bot_id == bot_id,
+                    CallLog.status.in_(["initiated", "ringing", "in_progress"]),
                 )
             )
             active = result.scalar() or 0
 
-            slots_available = MAX_CONCURRENT_PER_BOT - active
+            # Use per-bot concurrency limit from config, fallback to global env var
+            bot_config = await loader.get(str(bot_id))
+            bot_max = getattr(bot_config, "max_concurrent_calls", MAX_CONCURRENT_PER_BOT) if bot_config else MAX_CONCURRENT_PER_BOT
+
+            slots_available = bot_max - active
             if slots_available <= 0:
                 continue
 
