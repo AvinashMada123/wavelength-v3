@@ -43,7 +43,7 @@ async def list_calls(
     contact_phone: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
-    limit: int = 10000,
+    limit: int = 50,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_current_org),
@@ -100,7 +100,7 @@ async def list_calls(
 async def export_calls(
     bot_id: uuid.UUID | None = None,
     goal_outcome: str | None = None,
-    limit: int = 10000,
+    limit: int = 1000,
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_current_org),
 ):

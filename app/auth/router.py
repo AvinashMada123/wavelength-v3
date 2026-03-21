@@ -233,8 +233,12 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh(req: RefreshRequest):
-    """Exchange a valid refresh token for a new access token."""
+async def refresh(req: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    """Exchange a valid refresh token for a new access token.
+
+    Verifies the user still exists and is active before issuing a new token.
+    A suspended/deleted user cannot refresh even with a valid refresh token.
+    """
     try:
         payload = decode_token(req.refresh_token)
         if payload.get("type") != "refresh":
@@ -254,6 +258,22 @@ async def refresh(req: RefreshRequest):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token",
+        )
+
+    # Verify user still exists and is active
+    result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User no longer exists",
+        )
+
+    if user.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is not active",
         )
 
     access_token = create_access_token({"sub": user_id})
@@ -486,7 +506,7 @@ async def list_user_orgs(
     is_super = await db.execute(
         select(UserOrg).where(UserOrg.user_id == user.id, UserOrg.role == "super_admin")
     )
-    is_super_admin = is_super.scalar_one_or_none() is not None or user.role == "super_admin"
+    is_super_admin = is_super.scalars().first() is not None or user.role == "super_admin"
 
     if is_super_admin:
         # Super admins can see ALL organizations
@@ -548,7 +568,7 @@ async def switch_org(
     is_super_result = await db.execute(
         select(UserOrg).where(UserOrg.user_id == user.id, UserOrg.role == "super_admin")
     )
-    is_super_admin = is_super_result.scalar_one_or_none() is not None or user.role == "super_admin"
+    is_super_admin = is_super_result.scalars().first() is not None or user.role == "super_admin"
 
     if is_super_admin:
         # Super admin can switch to any org — ensure membership exists
