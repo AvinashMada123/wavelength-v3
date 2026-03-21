@@ -133,13 +133,17 @@ export function fetchCallLogs(params?: {
   status?: string;
   dateFrom?: string;
   dateTo?: string;
-}): Promise<CallLog[]> {
+  limit?: number;
+  offset?: number;
+}): Promise<{ items: CallLog[]; total: number }> {
   const sp = new URLSearchParams();
   if (params?.botId) sp.set("bot_id", params.botId);
   if (params?.goalOutcome) sp.set("goal_outcome", params.goalOutcome);
   if (params?.status) sp.set("status", params.status);
   if (params?.dateFrom) sp.set("date_from", params.dateFrom);
   if (params?.dateTo) sp.set("date_to", params.dateTo);
+  if (params?.limit != null) sp.set("limit", String(params.limit));
+  if (params?.offset != null) sp.set("offset", String(params.offset));
   const qs = sp.toString();
   return apiFetch(`/api/calls${qs ? `?${qs}` : ""}`);
 }

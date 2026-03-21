@@ -161,6 +161,7 @@ function CallLogsPageInner() {
 
   const [bots, setBots] = useState<BotConfig[]>([]);
   const [calls, setCalls] = useState<CallLog[]>([]);
+  const [totalCalls, setTotalCalls] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -199,14 +200,17 @@ function CallLogsPageInner() {
         status: filterStatus !== "all" ? filterStatus : undefined,
         dateFrom: dateRange.from ? new Date(dateRange.from).toISOString() : undefined,
         dateTo: dateRange.to ? new Date(dateRange.to).toISOString() : undefined,
+        limit: PAGE_SIZE,
+        offset: page * PAGE_SIZE,
       });
-      setCalls(data);
+      setCalls(data.items);
+      setTotalCalls(data.total);
     } catch {
       // silent
     } finally {
       setLoading(false);
     }
-  }, [filterBotId, filterGoalOutcome, filterStatus, dateRange]);
+  }, [filterBotId, filterGoalOutcome, filterStatus, dateRange, page]);
 
   useEffect(() => {
     fetchBots().then(setBots).catch(() => {});
@@ -312,11 +316,8 @@ function CallLogsPageInner() {
     return result;
   }, [calls, filterStatus, searchQuery, dateRange, transcriptSearch]);
 
-  const totalPages = Math.ceil(filteredCalls.length / PAGE_SIZE);
-  const paginatedCalls = filteredCalls.slice(
-    page * PAGE_SIZE,
-    (page + 1) * PAGE_SIZE
-  );
+  const totalPages = Math.ceil(totalCalls / PAGE_SIZE);
+  const paginatedCalls = filteredCalls;
 
   // Reset page when filters change
   useEffect(() => {
@@ -825,12 +826,12 @@ function CallLogsPageInner() {
                   </Table>
 
                   {/* Pagination */}
-                  {totalPages > 1 && (
+                  {totalPages > 0 && (
                     <div className="flex items-center justify-between pt-2">
                       <p className="text-sm text-muted-foreground">
                         Showing {page * PAGE_SIZE + 1}-
-                        {Math.min((page + 1) * PAGE_SIZE, filteredCalls.length)}{" "}
-                        of {filteredCalls.length} calls
+                        {Math.min((page + 1) * PAGE_SIZE, totalCalls)}{" "}
+                        of {totalCalls} calls
                       </p>
                       <div className="flex items-center gap-1">
                         <Button

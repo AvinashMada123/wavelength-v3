@@ -265,7 +265,7 @@ describe("convenience API wrappers", () => {
   });
 
   it("fetchCallLogs builds query string", async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse([]));
+    mockFetch.mockResolvedValueOnce(jsonResponse({ items: [], total: 0 }));
     await fetchCallLogs({ botId: "bot-1", goalOutcome: "completed" });
     expect(mockFetch.mock.calls[0][0]).toBe(
       "/api/calls?bot_id=bot-1&goal_outcome=completed"
@@ -273,9 +273,16 @@ describe("convenience API wrappers", () => {
   });
 
   it("fetchCallLogs without params has no query string", async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse([]));
+    mockFetch.mockResolvedValueOnce(jsonResponse({ items: [], total: 0 }));
     await fetchCallLogs();
     expect(mockFetch.mock.calls[0][0]).toBe("/api/calls");
+  });
+
+  it("fetchCallLogs passes limit and offset for pagination", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ items: [], total: 100 }));
+    const result = await fetchCallLogs({ limit: 25, offset: 50 });
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/calls?limit=25&offset=50");
+    expect(result.total).toBe(100);
   });
 });
 

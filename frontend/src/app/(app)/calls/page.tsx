@@ -128,8 +128,8 @@ export default function CallsPage() {
 
   const loadRecentCalls = useCallback(async () => {
     try {
-      const data = await fetchCallLogs();
-      setRecentCalls(data.slice(0, RECENT_CALLS_COUNT));
+      const data = await fetchCallLogs({ limit: RECENT_CALLS_COUNT });
+      setRecentCalls(data.items);
     } catch {
       // silent polling
     } finally {

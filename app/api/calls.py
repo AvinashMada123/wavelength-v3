@@ -35,7 +35,7 @@ def set_dependencies(loader: BotConfigLoader):
     bot_config_loader = loader
 
 
-@router.get("", response_model=list[CallLogListResponse])
+@router.get("")
 async def list_calls(
     bot_id: uuid.UUID | None = None,
     status: str | None = None,
@@ -49,38 +49,44 @@ async def list_calls(
     org_id: uuid.UUID = Depends(get_current_org),
 ):
     from datetime import datetime as dt
+    from sqlalchemy import func
 
-    # Always left-join analytics so we can return sentiment/score/interest
-    query = (
+    # Build base filter conditions (shared by count + data queries)
+    base_query = (
         select(CallLog, CallAnalytics)
         .outerjoin(CallAnalytics, CallAnalytics.call_log_id == CallLog.id)
         .where(CallLog.org_id == org_id)
-        .order_by(CallLog.created_at.desc())
     )
     if bot_id:
-        query = query.where(CallLog.bot_id == bot_id)
+        base_query = base_query.where(CallLog.bot_id == bot_id)
     if status:
-        query = query.where(CallLog.status == status)
+        base_query = base_query.where(CallLog.status == status)
     if goal_outcome:
-        query = query.where(CallAnalytics.goal_outcome == goal_outcome)
+        base_query = base_query.where(CallAnalytics.goal_outcome == goal_outcome)
     if contact_phone:
-        query = query.where(CallLog.contact_phone == contact_phone)
+        base_query = base_query.where(CallLog.contact_phone == contact_phone)
     if date_from:
         try:
-            query = query.where(CallLog.created_at >= dt.fromisoformat(date_from))
+            base_query = base_query.where(CallLog.created_at >= dt.fromisoformat(date_from))
         except ValueError:
             pass
     if date_to:
         try:
-            query = query.where(CallLog.created_at <= dt.fromisoformat(date_to))
+            base_query = base_query.where(CallLog.created_at <= dt.fromisoformat(date_to))
         except ValueError:
             pass
-    query = query.offset(offset).limit(limit)
-    result = await db.execute(query)
+
+    # Count total matching rows
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total = (await db.execute(count_query)).scalar() or 0
+
+    # Fetch paginated data
+    data_query = base_query.order_by(CallLog.created_at.desc()).offset(offset).limit(limit)
+    result = await db.execute(data_query)
     rows = result.all()
 
     # Build response with analytics attached
-    response = []
+    items = []
     for call_log, analytics in rows:
         data = CallLogListResponse.model_validate(call_log)
         if analytics:
@@ -92,8 +98,8 @@ async def list_calls(
                 captured_data=analytics.captured_data,
                 has_red_flags=analytics.has_red_flags,
             )
-        response.append(data)
-    return response
+        items.append(data)
+    return {"items": items, "total": total}
 
 
 @router.get("/export", response_model=list[CallLogResponse])

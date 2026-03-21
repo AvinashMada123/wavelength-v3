@@ -20,7 +20,10 @@ export const callKeys = {
 export function useCallLogs(filters?: { botId?: string; goalOutcome?: string }) {
   return useQuery({
     queryKey: callKeys.list(filters ?? {}),
-    queryFn: () => fetchCallLogs(filters),
+    queryFn: async () => {
+      const res = await fetchCallLogs(filters);
+      return res.items;
+    },
   });
 }
 
