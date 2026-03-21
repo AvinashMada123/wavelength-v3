@@ -45,6 +45,7 @@ def _resolve_greeting_text(ctx: CallContext, bot_config: BotConfig) -> str:
     else:
         greeting_template = getattr(bot_config, "greeting_template", None) or _DEFAULT_GREETING
     _greeting_vars = {
+        "name": ctx.contact_name or "there",
         "contact_name": ctx.contact_name or "there",
         "customer_name": ctx.contact_name or "there",
         "agent_name": bot_config.agent_name,
