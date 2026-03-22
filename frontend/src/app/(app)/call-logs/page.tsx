@@ -175,6 +175,7 @@ function CallLogsPageInner() {
 
   // Selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectAllMatching, setSelectAllMatching] = useState(false);
 
   // Transcript search
   const [transcriptSearch, setTranscriptSearch] = useState("");
@@ -323,6 +324,7 @@ function CallLogsPageInner() {
   useEffect(() => {
     setPage(0);
     setSelectedIds(new Set());
+    setSelectAllMatching(false);
   }, [filterBotId, filterStatus, filterGoalOutcome, searchQuery, dateRange, transcriptSearch]);
 
   // ---------- Selection ----------
@@ -334,6 +336,7 @@ function CallLogsPageInner() {
     paginatedCalls.some((c) => selectedIds.has(c.id)) && !allOnPageSelected;
 
   function toggleSelectAll() {
+    setSelectAllMatching(false);
     if (allOnPageSelected) {
       const next = new Set(selectedIds);
       for (const c of paginatedCalls) next.delete(c.id);
@@ -346,6 +349,7 @@ function CallLogsPageInner() {
   }
 
   function toggleSelect(id: string) {
+    setSelectAllMatching(false);
     const next = new Set(selectedIds);
     if (next.has(id)) next.delete(id);
     else next.add(id);
@@ -385,7 +389,7 @@ function CallLogsPageInner() {
         to.setHours(23, 59, 59, 999);
         toExport = toExport.filter((c) => new Date(c.created_at) <= to);
       }
-      if (selectedIds.size > 0) {
+      if (selectedIds.size > 0 && !selectAllMatching) {
         toExport = toExport.filter((c) => selectedIds.has(c.id));
       }
       exportCallsCSV(toExport);
@@ -606,38 +610,49 @@ function CallLogsPageInner() {
                     className="gap-1.5 ml-auto"
                   >
                     <Download className="h-3.5 w-3.5" />
-                    {selectedIds.size > 0
-                      ? `Export ${selectedIds.size} selected`
-                      : "Export CSV"}
+                    {selectAllMatching
+                      ? `Export all ${totalCalls}`
+                      : selectedIds.size > 0
+                        ? `Export ${selectedIds.size} selected`
+                        : "Export CSV"}
                   </Button>
                 </div>
 
                 {/* Selection + count indicator */}
                 {(selectedIds.size > 0 ||
+                  selectAllMatching ||
                   (hasFilters && filteredCalls.length !== calls.length)) && (
                   <div className="flex items-center gap-3">
-                    {selectedIds.size > 0 && (
+                    {(selectedIds.size > 0 || selectAllMatching) && (
                       <div className="flex items-center gap-2 text-xs">
                         <span className="text-violet-400 font-medium">
-                          {selectedIds.size} selected
+                          {selectAllMatching
+                            ? `All ${totalCalls} selected`
+                            : `${selectedIds.size} selected`}
                         </span>
+                        {!selectAllMatching && totalCalls > filteredCalls.length && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 text-xs px-2"
+                            onClick={() => {
+                              setSelectAllMatching(true);
+                              setSelectedIds(
+                                new Set(filteredCalls.map((c) => c.id))
+                              );
+                            }}
+                          >
+                            Select all {totalCalls}
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-6 text-xs px-2"
-                          onClick={() =>
-                            setSelectedIds(
-                              new Set(filteredCalls.map((c) => c.id))
-                            )
-                          }
-                        >
-                          Select all {filteredCalls.length}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 text-xs px-2"
-                          onClick={() => setSelectedIds(new Set())}
+                          onClick={() => {
+                            setSelectedIds(new Set());
+                            setSelectAllMatching(false);
+                          }}
                         >
                           Clear
                         </Button>
@@ -645,7 +660,8 @@ function CallLogsPageInner() {
                     )}
                     {hasFilters &&
                       filteredCalls.length !== calls.length &&
-                      selectedIds.size === 0 && (
+                      selectedIds.size === 0 &&
+                      !selectAllMatching && (
                         <p className="text-xs text-muted-foreground">
                           Showing {filteredCalls.length} of {calls.length} calls
                         </p>
