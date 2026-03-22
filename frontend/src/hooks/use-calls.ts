@@ -38,7 +38,7 @@ export function useCallDetail(callId: string) {
 export function useExportCallLogs() {
   return useMutation({
     mutationFn: (filters?: { botId?: string; goalOutcome?: string }) =>
-      exportCallLogs(filters?.botId, filters?.goalOutcome),
+      exportCallLogs({ botId: filters?.botId, goalOutcome: filters?.goalOutcome }),
   });
 }
 
