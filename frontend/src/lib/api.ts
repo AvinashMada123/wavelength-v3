@@ -152,10 +152,21 @@ export function fetchCallDetail(callId: string): Promise<CallLog> {
   return apiFetch(`/api/calls/${callId}`);
 }
 
-export function exportCallLogs(botId?: string, goalOutcome?: string): Promise<CallLog[]> {
+export function exportCallLogs(params?: {
+  botId?: string;
+  goalOutcome?: string;
+  status?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  limit?: number;
+}): Promise<CallLog[]> {
   const sp = new URLSearchParams();
-  if (botId) sp.set("bot_id", botId);
-  if (goalOutcome) sp.set("goal_outcome", goalOutcome);
+  if (params?.botId) sp.set("bot_id", params.botId);
+  if (params?.goalOutcome) sp.set("goal_outcome", params.goalOutcome);
+  if (params?.status) sp.set("status", params.status);
+  if (params?.dateFrom) sp.set("date_from", params.dateFrom);
+  if (params?.dateTo) sp.set("date_to", params.dateTo);
+  if (params?.limit != null) sp.set("limit", String(params.limit));
   const qs = sp.toString();
   return apiFetch(`/api/calls/export${qs ? `?${qs}` : ""}`);
 }

@@ -361,15 +361,15 @@ function CallLogsPageInner() {
   async function handleExport() {
     try {
       toast.info("Fetching full call data for export...");
-      const fullCalls = await exportCallLogs(
-        filterBotId !== "all" ? filterBotId : undefined,
-        filterGoalOutcome !== "all" ? filterGoalOutcome : undefined
-      );
-      // Apply client-side filters (status, search, date) to the full data
+      const fullCalls = await exportCallLogs({
+        botId: filterBotId !== "all" ? filterBotId : undefined,
+        goalOutcome: filterGoalOutcome !== "all" ? filterGoalOutcome : undefined,
+        status: filterStatus !== "all" ? filterStatus : undefined,
+        dateFrom: dateRange.from ? new Date(dateRange.from).toISOString() : undefined,
+        dateTo: dateRange.to ? new Date(dateRange.to).toISOString() : undefined,
+      });
       let toExport = fullCalls;
-      if (filterStatus !== "all") {
-        toExport = toExport.filter((c) => c.status === filterStatus);
-      }
+      // Client-side search filter (not available server-side)
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         toExport = toExport.filter(
@@ -379,16 +379,7 @@ function CallLogsPageInner() {
             (c.summary && c.summary.toLowerCase().includes(q))
         );
       }
-      if (dateRange.from) {
-        const from = new Date(dateRange.from);
-        from.setHours(0, 0, 0, 0);
-        toExport = toExport.filter((c) => new Date(c.created_at) >= from);
-      }
-      if (dateRange.to) {
-        const to = new Date(dateRange.to);
-        to.setHours(23, 59, 59, 999);
-        toExport = toExport.filter((c) => new Date(c.created_at) <= to);
-      }
+      // Filter by selection only if not "select all matching"
       if (selectedIds.size > 0 && !selectAllMatching) {
         toExport = toExport.filter((c) => selectedIds.has(c.id));
       }

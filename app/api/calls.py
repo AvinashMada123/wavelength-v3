@@ -109,29 +109,40 @@ async def list_calls(
 async def export_calls(
     bot_id: uuid.UUID | None = None,
     goal_outcome: str | None = None,
-    limit: int = 1000,
+    status: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int = 5000,
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_current_org),
 ):
     """Full call logs with metadata (transcript + recording) for CSV export."""
+    from datetime import datetime as dt
+
+    query = (
+        select(CallLog, BotConfig.agent_name.label("bot_name"))
+        .outerjoin(BotConfig, BotConfig.id == CallLog.bot_id)
+        .where(CallLog.org_id == org_id)
+    )
     if goal_outcome:
-        query = (
-            select(CallLog, BotConfig.agent_name.label("bot_name"))
-            .join(CallAnalytics, CallAnalytics.call_log_id == CallLog.id)
-            .outerjoin(BotConfig, BotConfig.id == CallLog.bot_id)
-            .where(CallAnalytics.goal_outcome == goal_outcome, CallLog.org_id == org_id)
-            .order_by(CallLog.created_at.desc())
-        )
-    else:
-        query = (
-            select(CallLog, BotConfig.agent_name.label("bot_name"))
-            .outerjoin(BotConfig, BotConfig.id == CallLog.bot_id)
-            .where(CallLog.org_id == org_id)
-            .order_by(CallLog.created_at.desc())
+        query = query.join(CallAnalytics, CallAnalytics.call_log_id == CallLog.id).where(
+            CallAnalytics.goal_outcome == goal_outcome
         )
     if bot_id:
         query = query.where(CallLog.bot_id == bot_id)
-    query = query.limit(limit)
+    if status:
+        query = query.where(CallLog.status == status)
+    if date_from:
+        try:
+            query = query.where(CallLog.created_at >= dt.fromisoformat(date_from))
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            query = query.where(CallLog.created_at <= dt.fromisoformat(date_to))
+        except ValueError:
+            pass
+    query = query.order_by(CallLog.created_at.desc()).limit(limit)
     result = await db.execute(query)
     rows = result.all()
     items = []
