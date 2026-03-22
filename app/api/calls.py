@@ -14,6 +14,7 @@ from app.auth.dependencies import get_current_user, get_current_org
 from app.bot_config.loader import BotConfigLoader
 from app.database import get_db
 from app.services.billing import check_org_credits
+from app.models.bot_config import BotConfig
 from app.models.call_log import CallLog
 from app.models.organization import Organization
 from app.models.call_analytics import CallAnalytics
@@ -53,8 +54,9 @@ async def list_calls(
 
     # Build base filter conditions (shared by count + data queries)
     base_query = (
-        select(CallLog, CallAnalytics)
+        select(CallLog, CallAnalytics, BotConfig.agent_name.label("bot_name"))
         .outerjoin(CallAnalytics, CallAnalytics.call_log_id == CallLog.id)
+        .outerjoin(BotConfig, BotConfig.id == CallLog.bot_id)
         .where(CallLog.org_id == org_id)
     )
     if bot_id:
@@ -87,8 +89,9 @@ async def list_calls(
 
     # Build response with analytics attached
     items = []
-    for call_log, analytics in rows:
+    for call_log, analytics, bot_name in rows:
         data = CallLogListResponse.model_validate(call_log)
+        data.bot_name = bot_name
         if analytics:
             data.analytics = CallLogListAnalytics(
                 goal_outcome=analytics.goal_outcome,
@@ -113,18 +116,30 @@ async def export_calls(
     """Full call logs with metadata (transcript + recording) for CSV export."""
     if goal_outcome:
         query = (
-            select(CallLog)
+            select(CallLog, BotConfig.agent_name.label("bot_name"))
             .join(CallAnalytics, CallAnalytics.call_log_id == CallLog.id)
+            .outerjoin(BotConfig, BotConfig.id == CallLog.bot_id)
             .where(CallAnalytics.goal_outcome == goal_outcome, CallLog.org_id == org_id)
             .order_by(CallLog.created_at.desc())
         )
     else:
-        query = select(CallLog).where(CallLog.org_id == org_id).order_by(CallLog.created_at.desc())
+        query = (
+            select(CallLog, BotConfig.agent_name.label("bot_name"))
+            .outerjoin(BotConfig, BotConfig.id == CallLog.bot_id)
+            .where(CallLog.org_id == org_id)
+            .order_by(CallLog.created_at.desc())
+        )
     if bot_id:
         query = query.where(CallLog.bot_id == bot_id)
     query = query.limit(limit)
     result = await db.execute(query)
-    return result.scalars().all()
+    rows = result.all()
+    items = []
+    for call_log, bot_name in rows:
+        data = CallLogResponse.model_validate(call_log)
+        data.bot_name = bot_name
+        items.append(data)
+    return items
 
 
 @router.get("/{call_id}", response_model=CallLogResponse)
@@ -133,10 +148,15 @@ async def get_call(
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_current_org),
 ):
-    result = await db.execute(select(CallLog).where(CallLog.id == call_id, CallLog.org_id == org_id))
-    call_log = result.scalar_one_or_none()
-    if not call_log:
+    result = await db.execute(
+        select(CallLog, BotConfig.agent_name.label("bot_name"))
+        .outerjoin(BotConfig, BotConfig.id == CallLog.bot_id)
+        .where(CallLog.id == call_id, CallLog.org_id == org_id)
+    )
+    row = result.one_or_none()
+    if not row:
         raise HTTPException(status_code=404, detail="Call not found")
+    call_log, bot_name = row
 
     # Attach analytics if available
     analytics_result = await db.execute(
@@ -145,6 +165,7 @@ async def get_call(
     analytics_row = analytics_result.scalar_one_or_none()
 
     response = CallLogResponse.model_validate(call_log)
+    response.bot_name = bot_name
     if analytics_row:
         response.analytics = CallAnalyticsResponse(
             goal_outcome=analytics_row.goal_outcome,

@@ -341,6 +341,7 @@ export interface CallAnalyticsData {
 export interface CallLog {
   id: string;
   bot_id: string;
+  bot_name: string | null;
   call_sid: string;
   contact_name: string;
   contact_phone: string;

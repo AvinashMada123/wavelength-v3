@@ -313,6 +313,7 @@ class CallLogListResponse(BaseModel):
     """Light response for list endpoints — includes key analytics."""
     id: uuid.UUID
     bot_id: uuid.UUID
+    bot_name: str | None = None
     call_sid: str
     contact_name: str
     contact_phone: str
@@ -346,6 +347,7 @@ class CallLogResponse(BaseModel):
     """Full response with metadata — for single call detail."""
     id: uuid.UUID
     bot_id: uuid.UUID
+    bot_name: str | None = None
     call_sid: str
     contact_name: str
     contact_phone: str

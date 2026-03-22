@@ -1,13 +1,13 @@
 import type { CallLog } from "@/types/api";
 
-function escapeCsv(value: string): string {
+export function escapeCsv(value: string): string {
   if (value.includes(",") || value.includes('"') || value.includes("\n")) {
     return `"${value.replace(/"/g, '""')}"`;
   }
   return value;
 }
 
-function fmtDate(iso: string | null): string {
+export function fmtDate(iso: string | null): string {
   if (!iso) return "";
   return new Date(iso).toLocaleString("en-IN", {
     year: "numeric",
@@ -18,7 +18,7 @@ function fmtDate(iso: string | null): string {
   });
 }
 
-function formatTranscript(
+export function formatTranscript(
   transcript?: Array<{ role: string; content: string }>
 ): string {
   if (!transcript || transcript.length === 0) return "";
@@ -28,6 +28,7 @@ function formatTranscript(
 }
 
 const HEADERS = [
+  "Bot Name",
   "Contact Name",
   "Phone",
   "Status",
@@ -46,8 +47,9 @@ const HEADERS = [
   "Created At",
 ];
 
-function callToRow(call: CallLog): string[] {
+export function callToRow(call: CallLog): string[] {
   return [
+    call.bot_name || "",
     call.contact_name,
     call.contact_phone,
     call.status,
