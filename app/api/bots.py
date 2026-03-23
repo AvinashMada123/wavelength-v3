@@ -48,6 +48,18 @@ async def create_bot(
         if req.stt_provider in ADMIN_ONLY_STT:
             req.stt_provider = "deepgram"
 
+    # Cross-validate callback_schedule
+    if req.callback_schedule:
+        for i, step in enumerate(req.callback_schedule.steps):
+            if step.preferred_window:
+                pw_start, pw_end = step.preferred_window
+                if pw_end <= req.callback_window_start or pw_start >= req.callback_window_end:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Step {i+1} preferred window [{pw_start}-{pw_end}] "
+                               f"is entirely outside calling window [{req.callback_window_start}-{req.callback_window_end}]"
+                    )
+
     bot = BotConfig(
         org_id=org_id,
         agent_name=req.agent_name,
@@ -126,6 +138,30 @@ async def update_bot(
             update_data["tts_provider"] = "sarvam"
         if update_data.get("stt_provider") in ADMIN_ONLY_STT:
             update_data["stt_provider"] = "deepgram"
+
+    # Cross-validate callback_schedule preferred_windows against calling window
+    if "callback_schedule" in update_data and update_data["callback_schedule"]:
+        from app.models.schemas import CallbackSchedule
+        schedule_data = update_data["callback_schedule"]
+        if isinstance(schedule_data, dict):
+            schedule = CallbackSchedule(**schedule_data)
+        else:
+            schedule = schedule_data
+
+        w_start = update_data.get("callback_window_start", bot.callback_window_start)
+        w_end = update_data.get("callback_window_end", bot.callback_window_end)
+
+        for i, step in enumerate(schedule.steps):
+            if step.preferred_window:
+                pw_start, pw_end = step.preferred_window
+                if pw_end <= w_start or pw_start >= w_end:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Step {i+1} preferred window [{pw_start}-{pw_end}] "
+                               f"is entirely outside calling window [{w_start}-{w_end}]"
+                    )
+
+        update_data["callback_schedule"] = schedule.model_dump()
 
     # Validate goal_config if provided as raw dict (PATCH may send raw JSON)
     if "goal_config" in update_data and update_data["goal_config"] is not None:
