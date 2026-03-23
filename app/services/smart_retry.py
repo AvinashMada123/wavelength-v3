@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 
-def compute_scheduled_at(step: dict, bot_config) -> datetime:
+def compute_scheduled_at(step: dict, bot_config, *, _now_utc: datetime | None = None) -> datetime:
     """Compute UTC datetime for a retry based on step config.
 
     For delay_hours: base = now + delay. If preferred_window is set and
@@ -22,7 +22,7 @@ def compute_scheduled_at(step: dict, bot_config) -> datetime:
     Final guardrail: clamp to bot's global callback_window.
     """
     tz = ZoneInfo(getattr(bot_config, "callback_timezone", None) or "Asia/Kolkata")
-    now_utc = datetime.now(timezone.utc)
+    now_utc = _now_utc or datetime.now(timezone.utc)
     now_local = now_utc.astimezone(tz)
     window = step.get("preferred_window")
 
