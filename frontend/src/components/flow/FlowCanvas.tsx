@@ -134,8 +134,8 @@ interface FlowCanvasProps {
 
 export function FlowCanvas({ flowId, flow, version, bots, onPublished }: FlowCanvasProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
-  const [nodes, setNodes, onNodesChange] = useNodesState(apiNodesToRF(version.nodes));
-  const [edges, setEdges, onEdgesChange] = useEdgesState(apiEdgesToRF(version.edges));
+  const [nodes, setNodes, onNodesChange] = useNodesState(apiNodesToRF(version.nodes ?? []));
+  const [edges, setEdges, onEdgesChange] = useEdgesState(apiEdgesToRF(version.edges ?? []));
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);

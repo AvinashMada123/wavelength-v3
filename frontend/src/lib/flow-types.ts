@@ -162,8 +162,9 @@ export interface FlowVersion {
   flow_id: string;
   version_number: number;
   status: "draft" | "published" | "archived";
-  nodes: FlowNodeData[];
-  edges: FlowEdgeData[];
+  is_locked?: boolean;
+  nodes?: FlowNodeData[];
+  edges?: FlowEdgeData[];
   created_at: string;
   published_at: string | null;
 }
