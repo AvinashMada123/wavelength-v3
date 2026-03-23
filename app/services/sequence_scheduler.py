@@ -6,10 +6,13 @@ from datetime import datetime, timezone
 import structlog
 from sqlalchemy import select, and_
 
+import uuid
+
 from app.database import get_db_session
+from app.models.flow import FlowEvent, FlowInstance, FlowTouchpoint
 from app.models.organization import Organization
 from app.models.sequence import SequenceTouchpoint, SequenceInstance
-from app.services import sequence_engine
+from app.services import flow_engine, sequence_engine
 from app.services.business_hours import is_within_business_hours, next_available_time
 from app.services.rate_limiter import RateLimiter
 
@@ -44,15 +47,29 @@ async def stop():
 
 
 async def _scheduler_loop():
-    """Main loop — polls DB for due touchpoints."""
+    """Main loop — polls DB for due touchpoints (linear + flow)."""
     cycle_count = 0
     while not _shutdown:
         try:
-            await _process_batch()
+            await _process_batch()  # Linear engine
         except asyncio.CancelledError:
             break
         except Exception:
             logger.exception("sequence_scheduler_error")
+
+        try:
+            await _process_flow_batch()  # Flow engine
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.exception("flow_scheduler_error")
+
+        try:
+            await _process_flow_events()  # Wait-for-event consumption
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.exception("flow_event_scheduler_error")
 
         # Every 5th cycle, retry failed touchpoints that haven't hit max retries
         cycle_count += 1
@@ -79,6 +96,7 @@ async def _process_batch():
                 SequenceTouchpoint.status.in_(["pending", "scheduled"]),
                 SequenceTouchpoint.scheduled_at <= now,
                 SequenceInstance.status == "active",
+                SequenceInstance.engine_type == "linear",
             )
             .order_by(SequenceTouchpoint.scheduled_at.asc())
             .limit(MAX_CONCURRENT * 2)  # Fetch more than we process to account for skips
@@ -172,6 +190,107 @@ async def _process_batch():
 
         # Release the original FOR UPDATE lock
         await db.commit()
+
+
+async def _process_flow_batch() -> None:
+    """Find and process all due flow touchpoints."""
+    now = datetime.now(timezone.utc)
+
+    async with get_db_session() as db:
+        result = await db.execute(
+            select(FlowTouchpoint)
+            .join(FlowInstance, FlowTouchpoint.instance_id == FlowInstance.id)
+            .where(
+                FlowTouchpoint.status == "pending",
+                FlowTouchpoint.scheduled_at <= now,
+                FlowInstance.status == "active",
+            )
+            .order_by(FlowTouchpoint.scheduled_at.asc())
+            .limit(MAX_CONCURRENT * 2)
+            .with_for_update(skip_locked=True)
+        )
+        touchpoints = result.scalars().all()
+
+        if not touchpoints:
+            return
+
+        logger.info("flow_scheduler_batch", count=len(touchpoints))
+
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+
+        async def _process_one_flow(tp_id: uuid.UUID) -> None:
+            async with semaphore:
+                async with get_db_session() as tp_db:
+                    tp_result = await tp_db.execute(
+                        select(FlowTouchpoint)
+                        .where(FlowTouchpoint.id == tp_id)
+                        .with_for_update(skip_locked=True)
+                    )
+                    tp = tp_result.scalar_one_or_none()
+                    if not tp or tp.status != "pending":
+                        return
+
+                    try:
+                        await flow_engine.execute_touchpoint(tp_db, tp)
+                    except Exception:
+                        logger.exception(
+                            "flow_touchpoint_processing_failed",
+                            touchpoint_id=str(tp_id),
+                        )
+                        tp.status = "failed"
+                        tp.error_message = "Unexpected processing error"
+                        tp.retry_count += 1
+                        await tp_db.commit()
+
+        tasks = [asyncio.create_task(_process_one_flow(tp.id)) for tp in touchpoints]
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await db.commit()
+
+
+async def _process_flow_events() -> None:
+    """Poll FlowEvent for wait_for_event nodes and consume matching events."""
+    async with get_db_session() as db:
+        result = await db.execute(
+            select(FlowEvent).where(FlowEvent.consumed == False)  # noqa: E712
+        )
+        events = result.scalars().all()
+
+        for event in events:
+            tp_result = await db.execute(
+                select(FlowTouchpoint)
+                .join(FlowInstance, FlowTouchpoint.instance_id == FlowInstance.id)
+                .where(
+                    FlowTouchpoint.status == "waiting",
+                    FlowInstance.lead_id == event.lead_id,
+                    FlowInstance.status == "active",
+                )
+            )
+            waiting_tps = tp_result.scalars().all()
+
+            for tp in waiting_tps:
+                node_config = tp.node_snapshot or {}
+                if node_config.get("node_type") != "wait_for_event":
+                    continue
+                config = node_config.get("config", {})
+                if config.get("event_type") == event.event_type:
+                    event.consumed = True
+                    try:
+                        await flow_engine.node_completed(
+                            tp_db=db,
+                            touchpoint=tp,
+                            outcome="event_received",
+                            outcome_data=event.payload,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "flow_event_processing_failed",
+                            event_id=str(event.id),
+                            touchpoint_id=str(tp.id),
+                        )
+                    break  # One event consumed by one touchpoint
+
+        if events:
+            await db.commit()
 
 
 async def _retry_failed():
