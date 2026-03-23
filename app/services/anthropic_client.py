@@ -13,6 +13,9 @@ logger = structlog.get_logger(__name__)
 MODEL_MAP = {
     "claude-sonnet": "claude-sonnet-4-20250514",
     "claude-haiku": "claude-haiku-4-5-20251001",
+    # New IDs used by flow builder AI nodes
+    "claude-sonnet-4-6": "claude-sonnet-4-20250514",
+    "claude-haiku-4-5": "claude-haiku-4-5-20251001",
 }
 
 COST_PER_1M_INPUT = {"claude-sonnet": 3.00, "claude-haiku": 0.80}
