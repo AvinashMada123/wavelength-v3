@@ -172,3 +172,75 @@ async def convert_all_templates(
         failed=failed,
         results=results,
     )
+
+
+@router.get("/linear-instances")
+async def list_active_linear_instances(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    org_id: uuid.UUID = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all active linear instances (for tracking completion before sunset)."""
+    base = select(SequenceInstance).where(
+        SequenceInstance.org_id == org_id,
+        SequenceInstance.status == "active",
+        SequenceInstance.engine_type == "linear",
+    )
+
+    count_q = select(func.count()).select_from(base.subquery())
+    total = (await db.execute(count_q)).scalar_one()
+
+    rows_q = (
+        base.order_by(SequenceInstance.created_at.asc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    result = await db.execute(rows_q)
+    items = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(i.id),
+                "template_id": str(i.template_id),
+                "lead_id": str(i.lead_id),
+                "status": i.status,
+                "started_at": i.started_at.isoformat() if i.started_at else None,
+            }
+            for i in items
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.post("/cancel-all-linear")
+async def cancel_all_linear_instances(
+    org_id: uuid.UUID = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Cancel all remaining active linear instances (use with caution)."""
+    from sqlalchemy import update
+
+    result = await db.execute(
+        update(SequenceInstance)
+        .where(
+            SequenceInstance.org_id == org_id,
+            SequenceInstance.status == "active",
+            SequenceInstance.engine_type == "linear",
+        )
+        .values(status="cancelled")
+        .returning(SequenceInstance.id)
+    )
+    cancelled_ids = result.scalars().all()
+    await db.commit()
+
+    logger.info(
+        "linear_instances_bulk_cancelled",
+        org_id=str(org_id),
+        count=len(cancelled_ids),
+    )
+
+    return {"cancelled": len(cancelled_ids)}

@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +29,18 @@ from app.services.sequence_engine import process_touchpoint
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/sequences", tags=["sequences"])
+
+DEPRECATION_MESSAGE = (
+    "This endpoint is deprecated. Use /api/flows/* instead. "
+    "Migrate existing sequences with POST /api/migration/convert-all"
+)
+
+
+def add_deprecation_warning(response: Response) -> None:
+    """Inject Deprecation and Sunset headers into response."""
+    response.headers["Deprecation"] = "true"
+    response.headers["Sunset"] = "2026-06-01"
+    response.headers["Link"] = '</api/flows>; rel="successor-version"'
 
 
 # ---------------------------------------------------------------------------
@@ -313,8 +325,9 @@ def _record_prompt_usage(org_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/templates", response_model=PaginatedTemplates)
+@router.get("/templates", response_model=PaginatedTemplates, deprecated=True)
 async def list_templates(
+    response: Response,
     is_active: bool | None = Query(None),
     search: str | None = Query(None),
     page: int = Query(1, ge=1),
@@ -322,7 +335,8 @@ async def list_templates(
     org_id: uuid.UUID = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
-    """List sequence templates for the current organisation."""
+    """List sequence templates. DEPRECATED: Use GET /api/flows instead."""
+    add_deprecation_warning(response)
     base = select(SequenceTemplate).where(SequenceTemplate.org_id == org_id)
 
     # Default to showing only active templates (soft-deleted ones hidden)
@@ -344,14 +358,16 @@ async def list_templates(
     return PaginatedTemplates(items=items, total=total, page=page, page_size=page_size)
 
 
-@router.post("/templates", response_model=TemplateListItem, status_code=201)
+@router.post("/templates", response_model=TemplateListItem, status_code=201, deprecated=True)
 async def create_template(
     body: TemplateCreate,
+    response: Response,
     user: User = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new sequence template."""
+    """Create a new sequence template. DEPRECATED: Use POST /api/flows instead."""
+    add_deprecation_warning(response)
     # Duplicate name check
     dup = await db.execute(
         select(SequenceTemplate.id).where(
@@ -378,13 +394,15 @@ async def create_template(
     return template
 
 
-@router.get("/templates/{template_id}", response_model=TemplateResponse)
+@router.get("/templates/{template_id}", response_model=TemplateResponse, deprecated=True)
 async def get_template(
     template_id: uuid.UUID,
+    response: Response,
     org_id: uuid.UUID = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get a template with all its steps."""
+    """Get a template with all its steps. DEPRECATED: Use GET /api/flows/{id} instead."""
+    add_deprecation_warning(response)
     result = await db.execute(
         select(SequenceTemplate).where(
             SequenceTemplate.id == template_id, SequenceTemplate.org_id == org_id
@@ -416,14 +434,16 @@ async def get_template(
     )
 
 
-@router.put("/templates/{template_id}", response_model=TemplateListItem)
+@router.put("/templates/{template_id}", response_model=TemplateListItem, deprecated=True)
 async def update_template(
     template_id: uuid.UUID,
     body: TemplateUpdate,
+    response: Response,
     org_id: uuid.UUID = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update a sequence template."""
+    """Update a sequence template. DEPRECATED: Use PUT /api/flows/{id} instead."""
+    add_deprecation_warning(response)
     result = await db.execute(
         select(SequenceTemplate).where(
             SequenceTemplate.id == template_id, SequenceTemplate.org_id == org_id
@@ -457,13 +477,15 @@ async def update_template(
     return template
 
 
-@router.delete("/templates/{template_id}", status_code=204)
+@router.delete("/templates/{template_id}", status_code=204, deprecated=True)
 async def delete_template(
     template_id: uuid.UUID,
+    response: Response,
     org_id: uuid.UUID = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
-    """Soft delete a template (set is_active=false)."""
+    """Soft delete a template. DEPRECATED: Use DELETE /api/flows/{id} instead."""
+    add_deprecation_warning(response)
     result = await db.execute(
         select(SequenceTemplate).where(
             SequenceTemplate.id == template_id, SequenceTemplate.org_id == org_id
@@ -484,14 +506,16 @@ async def delete_template(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/templates/{template_id}/steps", response_model=StepResponse, status_code=201)
+@router.post("/templates/{template_id}/steps", response_model=StepResponse, status_code=201, deprecated=True)
 async def add_step(
     template_id: uuid.UUID,
     body: StepCreate,
+    response: Response,
     org_id: uuid.UUID = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
-    """Add a step to a template."""
+    """Add a step to a template. DEPRECATED: Use flow node endpoints instead."""
+    add_deprecation_warning(response)
     # Verify template belongs to org
     result = await db.execute(
         select(SequenceTemplate).where(
@@ -534,14 +558,16 @@ async def add_step(
     return step
 
 
-@router.put("/steps/{step_id}", response_model=StepResponse)
+@router.put("/steps/{step_id}", response_model=StepResponse, deprecated=True)
 async def update_step(
     step_id: uuid.UUID,
     body: StepUpdate,
+    response: Response,
     org_id: uuid.UUID = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update a sequence step."""
+    """Update a sequence step. DEPRECATED: Use flow node endpoints instead."""
+    add_deprecation_warning(response)
     result = await db.execute(
         select(SequenceStep)
         .join(SequenceTemplate, SequenceStep.template_id == SequenceTemplate.id)
@@ -571,13 +597,15 @@ async def update_step(
     return step
 
 
-@router.delete("/steps/{step_id}", status_code=204)
+@router.delete("/steps/{step_id}", status_code=204, deprecated=True)
 async def delete_step(
     step_id: uuid.UUID,
+    response: Response,
     org_id: uuid.UUID = Depends(get_current_org),
     db: AsyncSession = Depends(get_db),
 ):
-    """Remove a step from a template."""
+    """Remove a step from a template. DEPRECATED: Use flow node endpoints instead."""
+    add_deprecation_warning(response)
     result = await db.execute(
         select(SequenceStep)
         .join(SequenceTemplate, SequenceStep.template_id == SequenceTemplate.id)
