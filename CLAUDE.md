@@ -4,6 +4,11 @@
 - Read REPO_STRUCTURE.md before exploring the codebase
 - After creating, moving, or deleting files, update REPO_STRUCTURE.md to reflect the change
 
+## Deployment
+- Read docs/DEPLOYMENT.md before any deploy-related work
+- All deploys must be atomic — never run partial deploy steps
+- See docs/DEPLOYMENT.md for exact commands, critical rules, and incident-learned gotchas
+
 ## Testing — Non-Negotiable
 - Every plan and spec MUST include unit tests and integration tests
 - No PR or feature is complete without test coverage
