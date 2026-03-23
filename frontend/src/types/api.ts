@@ -7,6 +7,17 @@ export interface GHLWorkflow {
   trigger_description?: string;
 }
 
+export interface RetryStep {
+  delay_hours?: number;
+  delay_type?: "next_day";
+  preferred_window?: [number, number];
+}
+
+export interface CallbackSchedule {
+  template: "standard" | "aggressive" | "relaxed" | "custom";
+  steps: RetryStep[];
+}
+
 export interface BotConfig {
   id: string;
   agent_name: string;
@@ -48,6 +59,7 @@ export interface BotConfig {
   callback_timezone: string;
   callback_window_start: number;
   callback_window_end: number;
+  callback_schedule: CallbackSchedule | null;
   max_concurrent_calls: number;
   call_memory_enabled: boolean;
   call_memory_count: number;
