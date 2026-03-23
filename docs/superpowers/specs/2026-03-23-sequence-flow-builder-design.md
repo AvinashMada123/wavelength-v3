@@ -68,6 +68,26 @@ These are independent of the flow builder UI and should be built before or in pa
 - When cap hit → action stays queued for next available window, not dropped
 - Exposed in org settings for configuration
 
+### 2.5 AI Model Configuration
+
+AI-powered nodes (AI Generate + Send, WhatsApp Session with AI, reply handlers) need a model selector. Both Google Vertex and Anthropic are already integrated in the codebase.
+
+**Available models (shown in node config dropdown):**
+
+| Model ID | Label (in UI) | Provider | Best For |
+|----------|---------------|----------|----------|
+| `gemini-2.5-flash` | Gemini 2.5 Flash | Google Vertex | **Default.** Fast, cheap. Good for WhatsApp messages, short follow-ups. |
+| `gemini-2.5-pro` | Gemini 2.5 Pro | Google Vertex | Complex personalized content, detailed proposals. |
+| `gemini-2.0-flash` | Gemini 2.0 Flash | Google Vertex | Stable fallback. Quick generation. |
+| `claude-sonnet-4-6` | Claude Sonnet 4.6 | Anthropic | High writing quality. Nuanced, persuasive content. |
+| `claude-haiku-4-5` | Claude Haiku 4.5 | Anthropic | Fastest/cheapest Claude. Simple templated messages. |
+
+**Implementation:**
+- Each AI node has a `model` field in its config (dropdown selector in the properties panel)
+- Default: `gemini-2.5-flash` (fastest, cheapest, Google SDK already in use)
+- The flow engine routes to `anthropic_client.generate_content()` or Google GenAI based on model prefix (`claude-*` → Anthropic, `gemini-*` → Google)
+- Model list is maintained as a config constant — easy to add new models without schema changes
+
 ---
 
 ## 3. Data Model
@@ -280,7 +300,7 @@ Bot config retries are **ignored** for calls triggered by flow nodes.
   "ai_generation": {
     "enabled": true,
     "prompt": "...",
-    "model": "claude-sonnet-4-6"
+    "model": "gemini-2.5-flash"
   },
   "on_window_expired": "fallback_template" | "expired_branch",
   "fallback_template_name": "string (if on_window_expired = fallback_template)",
@@ -303,7 +323,7 @@ If `on_window_expired = "expired_branch"`: follows the `expired` edge, user wire
 {
   "mode": "fill_template_vars" | "full_message",
   "prompt": "Generate a message for {{contact_name}} who is a {{profession}}...",
-  "model": "claude-sonnet-4-6",
+  "model": "gemini-2.5-flash",
   "send_via": "whatsapp_session" | "whatsapp_template",
   "template_name": "string (if send_via = whatsapp_template)",
   "template_param_key": "string (which param to fill)",
@@ -764,7 +784,7 @@ Deferred to Phase 2. Design notes for future reference:
     "ai_fields": {
       "ai_proposal": {
         "prompt": "Generate a coaching proposal for {{contact_name}}...",
-        "model": "claude-sonnet-4-6"
+        "model": "gemini-2.5-flash"
       }
     },
     "output_format": "pdf",
