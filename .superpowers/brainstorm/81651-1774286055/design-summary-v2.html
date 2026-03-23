@@ -1,0 +1,219 @@
+<h2>Sequence Flow Builder — Revised Design (Post-Audit)</h2>
+<p class="subtitle">Updated with all audit findings. Changes from v1 highlighted in <span style="color:#4ade80;">green</span>.</p>
+
+<!-- SECTION 1: Architecture -->
+<div class="section">
+  <h3>1. Core Architecture</h3>
+  <p>Replace linear step-based sequences with a <strong>visual flow builder</strong> using React Flow. Drag-and-drop nodes on a canvas, connect with edges, branch on outcomes.</p>
+  <p style="color:#4ade80;"><strong>NEW — Graph Storage:</strong> Replace <code>step_order</code> integer with proper graph model: <code>FlowNode</code> (id, type, position, config) + <code>FlowEdge</code> (source_node, target_node, condition_label). DAG structure stored as nodes + edges, not linear steps.</p>
+  <p style="color:#4ade80;"><strong>NEW — Graph Traversal Engine:</strong> New engine that walks the DAG. On node completion, evaluates outgoing edges, picks the matching branch, activates the next node. Replaces linear step iteration.</p>
+</div>
+
+<!-- SECTION 2: Node Types -->
+<div class="section">
+  <h3>2. Node Types (v1)</h3>
+  <table style="width:100%; border-collapse:collapse; margin:12px 0;">
+    <thead>
+      <tr style="border-bottom:2px solid #444; text-align:left;">
+        <th style="padding:8px;">Category</th>
+        <th style="padding:8px;">Node</th>
+        <th style="padding:8px;">Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr style="border-bottom:1px solid #333;">
+        <td style="padding:8px;" rowspan="4"><strong>Action</strong></td>
+        <td style="padding:8px;">Voice Call</td>
+        <td style="padding:8px;">Queue a call. Quick retry config (N times, X hrs apart) or wire retries in flow. Bot config retries ignored inside flows.</td>
+      </tr>
+      <tr style="border-bottom:1px solid #333;">
+        <td style="padding:8px;">WhatsApp Template</td>
+        <td style="padding:8px;">Send pre-approved template. Params: manual or AI-filled.</td>
+      </tr>
+      <tr style="border-bottom:1px solid #333;">
+        <td style="padding:8px;">WhatsApp Session</td>
+        <td style="padding:8px;">Freeform message within 24hr window. <span style="color:#4ade80;">NEW: If window expired → auto-fallback to WhatsApp Template node (configurable) or skip with "expired" branch output.</span></td>
+      </tr>
+      <tr style="border-bottom:1px solid #333;">
+        <td style="padding:8px;">AI Generate + Send</td>
+        <td style="padding:8px;">Two modes: fill template vars OR generate full message. Sent via WhatsApp.</td>
+      </tr>
+      <tr style="border-bottom:1px solid #333;">
+        <td style="padding:8px;" rowspan="3"><strong>Control</strong></td>
+        <td style="padding:8px;">Condition</td>
+        <td style="padding:8px;">Branch on: call outcome, post-call analysis, reply content, lead fields.</td>
+      </tr>
+      <tr style="border-bottom:1px solid #333;">
+        <td style="padding:8px;">Delay / Wait</td>
+        <td style="padding:8px;">Wait X hours/days. Configurable send window per node.</td>
+      </tr>
+      <tr style="border-bottom:1px solid #333;">
+        <td style="padding:8px;">Wait for Event</td>
+        <td style="padding:8px;">Wait for reply/call outcome. Mandatory timeout (default 24hrs). Timeout branch.</td>
+      </tr>
+      <tr style="border-bottom:1px solid #333;">
+        <td style="padding:8px;" rowspan="2"><strong>Terminal</strong></td>
+        <td style="padding:8px;">Goal Met</td>
+        <td style="padding:8px;">Milestone marker — doesn't end flow. Multiple per flow.</td>
+      </tr>
+      <tr style="border-bottom:1px solid #333;">
+        <td style="padding:8px;">End</td>
+        <td style="padding:8px;">Flow complete for this lead.</td>
+      </tr>
+    </tbody>
+  </table>
+  <p style="opacity:0.7;"><em>Phase 2: Generate Document node (AI-filled PDF via HTML template)</em></p>
+</div>
+
+<!-- SECTION 3: Critical Infrastructure (NEW) -->
+<div class="section" style="border:1px solid #4ade80; border-radius:8px; padding:16px;">
+  <h3 style="color:#4ade80;">3. Critical Infrastructure (Pre-requisites)</h3>
+  <p>These must be built BEFORE the flow builder:</p>
+  <table style="width:100%; border-collapse:collapse; margin:12px 0;">
+    <tbody>
+      <tr style="border-bottom:1px solid #333;">
+        <td style="padding:8px;"><strong>Call Outcome Feedback Loop</strong></td>
+        <td style="padding:8px;">Wire <code>plivo_event()</code> to update sequence touchpoints on call end. Map Plivo statuses to: <code>picked_up</code>, <code>no_answer</code>, <code>busy</code>, <code>failed</code>, <code>voicemail</code>. Preserve granularity — don't collapse statuses.</td>
+      </tr>
+      <tr style="border-bottom:1px solid #333;">
+        <td style="padding:8px;"><strong>Plivo Status Granularity</strong></td>
+        <td style="padding:8px;">Fix current mapping that collapses busy/timeout/no-answer into one value. Store raw Plivo status + normalized enum.</td>
+      </tr>
+      <tr style="border-bottom:1px solid #333;">
+        <td style="padding:8px;"><strong>Node Transition Audit Trail</strong></td>
+        <td style="padding:8px;">New <code>FlowTransition</code> table: instance_id, from_node, to_node, timestamp, outcome_data. Powers journey replay and debugging.</td>
+      </tr>
+      <tr style="border-bottom:1px solid #333;">
+        <td style="padding:8px;"><strong>Business Hours System</strong></td>
+        <td style="padding:8px;">Org-level default hours (e.g., Mon-Sat 9AM-7PM IST). Per-node override. "Send anytime" toggle.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- SECTION 4: Publish Model (REVISED) -->
+<div class="section" style="border:1px solid #4ade80; border-radius:8px; padding:16px;">
+  <h3 style="color:#4ade80;">4. Draft / Publish Model (REVISED)</h3>
+  <p><strong>Changed from v1:</strong> All leads no longer auto-migrate on publish.</p>
+  <ul>
+    <li>Edit freely in draft mode</li>
+    <li>Publish creates a new version — <strong>existing leads continue on their version</strong>, new enrollments get the new version</li>
+    <li>Manual "re-enroll" option to move specific leads to new version</li>
+    <li>Deleting a node with active leads: system warns, requires removing leads first</li>
+    <li>Version history visible — can see what changed between versions</li>
+  </ul>
+</div>
+
+<!-- SECTION 5: Flow Validation (NEW) -->
+<div class="section" style="border:1px solid #4ade80; border-radius:8px; padding:16px;">
+  <h3 style="color:#4ade80;">5. Flow Validation (NEW)</h3>
+  <p>Before publishing, validate:</p>
+  <ul>
+    <li>Every path reaches an End node (no dangling branches)</li>
+    <li>No disconnected nodes</li>
+    <li>No infinite loops without a delay/wait (prevents instant cycling)</li>
+    <li>All condition nodes have at least 2 outgoing branches</li>
+    <li>All action nodes have required config filled in</li>
+    <li>Warnings (non-blocking): unused branches, very short delays</li>
+  </ul>
+</div>
+
+<!-- SECTION 6: Rate Limiting (NEW) -->
+<div class="section" style="border:1px solid #4ade80; border-radius:8px; padding:16px;">
+  <h3 style="color:#4ade80;">6. Rate Limiting & Flood Protection (NEW)</h3>
+  <ul>
+    <li><strong>Per-lead daily cap:</strong> Max messages/calls per lead per day (org-configurable, default: 5)</li>
+    <li><strong>Per-lead hourly cap:</strong> Max 2 messages per hour per lead</li>
+    <li><strong>Cooldown:</strong> Min 60s between any two actions to same lead (existing)</li>
+    <li>When cap hit → action queued for next available window, not dropped</li>
+  </ul>
+</div>
+
+<!-- SECTION 7: UX & Onboarding (NEW) -->
+<div class="section" style="border:1px solid #4ade80; border-radius:8px; padding:16px;">
+  <h3 style="color:#4ade80;">7. UX Guardrails & Onboarding (NEW)</h3>
+  <p>Target users are Indian coaches — not technical. Canvas must be approachable.</p>
+  <ul>
+    <li><strong>Auto-layout mode:</strong> Default to structured top-down layout. Nodes snap to grid, edges auto-route. Free-form positioning as opt-in.</li>
+    <li><strong>Flow templates:</strong> Pre-built starter flows for common scenarios:
+      <ul>
+        <li>"Post-call follow-up" — call → condition → WhatsApp or retry</li>
+        <li>"No-answer recovery" — call → no answer → WhatsApp → delay → retry call</li>
+        <li>"Interested lead nurture" — condition on interest → personalized AI messages</li>
+      </ul>
+    </li>
+    <li><strong>Undo/Redo:</strong> Full undo/redo stack on canvas (Ctrl+Z/Ctrl+Y)</li>
+    <li><strong>Guided first-time experience:</strong> Tooltip tour on first visit</li>
+    <li><strong>Node palette:</strong> Sidebar with drag-and-drop nodes, grouped by category with clear labels</li>
+  </ul>
+</div>
+
+<!-- SECTION 8: Simulation -->
+<div class="section">
+  <h3>8. Simulation & Testing</h3>
+  <ul>
+    <li><strong>Visual dry-run:</strong> Simulate on canvas, pick outcomes at each branch, watch path highlight. No messages sent.</li>
+    <li><strong>Live test:</strong> Enroll yourself with test flag, real messages, compressed delays (minutes instead of hours).</li>
+    <li><strong>Journey replay:</strong> Click any real lead on canvas to see their actual path highlighted with outcomes and timestamps at each node.</li>
+  </ul>
+</div>
+
+<!-- SECTION 9: Lead Integration -->
+<div class="section">
+  <h3>9. Lead Integration</h3>
+  <ul>
+    <li>Add/remove leads from flows manually at any time</li>
+    <li><strong>Lead profile:</strong> New tab with full flow history timeline (which flows, which nodes, what happened)</li>
+    <li><strong>Canvas view:</strong> Panel showing leads in this flow, click to see their path</li>
+    <li style="color:#4ade80;"><strong>NEW — Transition log:</strong> Every node transition recorded with timestamp and outcome data. Full audit trail for debugging.</li>
+  </ul>
+</div>
+
+<!-- SECTION 10: Analytics -->
+<div class="section">
+  <h3>10. Analytics</h3>
+  <ul>
+    <li><strong>Canvas badges:</strong> Per-node stats (passed/dropped/success rate)</li>
+    <li><strong>Analytics page:</strong> Conversion rates, drop-off per node, time between nodes, goal completion rates</li>
+  </ul>
+</div>
+
+<!-- SECTION 11: Existing System -->
+<div class="section">
+  <h3>11. Triggers & Multi-flow</h3>
+  <ul>
+    <li><strong>Triggers:</strong> Keep existing (post_call, manual, campaign_complete). Extensible architecture for future triggers.</li>
+    <li><strong>Multi-flow:</strong> Independent flows. <code>max_active_per_lead</code> prevents over-contact.</li>
+    <li><strong>Business hours:</strong> Org-level defaults + per-node override + "send anytime" toggle.</li>
+  </ul>
+</div>
+
+<!-- SECTION 12: Migration -->
+<div class="section" style="border:1px solid #f59e0b; border-radius:8px; padding:16px;">
+  <h3 style="color:#f59e0b;">12. Migration Strategy</h3>
+  <p>Existing linear sequences must continue working:</p>
+  <ul>
+    <li>Auto-convert existing templates to single-path flows (step 1 → step 2 → ... → End)</li>
+    <li>Active instances complete on the linear engine — no mid-flight migration</li>
+    <li>New enrollments use the flow engine</li>
+    <li>Deprecate linear engine after all active instances complete</li>
+  </ul>
+</div>
+
+<!-- SECTION 13: Salvageable -->
+<div class="section">
+  <h3>13. What We Keep</h3>
+  <ul>
+    <li><code>anthropic_client.py</code> — AI generation, fully reusable</li>
+    <li><code>messaging_client.py</code> — WhatsApp sending, fully reusable</li>
+    <li>QueuedCall system — voice call queuing, <code>extra_vars</code> already carries touchpoint ID</li>
+    <li>Trigger evaluation logic from <code>sequence_engine.py</code></li>
+    <li>Reply handling + WhatsApp session window tracking</li>
+    <li>Instance/Touchpoint models — extended with new columns, not replaced</li>
+  </ul>
+</div>
+
+<div class="section" style="margin-top:24px; padding:16px; border:2px solid #555; border-radius:8px; text-align:center;">
+  <h3>Ready to proceed?</h3>
+  <p>Review the changes above (highlighted in green). Let me know in the terminal if anything needs adjusting, or if we're good to write the full spec.</p>
+</div>

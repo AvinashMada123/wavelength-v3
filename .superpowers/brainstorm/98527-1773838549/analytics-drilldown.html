@@ -1,0 +1,397 @@
+<h2>Analytics — Drill-Down Flow</h2>
+<p class="subtitle">How the Overview → Detail navigation works</p>
+
+<div class="section">
+  <h3>Main View: Overview Dashboard</h3>
+  <div class="mockup">
+    <div class="mockup-header">/sequences/analytics</div>
+    <div class="mockup-body" style="padding:16px;">
+      <!-- Filters bar -->
+      <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap;">
+        <div style="background:#1a1a2e;border:1px solid #333;border-radius:6px;padding:6px 12px;font-size:11px;color:#ccc;">Mar 1 — Mar 18, 2026</div>
+        <div style="background:#1a1a2e;border:1px solid #333;border-radius:6px;padding:6px 12px;font-size:11px;color:#888;">All Templates ▾</div>
+        <div style="background:#1a1a2e;border:1px solid #333;border-radius:6px;padding:6px 12px;font-size:11px;color:#888;">All Channels ▾</div>
+        <div style="background:#1a1a2e;border:1px solid #333;border-radius:6px;padding:6px 12px;font-size:11px;color:#888;">All Bots ▾</div>
+        <div style="display:flex;gap:4px;margin-left:auto;">
+          <div style="background:#1a1a2e;border:1px solid #333;border-radius:6px;padding:6px 10px;font-size:11px;color:#888;">7d</div>
+          <div style="background:#2563eb;border-radius:6px;padding:6px 10px;font-size:11px;color:#fff;">30d</div>
+          <div style="background:#1a1a2e;border:1px solid #333;border-radius:6px;padding:6px 10px;font-size:11px;color:#888;">90d</div>
+          <div style="background:#1a1a2e;border:1px solid #333;border-radius:6px;padding:6px 10px;font-size:11px;color:#888;">All</div>
+        </div>
+      </div>
+
+      <!-- KPI Cards Row -->
+      <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <div style="flex:1;background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;cursor:pointer;">
+          <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:0.5px;">Total Sent</div>
+          <div style="font-size:28px;font-weight:700;color:#fff;margin:4px 0;">1,247</div>
+          <div style="font-size:11px;color:#22c55e;">↑ 12% vs prev period</div>
+        </div>
+        <div style="flex:1;background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;cursor:pointer;">
+          <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:0.5px;">Reply Rate</div>
+          <div style="font-size:28px;font-weight:700;color:#22c55e;margin:4px 0;">34.2%</div>
+          <div style="font-size:11px;color:#22c55e;">↑ 3.1% vs prev period</div>
+        </div>
+        <div style="flex:1;background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;cursor:pointer;">
+          <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:0.5px;">Completion Rate</div>
+          <div style="font-size:28px;font-weight:700;color:#3b82f6;margin:4px 0;">67.8%</div>
+          <div style="font-size:11px;color:#ef4444;">↓ 2.4% vs prev period</div>
+        </div>
+        <div style="flex:1;background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;cursor:pointer;">
+          <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:0.5px;">Avg Time to Reply</div>
+          <div style="font-size:28px;font-weight:700;color:#eab308;margin:4px 0;">4.2h</div>
+          <div style="font-size:11px;color:#22c55e;">↓ 1.1h vs prev period</div>
+        </div>
+      </div>
+
+      <!-- Charts Row -->
+      <div style="display:flex;gap:12px;margin-bottom:16px;">
+        <div style="flex:2;background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <div style="font-size:12px;color:#ccc;font-weight:600;">Delivery Trend</div>
+            <div style="font-size:10px;color:#2563eb;cursor:pointer;">View details →</div>
+          </div>
+          <div style="display:flex;align-items:end;gap:3px;height:60px;">
+            <div style="flex:1;display:flex;flex-direction:column;gap:1px;justify-content:end;">
+              <div style="background:#22c55e;height:35px;border-radius:2px 2px 0 0;"></div>
+              <div style="background:#ef4444;height:4px;"></div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:1px;justify-content:end;">
+              <div style="background:#22c55e;height:42px;border-radius:2px 2px 0 0;"></div>
+              <div style="background:#ef4444;height:3px;"></div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:1px;justify-content:end;">
+              <div style="background:#22c55e;height:38px;border-radius:2px 2px 0 0;"></div>
+              <div style="background:#ef4444;height:6px;"></div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:1px;justify-content:end;">
+              <div style="background:#22c55e;height:50px;border-radius:2px 2px 0 0;"></div>
+              <div style="background:#ef4444;height:2px;"></div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:1px;justify-content:end;">
+              <div style="background:#22c55e;height:55px;border-radius:2px 2px 0 0;"></div>
+              <div style="background:#ef4444;height:5px;"></div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:1px;justify-content:end;">
+              <div style="background:#22c55e;height:48px;border-radius:2px 2px 0 0;"></div>
+              <div style="background:#ef4444;height:3px;"></div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:1px;justify-content:end;">
+              <div style="background:#22c55e;height:60px;border-radius:2px 2px 0 0;"></div>
+              <div style="background:#ef4444;height:2px;"></div>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:9px;color:#555;margin-top:4px;">
+            <span>Mar 12</span><span>Mar 14</span><span>Mar 16</span><span>Mar 18</span>
+          </div>
+        </div>
+        <div style="flex:1;background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;">
+          <div style="font-size:12px;color:#ccc;font-weight:600;margin-bottom:12px;">Channel Split</div>
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <div>
+              <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;">
+                <span style="color:#ccc;">WhatsApp Template</span><span style="color:#22c55e;">892 (71%)</span>
+              </div>
+              <div style="height:8px;background:#111;border-radius:4px;overflow:hidden;">
+                <div style="width:71%;height:100%;background:#22c55e;border-radius:4px;"></div>
+              </div>
+            </div>
+            <div>
+              <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;">
+                <span style="color:#ccc;">WhatsApp Session</span><span style="color:#10b981;">178 (14%)</span>
+              </div>
+              <div style="height:8px;background:#111;border-radius:4px;overflow:hidden;">
+                <div style="width:14%;height:100%;background:#10b981;border-radius:4px;"></div>
+              </div>
+            </div>
+            <div>
+              <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;">
+                <span style="color:#ccc;">SMS</span><span style="color:#3b82f6;">112 (9%)</span>
+              </div>
+              <div style="height:8px;background:#111;border-radius:4px;overflow:hidden;">
+                <div style="width:9%;height:100%;background:#3b82f6;border-radius:4px;"></div>
+              </div>
+            </div>
+            <div>
+              <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;">
+                <span style="color:#ccc;">Voice</span><span style="color:#a855f7;">65 (5%)</span>
+              </div>
+              <div style="height:8px;background:#111;border-radius:4px;overflow:hidden;">
+                <div style="width:5%;height:100%;background:#a855f7;border-radius:4px;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom: Template table + Lead scores -->
+      <div style="display:flex;gap:12px;">
+        <div style="flex:3;background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <div style="font-size:12px;color:#ccc;font-weight:600;">Template Performance</div>
+            <div style="font-size:10px;color:#2563eb;cursor:pointer;">View all →</div>
+          </div>
+          <table style="width:100%;font-size:11px;border-collapse:collapse;">
+            <tr style="color:#888;text-align:left;border-bottom:1px solid #222;">
+              <th style="padding:6px 4px;">Template</th>
+              <th style="padding:6px 4px;">Sent</th>
+              <th style="padding:6px 4px;">Reply %</th>
+              <th style="padding:6px 4px;">Complete %</th>
+              <th style="padding:6px 4px;">Funnel</th>
+            </tr>
+            <tr style="color:#ccc;border-bottom:1px solid #1a1a1a;cursor:pointer;">
+              <td style="padding:8px 4px;">Masterclass Engagement</td>
+              <td style="padding:8px 4px;">489</td>
+              <td style="padding:8px 4px;color:#22c55e;">42%</td>
+              <td style="padding:8px 4px;color:#22c55e;">71%</td>
+              <td style="padding:8px 4px;">
+                <div style="display:flex;gap:1px;align-items:end;height:16px;">
+                  <div style="width:12px;background:#3b82f6;height:100%;border-radius:2px;"></div>
+                  <div style="width:12px;background:#3b82f6;height:75%;border-radius:2px;"></div>
+                  <div style="width:12px;background:#3b82f6;height:55%;border-radius:2px;"></div>
+                  <div style="width:12px;background:#22c55e;height:42%;border-radius:2px;"></div>
+                </div>
+              </td>
+            </tr>
+            <tr style="color:#ccc;border-bottom:1px solid #1a1a1a;cursor:pointer;">
+              <td style="padding:8px 4px;">Follow-up Drip</td>
+              <td style="padding:8px 4px;">387</td>
+              <td style="padding:8px 4px;color:#eab308;">28%</td>
+              <td style="padding:8px 4px;color:#3b82f6;">63%</td>
+              <td style="padding:8px 4px;">
+                <div style="display:flex;gap:1px;align-items:end;height:16px;">
+                  <div style="width:12px;background:#3b82f6;height:100%;border-radius:2px;"></div>
+                  <div style="width:12px;background:#3b82f6;height:60%;border-radius:2px;"></div>
+                  <div style="width:12px;background:#eab308;height:35%;border-radius:2px;"></div>
+                </div>
+              </td>
+            </tr>
+            <tr style="color:#ccc;cursor:pointer;">
+              <td style="padding:8px 4px;">Re-engagement</td>
+              <td style="padding:8px 4px;">371</td>
+              <td style="padding:8px 4px;color:#ef4444;">12%</td>
+              <td style="padding:8px 4px;color:#ef4444;">38%</td>
+              <td style="padding:8px 4px;">
+                <div style="display:flex;gap:1px;align-items:end;height:16px;">
+                  <div style="width:12px;background:#3b82f6;height:100%;border-radius:2px;"></div>
+                  <div style="width:12px;background:#ef4444;height:30%;border-radius:2px;"></div>
+                </div>
+              </td>
+            </tr>
+          </table>
+        </div>
+        <div style="flex:2;background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <div style="font-size:12px;color:#ccc;font-weight:600;">Lead Engagement</div>
+            <div style="font-size:10px;color:#2563eb;cursor:pointer;">View all →</div>
+          </div>
+          <div style="display:flex;gap:6px;margin-bottom:12px;">
+            <div style="flex:1;text-align:center;background:#14532d;border-radius:6px;padding:8px 4px;">
+              <div style="font-size:16px;font-weight:700;color:#22c55e;">23</div>
+              <div style="font-size:9px;color:#86efac;">Hot</div>
+            </div>
+            <div style="flex:1;text-align:center;background:#422006;border-radius:6px;padding:8px 4px;">
+              <div style="font-size:16px;font-weight:700;color:#eab308;">87</div>
+              <div style="font-size:9px;color:#fde68a;">Warm</div>
+            </div>
+            <div style="flex:1;text-align:center;background:#1e1b4b;border-radius:6px;padding:8px 4px;">
+              <div style="font-size:16px;font-weight:700;color:#818cf8;">145</div>
+              <div style="font-size:9px;color:#c4b5fd;">Cold</div>
+            </div>
+            <div style="flex:1;text-align:center;background:#1c1917;border-radius:6px;padding:8px 4px;">
+              <div style="font-size:16px;font-weight:700;color:#888;">62</div>
+              <div style="font-size:9px;color:#a8a29e;">Inactive</div>
+            </div>
+          </div>
+          <div style="font-size:11px;">
+            <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #222;color:#ccc;cursor:pointer;">
+              <span>Ramesh K.</span>
+              <span style="background:#14532d;color:#22c55e;padding:2px 8px;border-radius:10px;font-size:10px;">92 Hot</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #222;color:#ccc;cursor:pointer;">
+              <span>Priya M.</span>
+              <span style="background:#14532d;color:#22c55e;padding:2px 8px;border-radius:10px;font-size:10px;">85 Hot</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #222;color:#ccc;cursor:pointer;">
+              <span>Arun S.</span>
+              <span style="background:#422006;color:#eab308;padding:2px 8px;border-radius:10px;font-size:10px;">54 Warm</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:5px 0;color:#ccc;cursor:pointer;">
+              <span>Deepa R.</span>
+              <span style="background:#1e1b4b;color:#818cf8;padding:2px 8px;border-radius:10px;font-size:10px;">28 Cold</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:24px;">
+  <h3>Drill-Down: Template Detail (click any template row)</h3>
+  <div class="mockup">
+    <div class="mockup-header">← Back to Overview / Masterclass Engagement</div>
+    <div class="mockup-body" style="padding:16px;">
+      <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:12px;text-align:center;">
+          <div style="font-size:10px;color:#888;">Leads Entered</div>
+          <div style="font-size:22px;font-weight:700;color:#fff;">489</div>
+        </div>
+        <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:12px;text-align:center;">
+          <div style="font-size:10px;color:#888;">Completed</div>
+          <div style="font-size:22px;font-weight:700;color:#22c55e;">347 (71%)</div>
+        </div>
+        <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:12px;text-align:center;">
+          <div style="font-size:10px;color:#888;">Reply Rate</div>
+          <div style="font-size:22px;font-weight:700;color:#3b82f6;">42%</div>
+        </div>
+        <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:12px;text-align:center;">
+          <div style="font-size:10px;color:#888;">AI Cost</div>
+          <div style="font-size:22px;font-weight:700;color:#eab308;">$12.40</div>
+        </div>
+      </div>
+
+      <!-- Step funnel -->
+      <div style="background:#1a1a2e;border-radius:8px;padding:14px;margin-bottom:16px;">
+        <div style="font-size:12px;color:#ccc;font-weight:600;margin-bottom:12px;">Step-by-Step Funnel</div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="width:140px;font-size:11px;color:#ccc;">1. Gift Message</div>
+            <div style="flex:1;height:24px;background:#111;border-radius:4px;overflow:hidden;">
+              <div style="width:100%;height:100%;background:#3b82f6;border-radius:4px;display:flex;align-items:center;padding-left:8px;font-size:10px;color:#fff;">489 sent</div>
+            </div>
+            <div style="width:50px;font-size:11px;color:#888;text-align:right;">100%</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="width:140px;font-size:11px;color:#ccc;">2. Hope Question</div>
+            <div style="flex:1;height:24px;background:#111;border-radius:4px;overflow:hidden;">
+              <div style="width:78%;height:100%;background:#3b82f6;border-radius:4px;display:flex;align-items:center;padding-left:8px;font-size:10px;color:#fff;">381 sent · 42 skipped</div>
+            </div>
+            <div style="width:50px;font-size:11px;color:#888;text-align:right;">78%</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="width:140px;font-size:11px;color:#ccc;">3. Success Story</div>
+            <div style="flex:1;height:24px;background:#111;border-radius:4px;overflow:hidden;">
+              <div style="width:58%;height:100%;background:#3b82f6;border-radius:4px;display:flex;align-items:center;padding-left:8px;font-size:10px;color:#fff;">284 sent</div>
+            </div>
+            <div style="width:50px;font-size:11px;color:#888;text-align:right;">58%</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="width:140px;font-size:11px;color:#ccc;">4. Reminder</div>
+            <div style="flex:1;height:24px;background:#111;border-radius:4px;overflow:hidden;">
+              <div style="width:71%;height:100%;background:#22c55e;border-radius:4px;display:flex;align-items:center;padding-left:8px;font-size:10px;color:#fff;">347 completed</div>
+            </div>
+            <div style="width:50px;font-size:11px;color:#888;text-align:right;">71%</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Failure + Skip reasons -->
+      <div style="display:flex;gap:12px;">
+        <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:14px;">
+          <div style="font-size:12px;color:#ccc;font-weight:600;margin-bottom:8px;">Failure Reasons</div>
+          <div style="font-size:11px;display:flex;flex-direction:column;gap:4px;">
+            <div style="display:flex;justify-content:space-between;color:#ccc;">
+              <span>Session window expired</span><span style="color:#ef4444;">18</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;color:#ccc;">
+              <span>Provider timeout</span><span style="color:#ef4444;">7</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;color:#ccc;">
+              <span>Invalid phone</span><span style="color:#ef4444;">3</span>
+            </div>
+          </div>
+        </div>
+        <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:14px;">
+          <div style="font-size:12px;color:#ccc;font-weight:600;margin-bottom:8px;">Skip Reasons</div>
+          <div style="font-size:11px;display:flex;flex-direction:column;gap:4px;">
+            <div style="display:flex;justify-content:space-between;color:#ccc;">
+              <span>Less than 3 days to event</span><span style="color:#eab308;">42</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;color:#ccc;">
+              <span>Already replied</span><span style="color:#eab308;">24</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:24px;">
+  <h3>Drill-Down: Lead Detail (click any lead)</h3>
+  <div class="mockup">
+    <div class="mockup-header">← Back to Overview / Ramesh K. — Score: 92 (Hot)</div>
+    <div class="mockup-body" style="padding:16px;">
+      <div style="display:flex;gap:12px;margin-bottom:16px;">
+        <!-- Score breakdown -->
+        <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:14px;">
+          <div style="font-size:12px;color:#ccc;font-weight:600;margin-bottom:10px;">Engagement Score: 92</div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div>
+              <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;">
+                <span style="color:#888;">Activity (40%)</span><span style="color:#22c55e;">38/40</span>
+              </div>
+              <div style="height:6px;background:#111;border-radius:3px;overflow:hidden;">
+                <div style="width:95%;height:100%;background:#22c55e;border-radius:3px;"></div>
+              </div>
+            </div>
+            <div>
+              <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;">
+                <span style="color:#888;">Recency (30%)</span><span style="color:#3b82f6;">28/30</span>
+              </div>
+              <div style="height:6px;background:#111;border-radius:3px;overflow:hidden;">
+                <div style="width:93%;height:100%;background:#3b82f6;border-radius:3px;"></div>
+              </div>
+            </div>
+            <div>
+              <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;">
+                <span style="color:#888;">Outcome (30%)</span><span style="color:#a855f7;">26/30</span>
+              </div>
+              <div style="height:6px;background:#111;border-radius:3px;overflow:hidden;">
+                <div style="width:87%;height:100%;background:#a855f7;border-radius:3px;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Quick stats -->
+        <div style="flex:1;display:flex;flex-direction:column;gap:8px;">
+          <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:10px;display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:11px;color:#888;">Active Sequences</span>
+            <span style="font-size:18px;font-weight:700;color:#fff;">1</span>
+          </div>
+          <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:10px;display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:11px;color:#888;">Total Replies</span>
+            <span style="font-size:18px;font-weight:700;color:#22c55e;">5</span>
+          </div>
+          <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:10px;display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:11px;color:#888;">Avg Reply Time</span>
+            <span style="font-size:18px;font-weight:700;color:#eab308;">2.1h</span>
+          </div>
+        </div>
+      </div>
+      <!-- Timeline -->
+      <div style="background:#1a1a2e;border-radius:8px;padding:14px;">
+        <div style="font-size:12px;color:#ccc;font-weight:600;margin-bottom:12px;">Engagement Timeline</div>
+        <div style="border-left:2px solid #333;margin-left:8px;padding-left:16px;display:flex;flex-direction:column;gap:12px;">
+          <div>
+            <div style="font-size:10px;color:#888;">Mar 15, 10:30 AM · Masterclass Engagement</div>
+            <div style="font-size:12px;color:#ccc;">Gift Message → <span style="color:#22c55e;">Sent ✓</span></div>
+          </div>
+          <div>
+            <div style="font-size:10px;color:#888;">Mar 15, 7:30 PM · Masterclass Engagement</div>
+            <div style="font-size:12px;color:#ccc;">Hope Question → <span style="color:#3b82f6;">Replied</span> <span style="color:#888;">"I want to automate my factory reports"</span></div>
+          </div>
+          <div>
+            <div style="font-size:10px;color:#888;">Mar 15, 7:32 PM · Masterclass Engagement</div>
+            <div style="font-size:12px;color:#ccc;">AI Response → <span style="color:#22c55e;">Sent ✓</span> <span style="color:#888;">Matched: Ramesh success story</span></div>
+          </div>
+          <div>
+            <div style="font-size:10px;color:#888;">Mar 17, 9:00 AM · Masterclass Engagement</div>
+            <div style="font-size:12px;color:#ccc;">Reminder → <span style="color:#22c55e;">Sent ✓</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

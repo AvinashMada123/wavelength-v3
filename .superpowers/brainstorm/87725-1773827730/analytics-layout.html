@@ -1,0 +1,199 @@
+<h2>Sequence Analytics — Dashboard Layout</h2>
+<p class="subtitle">How should the analytics page be organized?</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Tab-Based Sections</h3>
+      <p>Top-level tabs: <strong>Overview</strong> | <strong>Templates</strong> | <strong>Channels</strong> | <strong>Leads</strong></p>
+      <div class="mockup" style="margin-top: 12px;">
+        <div class="mockup-header">Preview</div>
+        <div class="mockup-body" style="padding: 16px;">
+          <div style="display:flex;gap:0;border-bottom:2px solid #333;margin-bottom:16px;">
+            <div style="padding:8px 20px;background:#2563eb;color:white;border-radius:6px 6px 0 0;font-size:13px;font-weight:600;">Overview</div>
+            <div style="padding:8px 20px;color:#888;font-size:13px;">Templates</div>
+            <div style="padding:8px 20px;color:#888;font-size:13px;">Channels</div>
+            <div style="padding:8px 20px;color:#888;font-size:13px;">Leads</div>
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:16px;">
+            <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:12px;text-align:center;">
+              <div style="font-size:10px;color:#888;text-transform:uppercase;">Total Sent</div>
+              <div style="font-size:24px;font-weight:700;color:#fff;">1,247</div>
+            </div>
+            <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:12px;text-align:center;">
+              <div style="font-size:10px;color:#888;text-transform:uppercase;">Reply Rate</div>
+              <div style="font-size:24px;font-weight:700;color:#22c55e;">34.2%</div>
+            </div>
+            <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:12px;text-align:center;">
+              <div style="font-size:10px;color:#888;text-transform:uppercase;">Completion</div>
+              <div style="font-size:24px;font-weight:700;color:#3b82f6;">67.8%</div>
+            </div>
+            <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:12px;text-align:center;">
+              <div style="font-size:10px;color:#888;text-transform:uppercase;">Failed</div>
+              <div style="font-size:24px;font-weight:700;color:#ef4444;">23</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:12px;">
+            <div style="flex:2;background:#1a1a2e;border-radius:8px;padding:12px;min-height:80px;">
+              <div style="font-size:11px;color:#888;margin-bottom:8px;">Step-by-Step Funnel</div>
+              <div style="display:flex;align-items:end;gap:4px;height:50px;">
+                <div style="flex:1;background:#3b82f6;border-radius:3px 3px 0 0;height:100%;"></div>
+                <div style="flex:1;background:#3b82f6;border-radius:3px 3px 0 0;height:75%;"></div>
+                <div style="flex:1;background:#3b82f6;border-radius:3px 3px 0 0;height:55%;"></div>
+                <div style="flex:1;background:#3b82f6;border-radius:3px 3px 0 0;height:40%;"></div>
+                <div style="flex:1;background:#22c55e;border-radius:3px 3px 0 0;height:35%;"></div>
+              </div>
+            </div>
+            <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:12px;min-height:80px;">
+              <div style="font-size:11px;color:#888;margin-bottom:8px;">Channel Split</div>
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <div style="display:flex;align-items:center;gap:6px;font-size:11px;">
+                  <div style="width:8px;height:8px;background:#22c55e;border-radius:50%;"></div>
+                  <span style="color:#ccc;">WhatsApp 72%</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:6px;font-size:11px;">
+                  <div style="width:8px;height:8px;background:#3b82f6;border-radius:50%;"></div>
+                  <span style="color:#ccc;">SMS 18%</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:6px;font-size:11px;">
+                  <div style="width:8px;height:8px;background:#a855f7;border-radius:50%;"></div>
+                  <span style="color:#ccc;">Voice 10%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p style="margin-top:8px;font-size:13px;color:#aaa;">Each tab is a focused view. Clean separation but requires clicking between tabs to cross-reference.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Single Scrollable Dashboard</h3>
+      <p>All sections on one page: KPI cards → Funnel → Channel breakdown → Template table → Lead table</p>
+      <div class="mockup" style="margin-top: 12px;">
+        <div class="mockup-header">Preview</div>
+        <div class="mockup-body" style="padding: 16px;">
+          <div style="display:flex;gap:8px;margin-bottom:12px;">
+            <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:10px;text-align:center;">
+              <div style="font-size:10px;color:#888;">Sent</div>
+              <div style="font-size:20px;font-weight:700;color:#fff;">1,247</div>
+            </div>
+            <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:10px;text-align:center;">
+              <div style="font-size:10px;color:#888;">Reply Rate</div>
+              <div style="font-size:20px;font-weight:700;color:#22c55e;">34.2%</div>
+            </div>
+            <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:10px;text-align:center;">
+              <div style="font-size:10px;color:#888;">Completion</div>
+              <div style="font-size:20px;font-weight:700;color:#3b82f6;">67.8%</div>
+            </div>
+          </div>
+          <div style="background:#1a1a2e;border-radius:8px;padding:10px;margin-bottom:12px;">
+            <div style="font-size:11px;color:#888;margin-bottom:6px;">Funnel</div>
+            <div style="height:30px;background:#111;border-radius:4px;overflow:hidden;display:flex;">
+              <div style="width:100%;background:#3b82f6;"></div>
+            </div>
+            <div style="height:30px;background:#111;border-radius:4px;overflow:hidden;display:flex;margin-top:3px;">
+              <div style="width:72%;background:#3b82f6;"></div>
+            </div>
+            <div style="height:30px;background:#111;border-radius:4px;overflow:hidden;display:flex;margin-top:3px;">
+              <div style="width:45%;background:#22c55e;"></div>
+            </div>
+          </div>
+          <div style="display:flex;gap:12px;margin-bottom:12px;">
+            <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:10px;">
+              <div style="font-size:11px;color:#888;">Channel Performance</div>
+              <div style="font-size:10px;color:#666;margin-top:4px;">chart area...</div>
+            </div>
+            <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:10px;">
+              <div style="font-size:11px;color:#888;">Failure Reasons</div>
+              <div style="font-size:10px;color:#666;margin-top:4px;">chart area...</div>
+            </div>
+          </div>
+          <div style="background:#1a1a2e;border-radius:8px;padding:10px;">
+            <div style="font-size:11px;color:#888;">Template Performance Table</div>
+            <div style="font-size:10px;color:#666;margin-top:4px;">sortable table...</div>
+          </div>
+        </div>
+      </div>
+      <p style="margin-top:8px;font-size:13px;color:#aaa;">Everything at a glance. Easy to scan but can get long. Good for "give me the full picture" use case.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Overview + Drill-Down</h3>
+      <p>Top KPI cards + charts on main view. Click any metric/template/channel to drill into detail view.</p>
+      <div class="mockup" style="margin-top: 12px;">
+        <div class="mockup-header">Preview</div>
+        <div class="mockup-body" style="padding: 16px;">
+          <div style="display:flex;gap:8px;margin-bottom:12px;">
+            <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:10px;text-align:center;border:1px solid #333;cursor:pointer;">
+              <div style="font-size:10px;color:#888;">Sent</div>
+              <div style="font-size:20px;font-weight:700;color:#fff;">1,247</div>
+              <div style="font-size:9px;color:#2563eb;margin-top:2px;">Click to drill →</div>
+            </div>
+            <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:10px;text-align:center;border:1px solid #333;cursor:pointer;">
+              <div style="font-size:10px;color:#888;">Reply Rate</div>
+              <div style="font-size:20px;font-weight:700;color:#22c55e;">34.2%</div>
+              <div style="font-size:9px;color:#2563eb;margin-top:2px;">Click to drill →</div>
+            </div>
+            <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:10px;text-align:center;border:1px solid #333;cursor:pointer;">
+              <div style="font-size:10px;color:#888;">Completion</div>
+              <div style="font-size:20px;font-weight:700;color:#3b82f6;">67.8%</div>
+              <div style="font-size:9px;color:#2563eb;margin-top:2px;">Click to drill →</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:12px;margin-bottom:12px;">
+            <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:10px;">
+              <div style="font-size:11px;color:#888;">Top Templates</div>
+              <div style="margin-top:6px;font-size:11px;">
+                <div style="display:flex;justify-content:space-between;color:#ccc;padding:3px 0;border-bottom:1px solid #222;">
+                  <span>Masterclass</span><span style="color:#22c55e;">42% reply</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;color:#ccc;padding:3px 0;border-bottom:1px solid #222;">
+                  <span>Follow-up</span><span style="color:#eab308;">28% reply</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;color:#ccc;padding:3px 0;">
+                  <span>Re-engage</span><span style="color:#ef4444;">12% reply</span>
+                </div>
+              </div>
+            </div>
+            <div style="flex:1;background:#1a1a2e;border-radius:8px;padding:10px;">
+              <div style="font-size:11px;color:#888;">Channel Comparison</div>
+              <div style="margin-top:8px;">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                  <div style="font-size:10px;color:#ccc;width:60px;">WhatsApp</div>
+                  <div style="flex:1;height:14px;background:#111;border-radius:3px;overflow:hidden;">
+                    <div style="width:72%;height:100%;background:#22c55e;border-radius:3px;"></div>
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                  <div style="font-size:10px;color:#ccc;width:60px;">SMS</div>
+                  <div style="flex:1;height:14px;background:#111;border-radius:3px;overflow:hidden;">
+                    <div style="width:45%;height:100%;background:#3b82f6;border-radius:3px;"></div>
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <div style="font-size:10px;color:#ccc;width:60px;">Voice</div>
+                  <div style="flex:1;height:14px;background:#111;border-radius:3px;overflow:hidden;">
+                    <div style="width:30%;height:100%;background:#a855f7;border-radius:3px;"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style="background:#1a1a2e;border-radius:8px;padding:10px;">
+            <div style="font-size:11px;color:#888;">Recent Activity</div>
+            <div style="font-size:10px;color:#666;margin-top:4px;">live feed of touchpoints...</div>
+          </div>
+        </div>
+      </div>
+      <p style="margin-top:8px;font-size:13px;color:#aaa;">Best of both: quick overview without scrolling, deep detail on demand. Most interactive but more complex to build.</p>
+    </div>
+  </div>
+</div>

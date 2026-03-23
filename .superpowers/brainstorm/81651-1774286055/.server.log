@@ -1,0 +1,5 @@
+{"type":"server-started","port":52115,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:52115","screen_dir":"/Users/animeshmahato/Wavelength v3/.superpowers/brainstorm/81651-1774286055"}
+{"type":"screen-added","file":"/Users/animeshmahato/Wavelength v3/.superpowers/brainstorm/81651-1774286055/design-summary.html"}
+{"type":"screen-added","file":"/Users/animeshmahato/Wavelength v3/.superpowers/brainstorm/81651-1774286055/design-summary-v2.html"}
+{"type":"screen-added","file":"/Users/animeshmahato/Wavelength v3/.superpowers/brainstorm/81651-1774286055/waiting.html"}
+{"type":"server-stopped","reason":"idle timeout"}

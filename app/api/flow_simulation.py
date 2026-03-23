@@ -61,10 +61,15 @@ class LiveTestResponse(BaseModel):
 async def _get_version_graph(db: AsyncSession, flow_id: str, version_id: str, org_id: str):
     """Load nodes + edges for a flow version. Returns (nodes, edges, entry_node_id)."""
     # Import here to avoid circular deps — models defined in Plan 2
-    from app.models.flow import FlowNode, FlowEdge, FlowVersion
+    from app.models.flow import FlowNode, FlowEdge, FlowVersion, FlowDefinition
 
     version = await db.get(FlowVersion, version_id)
-    if not version or str(version.flow_id) != flow_id or str(version.org_id) != org_id:
+    if not version or str(version.flow_id) != flow_id:
+        raise HTTPException(status_code=404, detail="Flow version not found")
+
+    # FlowVersion doesn't have org_id; verify via FlowDefinition
+    flow_def = await db.get(FlowDefinition, version.flow_id)
+    if not flow_def or str(flow_def.org_id) != org_id:
         raise HTTPException(status_code=404, detail="Flow version not found")
 
     nodes_result = await db.execute(
@@ -287,13 +292,15 @@ async def create_live_test(
     if not PHONE_PATTERN.match(phone_number):
         raise ValueError("Please enter a valid phone number (e.g. +919876543210)")
 
-    from app.models.flow import FlowVersion, FlowInstance
+    from app.models.flow import FlowVersion, FlowInstance, FlowDefinition
 
-    # Find published version
+    # Find published version (FlowVersion has no org_id, join through FlowDefinition)
     result = await db.execute(
-        select(FlowVersion).where(
+        select(FlowVersion)
+        .join(FlowDefinition, FlowVersion.flow_id == FlowDefinition.id)
+        .where(
             FlowVersion.flow_id == flow_id,
-            FlowVersion.org_id == org_id,
+            FlowDefinition.org_id == org_id,
             FlowVersion.status == "published",
         )
     )
@@ -328,6 +335,128 @@ async def create_live_test(
         "phone_number": phone_number,
         "status": "active",
     }
+
+
+# ---------------------------------------------------------------------------
+# Instance listing & journey helpers (used by tests + routes)
+# ---------------------------------------------------------------------------
+
+async def _query_instances(db: AsyncSession, flow_id: str, org_id: str, is_test: bool):
+    """Query flow instances with optional is_test filter. Returns (instances, total)."""
+    from app.models.flow import FlowInstance
+
+    stmt = select(FlowInstance).where(
+        FlowInstance.flow_id == flow_id,
+        FlowInstance.org_id == org_id,
+        FlowInstance.is_test == is_test,
+    )
+    result = await db.execute(stmt)
+    instances = list(result.scalars().all())
+    return instances, len(instances)
+
+
+async def fetch_flow_instances(
+    db: AsyncSession,
+    flow_id: str,
+    org_id: str,
+    is_test: bool = False,
+) -> dict:
+    """Fetch flow instances, optionally filtering by is_test flag."""
+    instances, total = await _query_instances(db, flow_id, org_id, is_test)
+    return {
+        "total": total,
+        "instances": [
+            {
+                "id": str(inst.id),
+                "is_test": inst.is_test,
+                "status": inst.status,
+                "lead_id": str(inst.lead_id),
+            }
+            for inst in instances
+        ],
+    }
+
+
+async def _get_instance(db: AsyncSession, flow_id: str, instance_id: str):
+    """Get a single flow instance by ID."""
+    from app.models.flow import FlowInstance
+
+    result = await db.execute(
+        select(FlowInstance).where(
+            FlowInstance.id == instance_id,
+            FlowInstance.flow_id == flow_id,
+        )
+    )
+    return result.scalars().first()
+
+
+async def _get_touchpoints(db: AsyncSession, instance_id: str):
+    """Get touchpoints for a flow instance."""
+    from app.models.flow import FlowTouchpoint
+
+    result = await db.execute(
+        select(FlowTouchpoint).where(FlowTouchpoint.instance_id == instance_id)
+        .order_by(FlowTouchpoint.scheduled_at.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def _get_transitions(db: AsyncSession, instance_id: str):
+    """Get transitions for a flow instance."""
+    from app.models.flow import FlowTransition
+
+    result = await db.execute(
+        select(FlowTransition).where(FlowTransition.instance_id == instance_id)
+        .order_by(FlowTransition.transitioned_at.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def fetch_journey_data(
+    db: AsyncSession,
+    flow_id: str,
+    instance_id: str,
+    org_id: str,
+) -> dict:
+    """Fetch touchpoints + transitions for a flow instance journey."""
+    instance = await _get_instance(db, flow_id, instance_id)
+    if not instance:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    touchpoints = await _get_touchpoints(db, instance_id)
+    transitions = await _get_transitions(db, instance_id)
+
+    return {
+        "touchpoints": [
+            {
+                "id": str(tp.id),
+                "node_id": str(tp.node_id),
+                "status": tp.status,
+                "outcome": tp.outcome,
+                "scheduled_at": tp.scheduled_at.isoformat() if tp.scheduled_at else None,
+                "executed_at": tp.executed_at.isoformat() if tp.executed_at else None,
+                "completed_at": tp.completed_at.isoformat() if tp.completed_at else None,
+            }
+            for tp in touchpoints
+        ],
+        "transitions": [
+            {
+                "id": str(tr.id),
+                "from_node_id": str(tr.from_node_id) if tr.from_node_id else None,
+                "to_node_id": str(tr.to_node_id),
+                "edge_id": str(tr.edge_id) if tr.edge_id else None,
+                "outcome_data": tr.outcome_data,
+                "transitioned_at": tr.transitioned_at.isoformat() if tr.transitioned_at else None,
+            }
+            for tr in transitions
+        ],
+    }
+
+
+def compute_compressed_delay(delay_seconds: int, delay_ratio: int) -> int:
+    """Compress a delay by the given ratio, with a minimum of 10 seconds."""
+    compressed = delay_seconds // delay_ratio
+    return max(compressed, 10)
 
 
 # ---------------------------------------------------------------------------
