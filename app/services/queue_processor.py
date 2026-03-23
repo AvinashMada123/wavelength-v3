@@ -188,7 +188,10 @@ async def stop():
 
 
 async def _cleanup_stale_calls():
-    """Mark calls stuck in 'ringing' or 'initiated' as 'no_answer' after timeout."""
+    """Mark calls stuck in 'ringing' or 'initiated' as 'no_answer' after timeout.
+    Also reset queue entries stuck in 'processing' for too long (e.g. Plivo callback
+    never arrived, pipeline crashed) so they don't block concurrency slots forever.
+    """
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=STALE_CALL_TIMEOUT_MINS)
     async with get_db_session() as db:
         result = await db.execute(
@@ -204,6 +207,28 @@ async def _cleanup_stale_calls():
         )
         if result.rowcount > 0:
             logger.info("stale_calls_cleaned", count=result.rowcount)
+
+        # Reset queue entries stuck in 'processing' for more than 10 minutes.
+        # processed_at is set when entering 'processing'; fall back to created_at
+        # for legacy rows that were never stamped.
+        queue_cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+        queue_result = await db.execute(
+            update(QueuedCall)
+            .where(
+                QueuedCall.status == "processing",
+                func.coalesce(QueuedCall.processed_at, QueuedCall.created_at) < queue_cutoff,
+            )
+            .values(status="failed", error_message="Stale processing — auto-reset")
+            .returning(QueuedCall.id)
+        )
+        stale_queue_ids = queue_result.scalars().all()
+        if stale_queue_ids:
+            logger.warning(
+                "stale_processing_queue_reset",
+                count=len(stale_queue_ids),
+                ids=[str(qid) for qid in stale_queue_ids],
+            )
+
         await db.commit()
 
 
@@ -340,6 +365,7 @@ async def _process_batch(loader: BotConfigLoader):
 
             for queued_call in calls:
                 queued_call.status = "processing"
+                queued_call.processed_at = datetime.now(timezone.utc)
                 calls_to_process.append((queued_call.id, queued_call.bot_id))
                 # Track org-level count
                 if org_id:
