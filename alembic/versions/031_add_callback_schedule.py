@@ -16,20 +16,25 @@ def upgrade():
     op.add_column("bot_configs", sa.Column("callback_schedule", JSONB, nullable=True))
 
     # Phase 2: Migrate existing callback configs to new format
+    # Use a FROM subquery to avoid aggregate-in-UPDATE error
     op.execute("""
-        UPDATE bot_configs
+        UPDATE bot_configs bc
         SET callback_schedule = jsonb_build_object(
             'template', 'custom',
-            'steps', (
-                SELECT jsonb_agg(
-                    jsonb_build_object('delay_hours', callback_retry_delay_hours)
-                )
-                FROM generate_series(1, callback_max_retries)
-            )
+            'steps', s.steps_arr
         )
-        WHERE callback_enabled = true
-          AND callback_max_retries > 0
-          AND callback_schedule IS NULL
+        FROM (
+            SELECT id,
+                   jsonb_agg(jsonb_build_object('delay_hours', callback_retry_delay_hours))
+                       AS steps_arr
+            FROM bot_configs,
+                 generate_series(1, callback_max_retries)
+            WHERE callback_enabled = true
+              AND callback_max_retries > 0
+              AND callback_schedule IS NULL
+            GROUP BY id
+        ) s
+        WHERE bc.id = s.id
     """)
 
 
