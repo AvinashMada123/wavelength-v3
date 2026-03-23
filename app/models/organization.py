@@ -10,6 +10,24 @@ from app.models.bot_config import Base
 
 
 class Organization(Base):
+    """Organization model.
+
+    settings JSONB schema supports these keys:
+      {
+        "business_hours": {
+          "enabled": true, "start": "09:00", "end": "19:00",
+          "days": ["mon", "tue", "wed", "thu", "fri", "sat"],
+          "timezone": "Asia/Kolkata"
+        },
+        "rate_limits": {
+          "daily_cap": 5, "hourly_cap": 2, "cooldown_seconds": 60
+        }
+      }
+
+    Usage:
+      business_hours = org.settings.get("business_hours", {})
+      rate_limits = org.settings.get("rate_limits", {})
+    """
     __tablename__ = "organizations"
 
     id: Mapped[uuid.UUID] = mapped_column(
