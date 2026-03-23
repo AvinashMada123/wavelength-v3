@@ -79,11 +79,13 @@ async def test_lead_flow_history_returns_enrollments():
     mock_result.all.return_value = [_make_instance_row()]
     mock_db.execute = AsyncMock(return_value=mock_result)
 
-    with (
-        patch("app.api.flow_leads.get_db", return_value=mock_db),
-        patch("app.api.flow_leads.get_current_org", return_value=_mock_org()),
-    ):
-        async with AsyncClient(
+    from app.api.flow_leads import get_db
+    from app.auth.dependencies import get_current_org
+
+    app.dependency_overrides[get_db] = lambda: mock_db
+    app.dependency_overrides[get_current_org] = lambda: _mock_org()
+
+    async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             resp = await client.get(f"/api/flows/leads/{FAKE_LEAD_ID}/history")
@@ -109,11 +111,13 @@ async def test_lead_flow_history_empty():
     mock_result.all.return_value = []
     mock_db.execute = AsyncMock(return_value=mock_result)
 
-    with (
-        patch("app.api.flow_leads.get_db", return_value=mock_db),
-        patch("app.api.flow_leads.get_current_org", return_value=_mock_org()),
-    ):
-        async with AsyncClient(
+    from app.api.flow_leads import get_db
+    from app.auth.dependencies import get_current_org
+
+    app.dependency_overrides[get_db] = lambda: mock_db
+    app.dependency_overrides[get_current_org] = lambda: _mock_org()
+
+    async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             resp = await client.get(f"/api/flows/leads/{FAKE_LEAD_ID}/history")
@@ -141,11 +145,13 @@ async def test_instance_journey_returns_transitions():
     ]
     mock_db.execute = AsyncMock(return_value=mock_result)
 
-    with (
-        patch("app.api.flow_leads.get_db", return_value=mock_db),
-        patch("app.api.flow_leads.get_current_org", return_value=_mock_org()),
-    ):
-        async with AsyncClient(
+    from app.api.flow_leads import get_db
+    from app.auth.dependencies import get_current_org
+
+    app.dependency_overrides[get_db] = lambda: mock_db
+    app.dependency_overrides[get_current_org] = lambda: _mock_org()
+
+    async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             resp = await client.get(f"/api/flows/instances/{FAKE_INSTANCE_ID}/journey")
@@ -183,11 +189,13 @@ async def test_canvas_leads_returns_filtered_leads():
     mock_count_result.scalar.return_value = 1
     mock_db.execute = AsyncMock(side_effect=[mock_count_result, mock_result])
 
-    with (
-        patch("app.api.flow_leads.get_db", return_value=mock_db),
-        patch("app.api.flow_leads.get_current_org", return_value=_mock_org()),
-    ):
-        async with AsyncClient(
+    from app.api.flow_leads import get_db
+    from app.auth.dependencies import get_current_org
+
+    app.dependency_overrides[get_db] = lambda: mock_db
+    app.dependency_overrides[get_current_org] = lambda: _mock_org()
+
+    async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             resp = await client.get(
@@ -222,11 +230,13 @@ async def test_node_lead_counts():
     mock_result.all.return_value = [mock_row_1, mock_row_2]
     mock_db.execute = AsyncMock(return_value=mock_result)
 
-    with (
-        patch("app.api.flow_leads.get_db", return_value=mock_db),
-        patch("app.api.flow_leads.get_current_org", return_value=_mock_org()),
-    ):
-        async with AsyncClient(
+    from app.api.flow_leads import get_db
+    from app.auth.dependencies import get_current_org
+
+    app.dependency_overrides[get_db] = lambda: mock_db
+    app.dependency_overrides[get_current_org] = lambda: _mock_org()
+
+    async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             resp = await client.get(f"/api/flows/{FAKE_FLOW_ID}/node-counts")
