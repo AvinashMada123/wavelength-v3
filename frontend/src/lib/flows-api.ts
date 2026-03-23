@@ -1,4 +1,51 @@
 import { apiFetch } from "./api";
+import type { FlowDefinition, FlowVersion, FlowNodeData, FlowEdgeData, ValidationResult } from "./flow-types";
+
+// ---------------------------------------------------------------------------
+// Flow CRUD & versioning
+// ---------------------------------------------------------------------------
+
+/** Fetch a flow definition with its versions */
+export async function fetchFlow(flowId: string): Promise<FlowDefinition> {
+  return apiFetch(`/api/flows/${flowId}`);
+}
+
+/** Create a new draft version (clones published) */
+export async function createDraftVersion(flowId: string): Promise<FlowVersion> {
+  return apiFetch(`/api/flows/${flowId}/versions`, { method: "POST" });
+}
+
+/** Save the graph (nodes + edges) for a draft version */
+export async function saveGraph(
+  flowId: string,
+  versionId: string,
+  graph: { nodes: FlowNodeData[]; edges: FlowEdgeData[] },
+): Promise<void> {
+  return apiFetch(`/api/flows/${flowId}/versions/${versionId}/graph`, {
+    method: "PUT",
+    body: JSON.stringify(graph),
+  });
+}
+
+/** Server-side validation of a flow version */
+export async function validateFlow(
+  flowId: string,
+  versionId: string,
+): Promise<ValidationResult> {
+  return apiFetch(`/api/flows/${flowId}/versions/${versionId}/validate`, {
+    method: "POST",
+  });
+}
+
+/** Publish a draft version */
+export async function publishVersion(
+  flowId: string,
+  versionId: string,
+): Promise<void> {
+  return apiFetch(`/api/flows/${flowId}/versions/${versionId}/publish`, {
+    method: "POST",
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Types

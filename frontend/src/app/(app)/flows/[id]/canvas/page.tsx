@@ -1,7 +1,12 @@
-// (or wherever FlowCanvas is defined in Plan 3)
+// frontend/src/app/(app)/flows/[id]/canvas/page.tsx
+"use client";
 
-// Additional imports for simulation
+import { useState } from "react";
+import { useParams } from "next/navigation";
+import { toast } from "sonner";
+
 import { useFlowSimulation } from "@/hooks/use-flow-simulation";
+import type { FlowGraph } from "@/lib/flow-simulation";
 import { useFlowJourney } from "@/hooks/use-flow-journey";
 import { SimulationToolbar } from "@/components/flow/SimulationToolbar";
 import { SimulationSummary } from "@/components/flow/SimulationSummary";
@@ -14,27 +19,43 @@ import {
   getJourneyNodeStyle,
   getJourneyEdgeStyle,
 } from "@/components/flow/useSimulationStyles";
+import { Button } from "@/components/ui/button";
 
-// Inside the canvas component:
+import {
+  ReactFlow,
+  useNodesState,
+  useEdgesState,
+  type Node,
+  type Edge,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+
 export default function FlowCanvasPage() {
-  // ... existing Plan 3 state (nodes, edges, version, etc.)
+  const params = useParams();
+  const flowId = params.id as string;
 
-  // --- Simulation ---
+  const [nodes] = useNodesState<Node>([]);
+  const [edges] = useEdgesState<Edge>([]);
+
+  // Build graph for simulation
+  const nodesWithIncoming = new Set(edges.map((e) => e.target));
+  const entryNode = nodes.find((n) => !nodesWithIncoming.has(n.id));
+
   const graph: FlowGraph = {
     nodes: nodes.map((n) => ({
       id: n.id,
-      type: n.data.nodeType,
-      name: n.data.name,
-      config: n.data.config,
+      type: (n.data.nodeType as string) || n.type || "",
+      name: (n.data.name as string) || "",
+      config: (n.data.config as Record<string, unknown>) || {},
       position: n.position,
     })),
     edges: edges.map((e) => ({
       id: e.id,
       source: e.source,
       target: e.target,
-      condition_label: e.data?.conditionLabel ?? "default",
+      condition_label: (e.data?.conditionLabel as string) ?? "default",
     })),
-    entryNodeId: nodes.find((n) => /* no incoming edges */)?.id ?? nodes[0]?.id,
+    entryNodeId: entryNode?.id ?? nodes[0]?.id ?? "",
   };
 
   const simulation = useFlowSimulation(graph);
@@ -42,7 +63,6 @@ export default function FlowCanvasPage() {
   const [liveTestOpen, setLiveTestOpen] = useState(false);
 
   // --- Apply visual styles ---
-  // In the node rendering, apply simulation/journey styles:
   const getNodeClassName = (nodeId: string) => {
     if (simulation.isActive && simulation.simulationState) {
       return getSimulationNodeStyle(
@@ -74,13 +94,12 @@ export default function FlowCanvasPage() {
 
   return (
     <div className="relative h-full">
-      {/* Canvas Toolbar — add simulation + test buttons */}
+      {/* Canvas Toolbar */}
       <div className="absolute left-1/2 top-4 z-50 -translate-x-1/2">
         {simulation.isActive ? (
           <SimulationToolbar simulation={simulation} graph={graph} />
         ) : (
           <div className="flex items-center gap-2">
-            {/* ... existing toolbar buttons from Plan 3 */}
             <SimulationToolbar simulation={simulation} graph={graph} />
             <Button
               size="sm"
@@ -105,7 +124,6 @@ export default function FlowCanvasPage() {
           style: getEdgeStyle(e.id),
           animated: getEdgeStyle(e.id).animated,
         }))}
-        // ... other React Flow props
       />
 
       {/* Simulation summary overlay */}
@@ -123,7 +141,7 @@ export default function FlowCanvasPage() {
         open={liveTestOpen}
         onOpenChange={setLiveTestOpen}
         flowId={flowId}
-        onTestStarted={(instanceId) => {
+        onTestStarted={() => {
           journey.refresh();
           toast.success("Live test started — check the Leads panel to track progress");
         }}
