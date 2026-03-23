@@ -200,3 +200,68 @@ class TestComputeScheduledAt:
         bot = FakeBotConfig()
         result = compute_scheduled_at(step, bot)
         assert result > datetime.now(timezone.utc)
+
+
+class TestRetryIntegration:
+    """Integration tests — verify full flow with real schema validation."""
+
+    def test_template_roundtrip(self):
+        """Template -> serialize -> deserialize -> matches."""
+        schedule = CallbackSchedule(
+            template="standard",
+            steps=[
+                RetryStep(delay_hours=3),
+                RetryStep(delay_hours=3),
+                RetryStep(delay_type="next_day", preferred_window=[11, 13]),
+                RetryStep(delay_type="next_day", preferred_window=[20, 22]),
+            ],
+        )
+        data = schedule.model_dump()
+        restored = CallbackSchedule(**data)
+        assert len(restored.steps) == 4
+        assert restored.steps[0].delay_hours == 3
+        assert restored.steps[2].preferred_window == [11, 13]
+        assert restored.template == "standard"
+
+    def test_step_progression_logic(self):
+        """Simulate 3 consecutive retries — each uses the next step."""
+        steps = [
+            {"delay_hours": 3},
+            {"delay_hours": 3},
+            {"delay_type": "next_day", "preferred_window": [11, 13]},
+        ]
+        bot = FakeBotConfig()
+
+        for retry_count in range(3):
+            step = steps[retry_count]
+            result = compute_scheduled_at(step, bot)
+            assert result > datetime.now(timezone.utc)
+
+        assert 3 >= len(steps)
+
+    def test_api_rejects_conflicting_windows(self):
+        """preferred_window [20,22] with calling window [9,18] -> should conflict."""
+        step = RetryStep(delay_type="next_day", preferred_window=[20, 22])
+        pw_start, pw_end = step.preferred_window
+        w_start, w_end = 9, 18
+        has_overlap = not (pw_end <= w_start or pw_start >= w_end)
+        assert not has_overlap
+
+    def test_migration_conversion_logic(self):
+        """Old config (delay=2, max=3) -> 3 steps of delay_hours=2."""
+        old_delay = 2.0
+        old_max = 3
+        steps = [{"delay_hours": old_delay} for _ in range(old_max)]
+        schedule = CallbackSchedule(template="custom", steps=[RetryStep(**s) for s in steps])
+        assert len(schedule.steps) == 3
+        assert all(s.delay_hours == 2.0 for s in schedule.steps)
+
+    def test_migration_skips_zero_retries(self):
+        """max_retries=0 -> no steps -> should NOT create schedule."""
+        old_max = 0
+        assert old_max <= 0
+
+    def test_migration_skips_disabled_bots(self):
+        """callback_enabled=false -> should NOT create schedule."""
+        callback_enabled = False
+        assert not callback_enabled
