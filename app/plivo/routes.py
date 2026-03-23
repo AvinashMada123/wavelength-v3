@@ -296,18 +296,68 @@ async def _save_call_analytics(
             logger.error("alert_threshold_check_failed", call_sid=call_sid, error=str(e))
 
 
+# Maps raw Plivo CallStatus to normalized CallOutcome enum values.
+# IMPORTANT: Do NOT collapse statuses — each value is used for flow branching.
+PLIVO_STATUS_MAP = {
+    "completed": "picked_up",
+    "busy": "busy",
+    "failed": "failed",
+    "timeout": "timeout",
+    "no-answer": "no_answer",
+    "cancel": "failed",
+    "machine": "voicemail",
+}
+
+
 def _map_plivo_status(plivo_status: str | None) -> str:
-    """Map Plivo call status to our internal status."""
-    mapping = {
-        "completed": "completed",
-        "busy": "no_answer",
-        "failed": "failed",
-        "timeout": "no_answer",
-        "no-answer": "no_answer",
-        "cancel": "failed",
-        "machine": "voicemail",
-    }
-    return mapping.get(plivo_status or "", plivo_status or "unknown")
+    """Map raw Plivo status to normalized CallOutcome.
+
+    Returns the normalized status for flow condition branching.
+    Unknown statuses return 'unknown' rather than passing through raw values.
+    """
+    if plivo_status is None:
+        return "unknown"
+    return PLIVO_STATUS_MAP.get(plivo_status, "unknown")
+
+
+async def _update_sequence_touchpoint(
+    db,
+    touchpoint_id: str,
+    call_outcome: str,
+    raw_plivo_status: str,
+) -> None:
+    """Update a sequence touchpoint with the call outcome.
+
+    Called from plivo_event() when a call finishes and the CallLog
+    has a sequence_touchpoint_id in context_data.
+    """
+    from app.models.sequence import SequenceTouchpoint
+
+    result = await db.execute(
+        select(SequenceTouchpoint).where(SequenceTouchpoint.id == touchpoint_id)
+    )
+    touchpoint = result.scalars().first()
+
+    if not touchpoint:
+        logger.warning("touchpoint_not_found_for_outcome", touchpoint_id=touchpoint_id)
+        return
+
+    if touchpoint.status not in ("scheduled", "sending"):
+        logger.info("touchpoint_already_terminal", touchpoint_id=touchpoint_id, status=touchpoint.status)
+        return
+
+    # Update touchpoint with call outcome
+    touchpoint.status = "sent" if call_outcome == "picked_up" else "failed"
+    touchpoint.sent_at = datetime.now(timezone.utc)
+
+    # Store outcome in step_snapshot for downstream access
+    snapshot = touchpoint.step_snapshot or {}
+    snapshot["call_outcome"] = call_outcome
+    snapshot["raw_plivo_status"] = raw_plivo_status
+    touchpoint.step_snapshot = snapshot
+
+    await db.commit()
+    logger.info("touchpoint_outcome_updated", touchpoint_id=touchpoint_id, call_outcome=call_outcome)
 
 
 # --- Routes ---
@@ -789,6 +839,19 @@ async def plivo_event(call_sid: str, request: Request):
     if call_log:
         from app.services.queue_processor import finalize_campaign_call
         await finalize_campaign_call(call_log.id, mapped_status)
+
+    # --- Call outcome feedback loop for sequences ---
+    # Check if this call was triggered by a sequence touchpoint
+    if call_log and call_log.context_data:
+        touchpoint_id = call_log.context_data.get("sequence_touchpoint_id")
+        if touchpoint_id:
+            async with get_db_session() as db:
+                await _update_sequence_touchpoint(
+                    db=db,
+                    touchpoint_id=touchpoint_id,
+                    call_outcome=mapped_status,
+                    raw_plivo_status=call_status,
+                )
 
     # Backup GHL outcome posting — if pipeline didn't post (e.g. crash)
     if call_log and call_log.context_data and not call_log.outcome:
