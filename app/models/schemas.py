@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # --- Goal Config schemas ---
@@ -133,6 +133,49 @@ class TriggerCallRequest(BaseModel):
         return merged
 
 
+class RetryStep(BaseModel):
+    """A single step in a retry schedule."""
+    delay_hours: float | None = None
+    delay_type: Literal["next_day"] | None = None
+    preferred_window: list[int] | None = None
+
+    @model_validator(mode="after")
+    def validate_step(self):
+        if self.delay_hours is not None and self.delay_type is not None:
+            raise ValueError("delay_hours and delay_type are mutually exclusive")
+        if self.delay_hours is None and self.delay_type is None:
+            raise ValueError("One of delay_hours or delay_type is required")
+        if self.delay_hours is not None:
+            if self.delay_hours <= 0:
+                raise ValueError("delay_hours must be positive")
+            if self.delay_hours > 48:
+                raise ValueError("delay_hours must be 48 or less")
+        if self.preferred_window is not None:
+            if len(self.preferred_window) != 2:
+                raise ValueError("preferred_window must be [start_hour, end_hour]")
+            s, e = self.preferred_window
+            if not (0 <= s <= 23 and 0 <= e <= 23):
+                raise ValueError("preferred_window hours must be 0-23")
+            if s >= e:
+                raise ValueError("preferred_window start must be before end (overnight windows not supported)")
+        return self
+
+
+class CallbackSchedule(BaseModel):
+    """Per-bot retry schedule with steps and optional template."""
+    template: Literal["standard", "aggressive", "relaxed", "custom"] = "custom"
+    steps: list[RetryStep]
+
+    @field_validator("steps")
+    @classmethod
+    def validate_steps(cls, v):
+        if len(v) == 0:
+            raise ValueError("At least one retry step is required")
+        if len(v) > 10:
+            raise ValueError("Maximum 10 retry steps")
+        return v
+
+
 class CreateBotConfigRequest(BaseModel):
     agent_name: str
     company_name: str
@@ -176,6 +219,7 @@ class CreateBotConfigRequest(BaseModel):
     callback_timezone: str = "Asia/Kolkata"
     callback_window_start: int = 9
     callback_window_end: int = 20
+    callback_schedule: CallbackSchedule | None = None
     bot_switch_targets: list[dict] = Field(default_factory=list)
     sequence_template_id: uuid.UUID | None = None
     max_concurrent_calls: int = 5
@@ -228,6 +272,7 @@ class UpdateBotConfigRequest(BaseModel):
     callback_timezone: str | None = None
     callback_window_start: int | None = None
     callback_window_end: int | None = None
+    callback_schedule: CallbackSchedule | dict | None = None
     bot_switch_targets: list[dict] | None = None
     sequence_template_id: uuid.UUID | None = None
     max_concurrent_calls: int | None = None
@@ -285,6 +330,7 @@ class BotConfigResponse(BaseModel):
     callback_timezone: str
     callback_window_start: int
     callback_window_end: int
+    callback_schedule: CallbackSchedule | dict | None = None
     bot_switch_targets: list[dict]
     sequence_template_id: uuid.UUID | None = None
     max_concurrent_calls: int
