@@ -64,6 +64,7 @@ class BotConfig(Base):
     callback_timezone: Mapped[str] = mapped_column(Text, nullable=False, server_default="Asia/Kolkata")
     callback_window_start: Mapped[int] = mapped_column(Integer, nullable=False, server_default="9")
     callback_window_end: Mapped[int] = mapped_column(Integer, nullable=False, server_default="20")
+    callback_schedule: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     bot_switch_targets: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     sequence_template_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("sequence_templates.id", ondelete="SET NULL"), nullable=True
