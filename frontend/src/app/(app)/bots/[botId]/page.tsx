@@ -53,8 +53,45 @@ import { useAuth } from "@/contexts/auth-context";
 import { useBot, useBots, useCreateBot, useUpdateBot } from "@/hooks/use-bots";
 import { usePhoneNumbers } from "@/hooks/use-settings";
 import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, ELEVENLABS_VOICE_GROUPS, SARVAM_LANGUAGE_OPTIONS, DEEPGRAM_LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS_CLIENT, LLM_PROVIDER_OPTIONS, LLM_MODEL_OPTIONS } from "@/lib/constants";
-import type { BotConfig, GHLWorkflow, GoalConfig, SuccessCriterion, RedFlagConfig, DataCaptureField } from "@/types/api";
+import type { BotConfig, GHLWorkflow, GoalConfig, SuccessCriterion, RedFlagConfig, DataCaptureField, CallbackSchedule, RetryStep } from "@/types/api";
 import { fetchTemplates, type SequenceTemplate } from "@/lib/sequences-api";
+
+// ---------------------------------------------------------------------------
+// Retry schedule templates
+// ---------------------------------------------------------------------------
+
+const RETRY_TEMPLATES: Record<string, { label: string; description: string; steps: RetryStep[] }> = {
+  standard: {
+    label: "Standard",
+    description: "3h, 3h, next day midday, next day evening",
+    steps: [
+      { delay_hours: 3 },
+      { delay_hours: 3 },
+      { delay_type: "next_day", preferred_window: [11, 13] },
+      { delay_type: "next_day", preferred_window: [20, 22] },
+    ],
+  },
+  aggressive: {
+    label: "Aggressive",
+    description: "1h, 2h, 3h, next day evening, next day midday",
+    steps: [
+      { delay_hours: 1 },
+      { delay_hours: 2 },
+      { delay_hours: 3 },
+      { delay_type: "next_day", preferred_window: [20, 22] },
+      { delay_type: "next_day", preferred_window: [11, 13] },
+    ],
+  },
+  relaxed: {
+    label: "Relaxed",
+    description: "Next day midday, next day evening, next day midday",
+    steps: [
+      { delay_type: "next_day", preferred_window: [11, 13] },
+      { delay_type: "next_day", preferred_window: [20, 22] },
+      { delay_type: "next_day", preferred_window: [11, 13] },
+    ],
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Form type
@@ -98,6 +135,7 @@ interface BotForm {
   callback_timezone: string;
   callback_window_start: number;
   callback_window_end: number;
+  callback_schedule: CallbackSchedule | null;
   call_memory_enabled: boolean;
   call_memory_count: number;
   bot_switch_targets: BotSwitchTarget[];
@@ -148,6 +186,7 @@ const EMPTY_FORM: BotForm = {
   callback_timezone: "Asia/Kolkata",
   callback_window_start: 9,
   callback_window_end: 20,
+  callback_schedule: null,
   call_memory_enabled: false,
   call_memory_count: 3,
   bot_switch_targets: [],
@@ -233,6 +272,14 @@ function botToForm(bot: BotConfig): BotForm {
     callback_timezone: bot.callback_timezone || "Asia/Kolkata",
     callback_window_start: bot.callback_window_start ?? 9,
     callback_window_end: bot.callback_window_end ?? 20,
+    callback_schedule: (bot as any).callback_schedule || (bot.callback_enabled && (bot.callback_max_retries ?? 0) > 0
+      ? {
+          template: "custom" as const,
+          steps: Array.from({ length: bot.callback_max_retries ?? 3 }, () => ({
+            delay_hours: bot.callback_retry_delay_hours ?? 2,
+          })),
+        }
+      : null),
     call_memory_enabled: bot.call_memory_enabled ?? false,
     call_memory_count: bot.call_memory_count ?? 3,
     bot_switch_targets: bot.bot_switch_targets || [],
@@ -2177,50 +2224,180 @@ export default function BotEditorPage() {
 
                         {form.callback_enabled && (
                           <div className="space-y-4">
-                            <div className="flex items-center justify-between rounded-lg border p-4">
-                              <div className="space-y-1">
-                                <p className="text-sm font-medium">Default Retry Delay</p>
-                                <p className="text-xs text-muted-foreground">
-                                  Hours to wait before calling back when no specific time is given.
-                                </p>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Input
-                                  type="number"
-                                  value={form.callback_retry_delay_hours}
-                                  onChange={(e) =>
-                                    setField("callback_retry_delay_hours", Math.max(0.5, parseFloat(e.target.value) || 2))
-                                  }
-                                  min={0.5}
-                                  max={48}
-                                  step={0.5}
-                                  className="w-20 text-center"
-                                />
-                                <span className="text-sm text-muted-foreground">hrs</span>
+                            {/* Template Picker */}
+                            <div>
+                              <Label className="text-sm font-medium">Retry Schedule Template</Label>
+                              <div className="flex gap-2 mt-2">
+                                {Object.entries(RETRY_TEMPLATES).map(([key, tmpl]) => (
+                                  <Button
+                                    key={key}
+                                    variant={form.callback_schedule?.template === key ? "default" : "outline"}
+                                    size="sm"
+                                    onClick={() => setField("callback_schedule", {
+                                      template: key as CallbackSchedule["template"],
+                                      steps: tmpl.steps,
+                                    })}
+                                  >
+                                    {tmpl.label}
+                                  </Button>
+                                ))}
+                                {form.callback_schedule?.template === "custom" && (
+                                  <Badge variant="secondary">Custom</Badge>
+                                )}
                               </div>
                             </div>
 
-                            <div className="flex items-center justify-between rounded-lg border p-4">
-                              <div className="space-y-1">
-                                <p className="text-sm font-medium">Max Retries</p>
-                                <p className="text-xs text-muted-foreground">
-                                  Maximum number of callback attempts per contact.
-                                </p>
+                            {/* Step List */}
+                            {form.callback_schedule && form.callback_schedule.steps.length > 0 && (
+                              <div className="space-y-2">
+                                <Label className="text-sm font-medium">Retry Steps</Label>
+                                {form.callback_schedule.steps.map((step, idx) => (
+                                  <div key={idx} className="flex items-center gap-2 p-2 rounded border bg-muted/30">
+                                    <Badge variant="outline" className="shrink-0">Step {idx + 1}</Badge>
+
+                                    <Select
+                                      value={step.delay_type ? "next_day" : "delay"}
+                                      onValueChange={(val) => {
+                                        const newSteps = [...form.callback_schedule!.steps];
+                                        if (val === "next_day") {
+                                          newSteps[idx] = { delay_type: "next_day", preferred_window: step.preferred_window };
+                                        } else {
+                                          newSteps[idx] = { delay_hours: step.delay_hours || 3, preferred_window: step.preferred_window };
+                                        }
+                                        setField("callback_schedule", { ...form.callback_schedule!, template: "custom", steps: newSteps });
+                                      }}
+                                    >
+                                      <SelectTrigger className="w-[140px]">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="delay">After X hours</SelectItem>
+                                        <SelectItem value="next_day">Next day</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+
+                                    {!step.delay_type && (
+                                      <Input
+                                        type="number"
+                                        min={0.5}
+                                        max={48}
+                                        step={0.5}
+                                        value={step.delay_hours || 3}
+                                        onChange={(e) => {
+                                          const newSteps = [...form.callback_schedule!.steps];
+                                          newSteps[idx] = { ...newSteps[idx], delay_hours: parseFloat(e.target.value) || 3 };
+                                          delete (newSteps[idx] as any).delay_type;
+                                          setField("callback_schedule", { ...form.callback_schedule!, template: "custom", steps: newSteps });
+                                        }}
+                                        className="w-[80px]"
+                                      />
+                                    )}
+
+                                    {/* Preferred Window */}
+                                    <div className="flex items-center gap-1 ml-2">
+                                      <Switch
+                                        checked={!!step.preferred_window}
+                                        onCheckedChange={(checked) => {
+                                          const newSteps = [...form.callback_schedule!.steps];
+                                          if (checked) {
+                                            newSteps[idx] = { ...newSteps[idx], preferred_window: [11, 13] };
+                                          } else {
+                                            const { preferred_window, ...rest } = newSteps[idx];
+                                            newSteps[idx] = rest;
+                                          }
+                                          setField("callback_schedule", { ...form.callback_schedule!, template: "custom", steps: newSteps });
+                                        }}
+                                      />
+                                      <span className="text-xs text-muted-foreground">Window</span>
+                                    </div>
+
+                                    {step.preferred_window && (
+                                      <>
+                                        <Input
+                                          type="number"
+                                          min={0}
+                                          max={23}
+                                          value={step.preferred_window[0]}
+                                          onChange={(e) => {
+                                            const newSteps = [...form.callback_schedule!.steps];
+                                            newSteps[idx] = {
+                                              ...newSteps[idx],
+                                              preferred_window: [parseInt(e.target.value) || 0, step.preferred_window![1]],
+                                            };
+                                            setField("callback_schedule", { ...form.callback_schedule!, template: "custom", steps: newSteps });
+                                          }}
+                                          className="w-[60px]"
+                                        />
+                                        <span className="text-muted-foreground">to</span>
+                                        <Input
+                                          type="number"
+                                          min={1}
+                                          max={23}
+                                          value={step.preferred_window[1]}
+                                          onChange={(e) => {
+                                            const newSteps = [...form.callback_schedule!.steps];
+                                            newSteps[idx] = {
+                                              ...newSteps[idx],
+                                              preferred_window: [step.preferred_window![0], parseInt(e.target.value) || 23],
+                                            };
+                                            setField("callback_schedule", { ...form.callback_schedule!, template: "custom", steps: newSteps });
+                                          }}
+                                          className="w-[60px]"
+                                        />
+                                      </>
+                                    )}
+
+                                    {/* Delete step */}
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="ml-auto text-destructive"
+                                      onClick={() => {
+                                        const newSteps = form.callback_schedule!.steps.filter((_, i) => i !== idx);
+                                        if (newSteps.length > 0) {
+                                          setField("callback_schedule", { ...form.callback_schedule!, template: "custom", steps: newSteps });
+                                        } else {
+                                          setField("callback_schedule", null);
+                                        }
+                                      }}
+                                    >
+                                      X
+                                    </Button>
+                                  </div>
+                                ))}
+
+                                {/* Add step button */}
+                                {form.callback_schedule.steps.length < 10 && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      const newSteps = [...form.callback_schedule!.steps, { delay_hours: 3 }];
+                                      setField("callback_schedule", { ...form.callback_schedule!, template: "custom", steps: newSteps });
+                                    }}
+                                  >
+                                    + Add Step
+                                  </Button>
+                                )}
                               </div>
-                              <div className="flex items-center gap-2">
-                                <Input
-                                  type="number"
-                                  value={form.callback_max_retries}
-                                  onChange={(e) =>
-                                    setField("callback_max_retries", Math.max(1, Math.min(10, parseInt(e.target.value) || 3)))
-                                  }
-                                  min={1}
-                                  max={10}
-                                  className="w-20 text-center"
-                                />
-                                <span className="text-sm text-muted-foreground">retries</span>
+                            )}
+
+                            {/* Initialize schedule if enabled but no schedule yet */}
+                            {!form.callback_schedule && (
+                              <div className="text-center py-4">
+                                <p className="text-sm text-muted-foreground mb-2">No retry schedule configured</p>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setField("callback_schedule", {
+                                    template: "standard",
+                                    steps: RETRY_TEMPLATES.standard.steps,
+                                  })}
+                                >
+                                  Set up retry schedule
+                                </Button>
                               </div>
-                            </div>
+                            )}
 
                             <div className="flex items-center justify-between rounded-lg border p-4">
                               <div className="space-y-1">
