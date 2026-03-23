@@ -244,3 +244,28 @@ async def cancel_all_linear_instances(
     )
 
     return {"cancelled": len(cancelled_ids)}
+
+
+@router.post("/rollback-migrations")
+async def rollback_migrations(
+    org_id: uuid.UUID = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete all auto-migrated flow drafts (rollback Phase 2)."""
+    result = await db.execute(
+        select(FlowDefinition).where(
+            FlowDefinition.org_id == org_id,
+            FlowDefinition.name.like("% (migrated)"),
+            FlowDefinition.is_active == False,  # noqa: E712
+        )
+    )
+    flows = result.scalars().all()
+
+    deleted = 0
+    for flow in flows:
+        await db.delete(flow)
+        deleted += 1
+
+    await db.commit()
+    logger.info("migration_rollback", org_id=str(org_id), deleted=deleted)
+    return {"deleted": deleted}
