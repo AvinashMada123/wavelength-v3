@@ -9,6 +9,7 @@ from sqlalchemy import select, and_
 from app.database import get_db_session
 from app.models.sequence import SequenceTouchpoint, SequenceInstance
 from app.services import sequence_engine
+from app.services.rate_limiter import RateLimiter
 
 logger = structlog.get_logger(__name__)
 
@@ -83,28 +84,16 @@ async def _process_batch():
         )
         touchpoints = result.scalars().all()
 
-        # Phone spacing: skip touchpoints whose lead had a message sent <60s ago
-        # This prevents WhatsApp rate limiting when multiple sequences target same lead
-        _recent_phones: dict[str, datetime] = {}
+        # Persistent rate limiting: skip touchpoints whose lead has been contacted
+        # too recently. Replaces the old in-memory _recent_phones dict.
+        limiter = RateLimiter(db=db)
         filtered = []
         for tp in touchpoints:
-            # Get phone from instance context (cheap: already in memory after join)
-            phone = None
-            if tp.step_snapshot and tp.step_snapshot.get("channel", "").startswith("whatsapp"):
-                inst_result = await db.execute(
-                    select(SequenceInstance.context_data).where(SequenceInstance.id == tp.instance_id)
-                )
-                ctx = inst_result.scalar_one_or_none() or {}
-                phone = ctx.get("contact_phone", "")[-10:] if isinstance(ctx, dict) else ""
-
-            if phone and phone in _recent_phones:
-                last_sent = _recent_phones[phone]
-                if (now - last_sent).total_seconds() < 60:
-                    continue  # Skip — too soon for this phone
-
+            if tp.lead_id and tp.org_id:
+                if not await limiter.can_contact(lead_id=str(tp.lead_id), org_id=str(tp.org_id)):
+                    logger.debug("rate_limit_skip", touchpoint_id=str(tp.id), lead_id=str(tp.lead_id))
+                    continue
             filtered.append(tp)
-            if phone:
-                _recent_phones[phone] = now
 
         touchpoints = filtered
 
@@ -131,6 +120,14 @@ async def _process_batch():
 
                     try:
                         await sequence_engine.process_touchpoint(tp_db, tp)
+                        # Record contact for rate limiting after successful send
+                        if tp.lead_id and tp.org_id:
+                            rl = RateLimiter(db=tp_db)
+                            await rl.record_contact(
+                                lead_id=str(tp.lead_id),
+                                org_id=str(tp.org_id),
+                                channel=tp.step_snapshot.get("channel", "unknown") if tp.step_snapshot else "unknown",
+                            )
                     except Exception:
                         logger.exception("sequence_touchpoint_processing_failed", touchpoint_id=str(tp_id))
                         tp.status = "failed"
