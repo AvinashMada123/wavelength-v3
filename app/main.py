@@ -28,7 +28,7 @@ if _env_file.exists():
             if key and key not in os.environ:
                 os.environ[key] = value
 
-from app.api import admin, analytics, billing, bots, calls, campaigns, health, leads, messaging_providers, payments, queue, sequence_analytics, sequences, telephony, webhook, webhooks
+from app.api import admin, analytics, billing, bots, calls, campaigns, flows, health, leads, messaging_providers, payments, queue, sequence_analytics, sequences, telephony, webhook, webhooks
 from app.auth import router as auth_router
 from app.bot_config.loader import BotConfigLoader
 from app.database import close_asyncpg_pool, init_asyncpg_pool
@@ -46,6 +46,15 @@ async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
     # --- Startup ---
     logger.info("app_starting")
+
+    # Security check: refuse to start with the default JWT secret
+    from app.config import settings as _settings
+    if _settings.JWT_SECRET == "CHANGE-ME-IN-PRODUCTION":
+        if os.environ.get("TESTING") != "1":
+            raise RuntimeError(
+                "FATAL: JWT_SECRET is set to the default value. "
+                "Set a strong, unique JWT_SECRET in your .env file before running in production."
+            )
 
     # Init asyncpg pool for BotConfigLoader
     pool = await init_asyncpg_pool()
@@ -103,6 +112,7 @@ app.include_router(payments.router)
 app.include_router(telephony.router)
 app.include_router(sequences.router)
 app.include_router(sequence_analytics.router)
+app.include_router(flows.router)
 app.include_router(messaging_providers.router)
 app.include_router(webhooks.router)
 app.include_router(plivo_routes.router)
