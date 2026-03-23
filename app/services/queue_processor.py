@@ -1009,12 +1009,13 @@ async def schedule_auto_retry(call_log_id: UUID, bot_config_loader):
     """Re-queue a no-answer call for automatic retry if callback is enabled.
 
     Called from plivo_event / twilio_event when call status is 'no_answer'.
-    Checks bot config callback settings, finds the original queued call to
-    read retry_count, and creates a new scheduled QueuedCall.
+    Uses step-based callback_schedule if configured, falls back to old
+    flat fields (callback_retry_delay_hours + callback_max_retries) for
+    backward compatibility during Phase 1 migration.
     """
     try:
         async with get_db_session() as db:
-            # Load call log
+            # 1. Load call log
             result = await db.execute(
                 select(CallLog).where(CallLog.id == call_log_id)
             )
@@ -1022,7 +1023,7 @@ async def schedule_auto_retry(call_log_id: UUID, bot_config_loader):
             if not call_log or not call_log.context_data:
                 return
 
-            # Skip campaign calls — campaigns have their own retry logic
+            # 2. Skip campaign calls — campaigns have their own retry logic
             qc_result = await db.execute(
                 select(QueuedCall).where(
                     QueuedCall.call_log_id == call_log_id,
@@ -1032,15 +1033,12 @@ async def schedule_auto_retry(call_log_id: UUID, bot_config_loader):
             if qc_result.scalar_one_or_none():
                 return
 
-            # Load bot config and check callback_enabled
+            # 3. Load bot config and check callback_enabled
             bot_config = await bot_config_loader.get(call_log.context_data["bot_id"])
             if not bot_config or not getattr(bot_config, "callback_enabled", False):
                 return
 
-            max_retries = getattr(bot_config, "callback_max_retries", 3)
-            delay_hours = getattr(bot_config, "callback_retry_delay_hours", 2.0)
-
-            # Find original queued call to get retry_count and extra_vars
+            # 4. Find original queued call to get retry_count and extra_vars
             orig_result = await db.execute(
                 select(QueuedCall)
                 .where(QueuedCall.call_log_id == call_log_id)
@@ -1049,17 +1047,58 @@ async def schedule_auto_retry(call_log_id: UUID, bot_config_loader):
             )
             original_qc = orig_result.scalar_one_or_none()
 
-            current_retry = (original_qc.retry_count if original_qc else 0)
-            if current_retry >= max_retries:
+            # 5. Skip sequence-sourced calls — they have their own follow-up
+            if original_qc and original_qc.source == "sequence":
+                return
+
+            # 6. Deduplication — skip if a queued auto_retry already exists
+            existing = await db.execute(
+                select(QueuedCall.id).where(
+                    QueuedCall.contact_phone == call_log.contact_phone,
+                    QueuedCall.bot_id == call_log.bot_id,
+                    QueuedCall.source == "auto_retry",
+                    QueuedCall.status == "queued",
+                ).limit(1)
+            )
+            if existing.scalar():
                 logger.info(
-                    "auto_retry_max_reached",
+                    "auto_retry_dedup_skip",
                     call_log_id=str(call_log_id),
-                    retry_count=current_retry,
-                    max_retries=max_retries,
+                    phone=call_log.contact_phone,
                 )
                 return
 
-            scheduled_at = datetime.now(timezone.utc) + timedelta(hours=delay_hours)
+            current_retry = (original_qc.retry_count if original_qc else 0)
+
+            # 7. Compute scheduled_at — new step-based or old flat fallback
+            schedule = getattr(bot_config, "callback_schedule", None)
+            if schedule and schedule.get("steps"):
+                steps = schedule["steps"]
+                if current_retry >= len(steps):
+                    logger.info(
+                        "auto_retry_schedule_exhausted",
+                        call_log_id=str(call_log_id),
+                        phone=call_log.contact_phone,
+                        retry_count=current_retry,
+                        max_steps=len(steps),
+                    )
+                    return
+                from app.services.smart_retry import compute_scheduled_at
+                step = steps[current_retry]
+                scheduled_at = compute_scheduled_at(step, bot_config)
+            else:
+                # Phase 1 fallback: old flat fields
+                max_retries = getattr(bot_config, "callback_max_retries", 3)
+                delay_hours = getattr(bot_config, "callback_retry_delay_hours", 2.0)
+                if current_retry >= max_retries:
+                    logger.info(
+                        "auto_retry_max_reached",
+                        call_log_id=str(call_log_id),
+                        retry_count=current_retry,
+                        max_retries=max_retries,
+                    )
+                    return
+                scheduled_at = datetime.now(timezone.utc) + timedelta(hours=delay_hours)
 
             retry_call = QueuedCall(
                 org_id=call_log.org_id,
@@ -1083,9 +1122,8 @@ async def schedule_auto_retry(call_log_id: UUID, bot_config_loader):
                 call_log_id=str(call_log_id),
                 phone=call_log.contact_phone,
                 retry_number=current_retry + 1,
-                max_retries=max_retries,
                 scheduled_at=scheduled_at.isoformat(),
-                delay_hours=delay_hours,
+                used_schedule=bool(schedule and schedule.get("steps")),
             )
 
     except Exception:
