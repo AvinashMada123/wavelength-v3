@@ -37,6 +37,7 @@ from app.schemas.flow import (
     SimulateResponse,
     ValidationResult,
 )
+from app.services.flow_export import export_flow_version, import_flow
 from app.services.flow_simulator import simulate_flow
 from app.services.flow_validator import validate_flow_version
 
@@ -1489,3 +1490,63 @@ async def start_live_test(
         version_id=str(version.id),
     )
     return instance
+
+
+# ---------------------------------------------------------------------------
+# Export / Import
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{flow_id}/versions/{version_id}/export")
+async def export_flow(
+    flow_id: uuid.UUID,
+    version_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Export a flow version as portable JSON."""
+    try:
+        data = await export_flow_version(db, flow_id, version_id, org_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return data
+
+
+class FlowImportRequest(BaseModel):
+    name: str
+    description: str = ""
+    trigger_type: str = "manual"
+    trigger_config: dict[str, Any] = Field(default_factory=dict)
+    nodes: list[dict[str, Any]]
+    edges: list[dict[str, Any]]
+
+
+@router.post("/import", status_code=status.HTTP_201_CREATED)
+async def import_flow_endpoint(
+    body: FlowImportRequest,
+    org_id: uuid.UUID = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import a flow from JSON (creates new flow as draft)."""
+    try:
+        result = await import_flow(db, org_id, body.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return result
+
+
+@router.post("/{flow_id}/import-version", status_code=status.HTTP_201_CREATED)
+async def import_flow_version_endpoint(
+    flow_id: uuid.UUID,
+    body: FlowImportRequest,
+    org_id: uuid.UUID = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import JSON as a new version of an existing flow."""
+    try:
+        result = await import_flow(db, org_id, body.model_dump(), target_flow_id=flow_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return result
