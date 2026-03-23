@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
-import { useFlowJourney } from "../use-flow-journey";
 
-// Mock the API
+// Mock the API before importing the hook
 vi.mock("@/lib/flows-api", () => ({
   fetchFlowInstances: vi.fn(),
   fetchJourneyData: vi.fn(),
 }));
 
 import { fetchFlowInstances, fetchJourneyData } from "@/lib/flows-api";
+import { useFlowJourney } from "../use-flow-journey";
 
 const MOCK_INSTANCES = {
   instances: [
@@ -59,36 +59,46 @@ const MOCK_JOURNEY = {
 describe("useFlowJourney", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (fetchFlowInstances as any).mockResolvedValue(MOCK_INSTANCES);
-    (fetchJourneyData as any).mockResolvedValue(MOCK_JOURNEY);
+    (fetchFlowInstances as ReturnType<typeof vi.fn>).mockResolvedValue(MOCK_INSTANCES);
+    (fetchJourneyData as ReturnType<typeof vi.fn>).mockResolvedValue(MOCK_JOURNEY);
   });
 
   it("loads instances on mount", async () => {
     const { result } = renderHook(() => useFlowJourney("f1"));
+
     await waitFor(() => {
-      expect(result.current.instances).toHaveLength(2);
+      expect(result.current).not.toBeNull();
+      expect(result.current!.instances).toHaveLength(2);
     });
+
     expect(fetchFlowInstances).toHaveBeenCalledWith("f1", expect.any(Object));
   });
 
   it("selects an instance and loads journey", async () => {
     const { result } = renderHook(() => useFlowJourney("f1"));
-    await waitFor(() => expect(result.current.instances).toHaveLength(2));
 
-    act(() => result.current.selectInstance("inst-1"));
     await waitFor(() => {
-      expect(result.current.journeyData).not.toBeNull();
+      expect(result.current).not.toBeNull();
+      expect(result.current!.instances).toHaveLength(2);
     });
 
-    expect(result.current.visitedNodeIds).toContain("n1");
-    expect(result.current.visitedNodeIds).toContain("n2");
-    expect(result.current.visitedNodeIds).toContain("n3");
-    expect(result.current.visitedEdgeIds).toContain("e1");
-    expect(result.current.visitedEdgeIds).toContain("e2");
+    await act(async () => {
+      result.current!.selectInstance("inst-1");
+    });
+
+    await waitFor(() => {
+      expect(result.current!.journeyData).not.toBeNull();
+    });
+
+    expect(result.current!.visitedNodeIds).toContain("n1");
+    expect(result.current!.visitedNodeIds).toContain("n2");
+    expect(result.current!.visitedNodeIds).toContain("n3");
+    expect(result.current!.visitedEdgeIds).toContain("e1");
+    expect(result.current!.visitedEdgeIds).toContain("e2");
   });
 
   it("identifies error nodes", async () => {
-    (fetchJourneyData as any).mockResolvedValue({
+    (fetchJourneyData as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...MOCK_JOURNEY,
       instance: MOCK_INSTANCES.instances[1],
       touchpoints: [
@@ -98,19 +108,35 @@ describe("useFlowJourney", () => {
     });
 
     const { result } = renderHook(() => useFlowJourney("f1"));
-    await waitFor(() => expect(result.current.instances).toHaveLength(2));
 
-    act(() => result.current.selectInstance("inst-2"));
-    await waitFor(() => expect(result.current.journeyData).not.toBeNull());
+    await waitFor(() => {
+      expect(result.current).not.toBeNull();
+      expect(result.current!.instances).toHaveLength(2);
+    });
 
-    expect(result.current.errorNodeIds).toContain("n3");
+    await act(async () => {
+      result.current!.selectInstance("inst-2");
+    });
+
+    await waitFor(() => {
+      expect(result.current!.journeyData).not.toBeNull();
+    });
+
+    expect(result.current!.errorNodeIds).toContain("n3");
   });
 
   it("filters instances by status", async () => {
     const { result } = renderHook(() => useFlowJourney("f1"));
-    await waitFor(() => expect(result.current.instances).toHaveLength(2));
 
-    act(() => result.current.setStatusFilter("error"));
+    await waitFor(() => {
+      expect(result.current).not.toBeNull();
+      expect(result.current!.instances).toHaveLength(2);
+    });
+
+    await act(async () => {
+      result.current!.setStatusFilter("error");
+    });
+
     await waitFor(() => {
       expect(fetchFlowInstances).toHaveBeenCalledWith("f1", expect.objectContaining({ status: "error" }));
     });
@@ -118,14 +144,26 @@ describe("useFlowJourney", () => {
 
   it("clears selection", async () => {
     const { result } = renderHook(() => useFlowJourney("f1"));
-    await waitFor(() => expect(result.current.instances).toHaveLength(2));
 
-    act(() => result.current.selectInstance("inst-1"));
-    await waitFor(() => expect(result.current.journeyData).not.toBeNull());
+    await waitFor(() => {
+      expect(result.current).not.toBeNull();
+      expect(result.current!.instances).toHaveLength(2);
+    });
 
-    act(() => result.current.clearSelection());
-    expect(result.current.selectedInstanceId).toBeNull();
-    expect(result.current.journeyData).toBeNull();
-    expect(result.current.visitedNodeIds).toEqual([]);
+    await act(async () => {
+      result.current!.selectInstance("inst-1");
+    });
+
+    await waitFor(() => {
+      expect(result.current!.journeyData).not.toBeNull();
+    });
+
+    act(() => {
+      result.current!.clearSelection();
+    });
+
+    expect(result.current!.selectedInstanceId).toBeNull();
+    expect(result.current!.journeyData).toBeNull();
+    expect(result.current!.visitedNodeIds).toEqual([]);
   });
 });
