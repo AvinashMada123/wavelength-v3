@@ -53,6 +53,18 @@ router = APIRouter(prefix="/api/flows", tags=["flows"])
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class FlowVersionSummary(BaseModel):
+    id: uuid.UUID
+    flow_id: uuid.UUID
+    version_number: int
+    status: str
+    is_locked: bool
+    published_at: datetime | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class FlowListItem(BaseModel):
     id: uuid.UUID
     org_id: uuid.UUID
@@ -62,6 +74,8 @@ class FlowListItem(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    draft_version: FlowVersionSummary | None = None
+    published_version: FlowVersionSummary | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -384,7 +398,25 @@ async def get_flow(
 ):
     """Get a flow with its current published/draft version info."""
     flow = await _get_flow_or_404(flow_id, org_id, db)
-    return flow
+
+    # Fetch draft and published versions
+    versions_result = await db.execute(
+        select(FlowVersion)
+        .where(FlowVersion.flow_id == flow.id)
+        .order_by(FlowVersion.version_number.desc())
+    )
+    versions = versions_result.scalars().all()
+
+    draft = next((v for v in versions if v.status == "draft"), None)
+    published = next((v for v in versions if v.status == "published"), None)
+
+    result = FlowListItem.model_validate(flow)
+    if draft:
+        result.draft_version = FlowVersionSummary.model_validate(draft)
+    if published:
+        result.published_version = FlowVersionSummary.model_validate(published)
+
+    return result
 
 
 @router.put("/{flow_id}", response_model=FlowListItem)
