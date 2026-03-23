@@ -218,18 +218,28 @@ async def _merge_recording(bot_wav: str, user_wav: str, call_sid: str) -> str | 
     return None
 
 
+# Maps raw Plivo CallStatus to normalized CallOutcome enum values.
+# IMPORTANT: Do NOT collapse statuses — each value is used for flow branching.
+PLIVO_STATUS_MAP = {
+    "completed": "picked_up",
+    "busy": "busy",
+    "failed": "failed",
+    "timeout": "timeout",
+    "no-answer": "no_answer",
+    "cancel": "failed",
+    "machine": "voicemail",
+}
+
+
 def _map_plivo_status(plivo_status: str | None) -> str:
-    """Map Plivo call status to our internal status."""
-    mapping = {
-        "completed": "completed",
-        "busy": "no_answer",
-        "failed": "failed",
-        "timeout": "no_answer",
-        "no-answer": "no_answer",
-        "cancel": "failed",
-        "machine": "voicemail",
-    }
-    return mapping.get(plivo_status or "", plivo_status or "unknown")
+    """Map raw Plivo status to normalized CallOutcome.
+
+    Returns the normalized status for flow condition branching.
+    Unknown statuses return 'unknown' rather than passing through raw values.
+    """
+    if plivo_status is None:
+        return "unknown"
+    return PLIVO_STATUS_MAP.get(plivo_status, "unknown")
 
 
 # --- Routes ---
