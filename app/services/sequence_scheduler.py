@@ -7,8 +7,10 @@ import structlog
 from sqlalchemy import select, and_
 
 from app.database import get_db_session
+from app.models.organization import Organization
 from app.models.sequence import SequenceTouchpoint, SequenceInstance
 from app.services import sequence_engine
+from app.services.business_hours import is_within_business_hours, next_available_time
 from app.services.rate_limiter import RateLimiter
 
 logger = structlog.get_logger(__name__)
@@ -96,6 +98,35 @@ async def _process_batch():
             filtered.append(tp)
 
         touchpoints = filtered
+
+        # Business hours check: defer touchpoints outside org's configured window
+        now_aware = datetime.now(timezone.utc)
+        org_hours_cache: dict[str, dict] = {}  # org_id -> business_hours config
+        ready = []
+        for tp in touchpoints:
+            org_key = str(tp.org_id) if tp.org_id else None
+            if org_key:
+                if org_key not in org_hours_cache:
+                    org_result = await db.execute(
+                        select(Organization).where(Organization.id == tp.org_id)
+                    )
+                    org = org_result.scalar_one_or_none()
+                    org_hours_cache[org_key] = (
+                        org.settings.get("business_hours", {}) if org and org.settings else {}
+                    )
+                bh_config = org_hours_cache[org_key]
+                if not is_within_business_hours(now_aware, bh_config):
+                    # Reschedule to next available window instead of silently skipping
+                    next_time = next_available_time(now_aware, bh_config)
+                    tp.scheduled_at = next_time
+                    logger.debug(
+                        "business_hours_defer",
+                        touchpoint_id=str(tp.id),
+                        next_time=next_time.isoformat(),
+                    )
+                    continue
+            ready.append(tp)
+        touchpoints = ready
 
         if not touchpoints:
             return
