@@ -76,6 +76,7 @@ class SequenceInstance(Base):
         Index("ix_seqinst_lead", "lead_id"),
         Index("ix_seqinst_org_status", "org_id", "status"),
         Index("ix_seqinst_template_status", "template_id", "status"),
+        Index("ix_seqinst_engine_type_status", "engine_type", "status"),
         # Partial unique index: only one active instance per lead per template
         Index(
             "uq_seqinst_template_lead_active",
@@ -102,6 +103,9 @@ class SequenceInstance(Base):
         UUID(as_uuid=True), ForeignKey("call_logs.id"), nullable=True
     )
     status: Mapped[str] = mapped_column(Text, server_default=text("'active'"))
+    engine_type: Mapped[str] = mapped_column(
+        Text, server_default=text("'linear'"), nullable=False
+    )
     context_data: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     started_at: Mapped[datetime] = mapped_column(server_default=text("now()"))
     completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
