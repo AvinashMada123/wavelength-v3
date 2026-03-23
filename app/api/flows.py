@@ -39,7 +39,7 @@ from app.schemas.flow import (
 )
 from app.services.flow_export import export_flow_version, import_flow
 from app.services.flow_simulator import simulate_flow
-from app.services.flow_validator import validate_flow_version
+from app.services.flow_validator import validate_flow
 
 logger = structlog.get_logger(__name__)
 
@@ -810,7 +810,7 @@ async def publish_version(
         await db.execute(select(FlowEdge).where(FlowEdge.version_id == version_id))
     ).scalars().all()
 
-    validation = validate_flow_version(nodes, edges)
+    validation = validate_flow(nodes, edges)
     if not validation.is_valid:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -873,7 +873,7 @@ async def validate_version(
         await db.execute(select(FlowEdge).where(FlowEdge.version_id == version_id))
     ).scalars().all()
 
-    return validate_flow_version(nodes, edges)
+    return validate_flow(nodes, edges)
 
 
 # ---------------------------------------------------------------------------
