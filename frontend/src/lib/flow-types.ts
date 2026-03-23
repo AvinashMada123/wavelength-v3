@@ -170,9 +170,13 @@ export interface FlowVersion {
 
 export interface FlowDefinition {
   id: string;
-  sequence_id: string;
+  org_id: string;
   name: string;
-  description: string;
+  description: string | null;
+  trigger_type: string;
+  trigger_conditions: Record<string, unknown> | null;
+  max_active_per_lead: number;
+  is_active: boolean;
   published_version: FlowVersion | null;
   draft_version: FlowVersion | null;
   created_at: string;

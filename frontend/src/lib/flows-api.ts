@@ -5,6 +5,16 @@ import type { FlowDefinition, FlowVersion, FlowNodeData, FlowEdgeData, Validatio
 // Flow CRUD & versioning
 // ---------------------------------------------------------------------------
 
+/** List all flows for the current org */
+export async function fetchFlows(page = 1, limit = 50): Promise<{ items: FlowDefinition[]; total: number }> {
+  return apiFetch(`/api/flows?page=${page}&limit=${limit}`);
+}
+
+/** Create a new flow */
+export async function createFlow(data: { name: string; trigger_type: string }): Promise<FlowDefinition> {
+  return apiFetch("/api/flows", { method: "POST", body: JSON.stringify(data) });
+}
+
 /** Fetch a flow definition with its versions */
 export async function fetchFlow(flowId: string): Promise<FlowDefinition> {
   return apiFetch(`/api/flows/${flowId}`);

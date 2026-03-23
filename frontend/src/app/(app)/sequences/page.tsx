@@ -55,6 +55,8 @@ import {
   updateTemplate,
   type SequenceTemplate,
 } from "@/lib/sequences-api";
+import { fetchFlows, createFlow } from "@/lib/flows-api";
+import type { FlowDefinition } from "@/lib/flow-types";
 
 const PAGE_SIZE = 50;
 
@@ -102,6 +104,11 @@ export default function SequencesPage() {
   // Active toggle
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
+  // Flow builder
+  const [flows, setFlows] = useState<FlowDefinition[]>([]);
+  const [flowsLoading, setFlowsLoading] = useState(true);
+  const [creatingFlow, setCreatingFlow] = useState(false);
+
   const loadTemplates = useCallback(async () => {
     setLoading(true);
     try {
@@ -118,6 +125,35 @@ export default function SequencesPage() {
   useEffect(() => {
     loadTemplates();
   }, [loadTemplates]);
+
+  // Load flows
+  useEffect(() => {
+    async function loadFlows() {
+      setFlowsLoading(true);
+      try {
+        const data = await fetchFlows();
+        setFlows(data.items ?? data ?? []);
+      } catch {
+        // Silently fail — flow section just won't show data
+      } finally {
+        setFlowsLoading(false);
+      }
+    }
+    loadFlows();
+  }, []);
+
+  async function handleCreateFlow() {
+    setCreatingFlow(true);
+    try {
+      const flow = await createFlow({ name: "Untitled Flow", trigger_type: "manual" });
+      toast.success("Flow created");
+      router.push(`/sequences/${flow.id}/flow`);
+    } catch {
+      toast.error("Failed to create flow");
+    } finally {
+      setCreatingFlow(false);
+    }
+  }
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -239,6 +275,73 @@ export default function SequencesPage() {
                 </Button>
               </Link>
             ))}
+          </div>
+
+          {/* Flow Builder Section */}
+          <Card className="border-violet-500/30 bg-gradient-to-r from-violet-500/5 to-indigo-600/5">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold flex items-center gap-2">
+                    <Workflow className="h-5 w-5 text-violet-400" />
+                    Flow Builder
+                    <Badge variant="secondary" className="text-xs">New</Badge>
+                  </h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Design visual flows with branching, conditions, and automated actions
+                  </p>
+                </div>
+                <Button
+                  onClick={handleCreateFlow}
+                  disabled={creatingFlow}
+                  className="bg-gradient-to-r from-violet-500 to-indigo-600 text-white hover:from-violet-600 hover:to-indigo-700"
+                >
+                  {creatingFlow ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  New Flow
+                </Button>
+              </div>
+
+              {/* Flow list */}
+              {flowsLoading ? (
+                <div className="mt-4 space-y-2">
+                  <Skeleton className="h-10 w-full" />
+                </div>
+              ) : flows.length > 0 ? (
+                <div className="mt-4 space-y-2">
+                  {flows.map((flow) => (
+                    <div
+                      key={flow.id}
+                      onClick={() => router.push(`/sequences/${flow.id}/flow`)}
+                      className="flex items-center justify-between rounded-lg border border-border/50 bg-background/50 p-3 cursor-pointer hover:bg-accent/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Workflow className="h-4 w-4 text-violet-400" />
+                        <span className="font-medium text-sm">{flow.name}</span>
+                        <Badge variant="outline" className="text-xs">
+                          {flow.trigger_type === "post_call" ? "Post Call" : flow.trigger_type === "manual" ? "Manual" : flow.trigger_type}
+                        </Badge>
+                      </div>
+                      <Badge variant={flow.is_active ? "default" : "secondary"} className="text-xs">
+                        {flow.is_active ? "Active" : "Draft"}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-4 text-sm text-muted-foreground">
+                  No flows yet. Create your first visual flow to get started.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-background px-2 text-muted-foreground">Legacy Templates</span>
+            </div>
           </div>
 
           {/* Description + Actions */}
