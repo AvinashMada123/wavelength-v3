@@ -147,7 +147,7 @@ function getInitialNodes(version: FlowVersion): Node[] {
   // Empty flow — auto-add a trigger node so the user has a starting point
   return [
     {
-      id: "trigger-1",
+      id: crypto.randomUUID(),
       type: "trigger_manual",
       position: { x: 250, y: 50 },
       data: {
@@ -187,8 +187,10 @@ export function FlowCanvas({ flowId, flow, version, bots, onPublished }: FlowCan
           nodes: rfNodesToAPI(nodes, version.id),
           edges: rfEdgesToAPI(edges, version.id),
         });
-      } catch {
-        toast.error("Failed to save flow");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        toast.error(`Failed to save flow: ${msg}`);
+        console.error("[FlowCanvas] Save failed:", err);
       } finally {
         setIsSaving(false);
       }
@@ -260,7 +262,7 @@ export function FlowCanvas({ flowId, flow, version, bots, onPublished }: FlowCan
       history.pushState(nodes, edges, `Add ${info.label}`);
 
       const newNode: Node = {
-        id: `temp_${Date.now()}`,
+        id: crypto.randomUUID(),
         type: nodeType,
         position,
         data: {
