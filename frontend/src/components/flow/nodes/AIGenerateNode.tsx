@@ -4,15 +4,17 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Sparkles } from "lucide-react";
+import { DeleteNodeButton } from "./DeleteNodeButton";
 
-function AIGenerateNodeComponent({ data, selected }: NodeProps) {
+function AIGenerateNodeComponent({ id, data, selected }: NodeProps) {
   return (
     <div
-      className={`rounded-lg border-2 bg-background px-4 py-3 shadow-sm transition-colors ${
+      className={`group relative rounded-lg border-2 bg-background px-4 py-3 shadow-sm transition-colors ${
         selected ? "border-purple-500 ring-2 ring-purple-500/20" : "border-purple-300"
       }`}
       style={{ minWidth: 180 }}
     >
+      <DeleteNodeButton nodeId={id} />
       <Handle type="target" position={Position.Top} className="!bg-purple-500" />
       <div className="flex items-center gap-2">
         <Sparkles className="h-4 w-4 text-purple-500" />

@@ -42,6 +42,7 @@ import { NodePalette } from "./NodePalette";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { CanvasToolbar } from "./CanvasToolbar";
 import { ValidationPanel } from "./ValidationPanel";
+import { FlowDraftProvider } from "./FlowDraftContext";
 
 import { VoiceCallNode } from "./nodes/VoiceCallNode";
 import { WhatsAppTemplateNode } from "./nodes/WhatsAppTemplateNode";
@@ -440,6 +441,7 @@ export function FlowCanvas({ flowId, flow, version, bots, onPublished }: FlowCan
   );
 
   return (
+    <FlowDraftProvider value={isDraft}>
     <div className="flex h-full">
       {/* Left: Node Palette */}
       {isDraft && <NodePalette />}
@@ -522,5 +524,6 @@ export function FlowCanvas({ flowId, flow, version, bots, onPublished }: FlowCan
         />
       )}
     </div>
+    </FlowDraftProvider>
   );
 }

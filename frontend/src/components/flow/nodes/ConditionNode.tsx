@@ -4,15 +4,17 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { GitBranch } from "lucide-react";
+import { DeleteNodeButton } from "./DeleteNodeButton";
 
-function ConditionNodeComponent({ data, selected }: NodeProps) {
+function ConditionNodeComponent({ id, data, selected }: NodeProps) {
   return (
     <div
-      className={`rounded-lg border-2 bg-background px-4 py-3 shadow-sm transition-colors ${
+      className={`group relative rounded-lg border-2 bg-background px-4 py-3 shadow-sm transition-colors ${
         selected ? "border-amber-500 ring-2 ring-amber-500/20" : "border-amber-300"
       }`}
       style={{ minWidth: 180 }}
     >
+      <DeleteNodeButton nodeId={id} />
       <Handle type="target" position={Position.Top} className="!bg-amber-500" />
       <div className="flex items-center gap-2">
         <GitBranch className="h-4 w-4 text-amber-500" />

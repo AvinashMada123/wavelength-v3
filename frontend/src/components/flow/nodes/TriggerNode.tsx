@@ -3,6 +3,7 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Zap, Play, Flag } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { DeleteNodeButton } from "./DeleteNodeButton";
 
 const TRIGGER_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   trigger_post_call: Zap,
@@ -22,7 +23,7 @@ const TRIGGER_DESCRIPTIONS: Record<string, string> = {
   trigger_campaign_complete: "Flow starts when campaign finishes",
 };
 
-export function TriggerNode({ data, selected }: NodeProps) {
+export function TriggerNode({ id, data, selected }: NodeProps) {
   const nodeType = String(data.nodeType ?? "trigger_manual");
   const Icon = TRIGGER_ICONS[nodeType] || Zap;
   const label: string = String(data.label ?? TRIGGER_LABELS[nodeType] ?? "Trigger");
@@ -32,11 +33,12 @@ export function TriggerNode({ data, selected }: NodeProps) {
   return (
     <div
       className={cn(
-        "min-w-[200px] rounded-lg border-2 bg-background shadow-md transition-all",
+        "group relative min-w-[200px] rounded-lg border-2 bg-background shadow-md transition-all",
         "border-orange-500",
         selected && "ring-2 ring-orange-400 ring-offset-2 ring-offset-background",
       )}
     >
+      <DeleteNodeButton nodeId={id} />
       {/* Header */}
       <div className="flex items-center gap-2 rounded-t-md bg-orange-500/10 px-3 py-2">
         <div className="flex h-7 w-7 items-center justify-center rounded-full bg-orange-500/20">
