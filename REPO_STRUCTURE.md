@@ -157,6 +157,12 @@ tests/                            — Python test suite
 docs/                             — Documentation and specs
 scripts/                          — Build and utility scripts
 
+infra/                            — GCP infrastructure scripts
+  autoscaler/                     — VM CPU auto-scaler (Cloud Function)
+    main.py                       — Auto-scale logic (1-4 CPUs based on utilization)
+    requirements.txt              — Cloud Function dependencies
+    deploy.sh                     — One-command deploy script
+
 Dockerfile                        — Single-process Docker build
 docker-compose.yml                — Local dev containers
 requirements.txt                  — Python dependencies

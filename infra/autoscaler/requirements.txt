@@ -1,0 +1,2 @@
+google-cloud-compute==1.19.0
+google-cloud-monitoring==2.21.0
