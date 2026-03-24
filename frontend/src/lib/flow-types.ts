@@ -5,17 +5,23 @@
 // ---------------------------------------------------------------------------
 
 export type FlowNodeType =
+  // Triggers
+  | "trigger_post_call"
+  | "trigger_manual"
+  | "trigger_campaign_complete"
+  // Actions
   | "voice_call"
   | "whatsapp_template"
   | "whatsapp_session"
   | "ai_generate_send"
+  | "goal_met"
+  | "end"
+  // Logic
   | "condition"
   | "delay_wait"
-  | "wait_for_event"
-  | "goal_met"
-  | "end";
+  | "wait_for_event";
 
-export type NodeCategory = "action" | "control" | "terminal";
+export type NodeCategory = "trigger" | "action" | "logic";
 
 export interface NodeTypeRegistryEntry {
   type: FlowNodeType;
@@ -27,7 +33,32 @@ export interface NodeTypeRegistryEntry {
 }
 
 export const NODE_TYPE_REGISTRY: NodeTypeRegistryEntry[] = [
-  // Actions
+  // ── Triggers ──────────────────────────────────────────────
+  {
+    type: "trigger_post_call",
+    label: "Post Call",
+    description: "Triggered after a call ends — branches on call outcome",
+    icon: "Zap",
+    color: "border-orange-500",
+    category: "trigger",
+  },
+  {
+    type: "trigger_manual",
+    label: "Manual Trigger",
+    description: "Triggered when you manually enroll a lead",
+    icon: "Play",
+    color: "border-orange-500",
+    category: "trigger",
+  },
+  {
+    type: "trigger_campaign_complete",
+    label: "Campaign Complete",
+    description: "Triggered when a campaign finishes for a lead",
+    icon: "Flag",
+    color: "border-orange-500",
+    category: "trigger",
+  },
+  // ── Actions ───────────────────────────────────────────────
   {
     type: "voice_call",
     label: "Voice Call",
@@ -60,14 +91,30 @@ export const NODE_TYPE_REGISTRY: NodeTypeRegistryEntry[] = [
     color: "border-purple-500",
     category: "action",
   },
-  // Control
+  {
+    type: "goal_met",
+    label: "Goal Met",
+    description: "Mark a milestone as achieved (flow continues)",
+    icon: "Target",
+    color: "border-emerald-500",
+    category: "action",
+  },
+  {
+    type: "end",
+    label: "End Flow",
+    description: "End the flow for this lead",
+    icon: "CircleStop",
+    color: "border-red-500",
+    category: "action",
+  },
+  // ── Logic ─────────────────────────────────────────────────
   {
     type: "condition",
-    label: "Condition",
-    description: "Branch based on lead data or outcomes",
+    label: "IF / ELSE",
+    description: "Branch based on lead data, call outcome, or reply content",
     icon: "GitBranch",
     color: "border-amber-500",
-    category: "control",
+    category: "logic",
   },
   {
     type: "delay_wait",
@@ -75,32 +122,15 @@ export const NODE_TYPE_REGISTRY: NodeTypeRegistryEntry[] = [
     description: "Wait for a specified duration before continuing",
     icon: "Clock",
     color: "border-slate-500",
-    category: "control",
+    category: "logic",
   },
   {
     type: "wait_for_event",
-    label: "Wait for Event",
-    description: "Wait for a reply, call completion, or other event",
+    label: "Wait for Reply",
+    description: "Wait for a WhatsApp reply or call outcome with timeout",
     icon: "Bell",
     color: "border-cyan-500",
-    category: "control",
-  },
-  // Terminal
-  {
-    type: "goal_met",
-    label: "Goal Met",
-    description: "Mark the sequence goal as achieved",
-    icon: "Target",
-    color: "border-emerald-500",
-    category: "terminal",
-  },
-  {
-    type: "end",
-    label: "End",
-    description: "End the sequence for this lead",
-    icon: "CircleStop",
-    color: "border-red-500",
-    category: "terminal",
+    category: "logic",
   },
 ];
 

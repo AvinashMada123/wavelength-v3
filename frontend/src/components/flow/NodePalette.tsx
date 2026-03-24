@@ -12,18 +12,37 @@ import {
   Bell,
   Target,
   CircleStop,
+  Zap,
+  Play,
+  Flag,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NODE_TYPE_REGISTRY, type FlowNodeType } from "@/lib/flow-types";
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
-  Phone, MessageSquare, MessageCircle, Sparkles, GitBranch, Clock, Bell, Target, CircleStop,
+  Phone, MessageSquare, MessageCircle, Sparkles, GitBranch, Clock, Bell,
+  Target, CircleStop, Zap, Play, Flag,
 };
 
 const CATEGORIES = [
-  { key: "action" as const, label: "Actions" },
-  { key: "control" as const, label: "Control" },
-  { key: "terminal" as const, label: "Terminal" },
+  {
+    key: "trigger" as const,
+    label: "Triggers",
+    description: "What starts the flow",
+    accent: "text-orange-400",
+  },
+  {
+    key: "action" as const,
+    label: "Actions",
+    description: "Do something",
+    accent: "text-blue-400",
+  },
+  {
+    key: "logic" as const,
+    label: "Logic",
+    description: "Control the flow",
+    accent: "text-amber-400",
+  },
 ];
 
 interface NodePaletteProps {
@@ -40,15 +59,18 @@ export function NodePalette({ className }: NodePaletteProps) {
   );
 
   return (
-    <div className={cn("flex w-56 flex-col gap-4 border-r bg-background p-4", className)}>
+    <div className={cn("flex w-56 flex-col gap-5 border-r bg-background/50 p-4 overflow-y-auto", className)}>
       <h3 className="text-sm font-semibold text-foreground">Nodes</h3>
       {CATEGORIES.map((cat) => {
         const items = NODE_TYPE_REGISTRY.filter((n) => n.category === cat.key);
         return (
           <div key={cat.key}>
-            <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              {cat.label}
-            </p>
+            <div className="mb-2">
+              <p className={cn("text-[11px] font-semibold uppercase tracking-wider", cat.accent)}>
+                {cat.label}
+              </p>
+              <p className="text-[10px] text-muted-foreground">{cat.description}</p>
+            </div>
             <div className="flex flex-col gap-1">
               {items.map((info) => {
                 const Icon = ICON_MAP[info.icon];

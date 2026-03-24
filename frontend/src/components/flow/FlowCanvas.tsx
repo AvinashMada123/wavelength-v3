@@ -52,20 +52,27 @@ import { DelayWaitNode } from "./nodes/DelayWaitNode";
 import { WaitForEventNode } from "./nodes/WaitForEventNode";
 import { GoalMetNode } from "./nodes/GoalMetNode";
 import { EndNode } from "./nodes/EndNode";
+import { TriggerNode } from "./nodes/TriggerNode";
 
 // ---------------------------------------------------------------------------
 // Node type registry for React Flow
 // ---------------------------------------------------------------------------
 const nodeTypes: NodeTypes = {
+  // Triggers
+  trigger_post_call: TriggerNode,
+  trigger_manual: TriggerNode,
+  trigger_campaign_complete: TriggerNode,
+  // Actions
   voice_call: VoiceCallNode,
   whatsapp_template: WhatsAppTemplateNode,
   whatsapp_session: WhatsAppSessionNode,
   ai_generate_send: AIGenerateNode,
+  goal_met: GoalMetNode,
+  end: EndNode,
+  // Logic
   condition: ConditionNode,
   delay_wait: DelayWaitNode,
   wait_for_event: WaitForEventNode,
-  goal_met: GoalMetNode,
-  end: EndNode,
 };
 
 // ---------------------------------------------------------------------------
@@ -132,9 +139,28 @@ interface FlowCanvasProps {
   onPublished: () => void;
 }
 
+function getInitialNodes(version: FlowVersion): Node[] {
+  const apiNodes = version.nodes ?? [];
+  if (apiNodes.length > 0) return apiNodesToRF(apiNodes);
+
+  // Empty flow — auto-add a trigger node so the user has a starting point
+  return [
+    {
+      id: "trigger-1",
+      type: "trigger_manual",
+      position: { x: 250, y: 50 },
+      data: {
+        label: "Manual Trigger",
+        nodeType: "trigger_manual",
+        config: {},
+      },
+    },
+  ];
+}
+
 export function FlowCanvas({ flowId, flow, version, bots, onPublished }: FlowCanvasProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
-  const [nodes, setNodes, onNodesChange] = useNodesState(apiNodesToRF(version.nodes ?? []));
+  const [nodes, setNodes, onNodesChange] = useNodesState(getInitialNodes(version));
   const [edges, setEdges, onEdgesChange] = useEdgesState(apiEdgesToRF(version.edges ?? []));
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
