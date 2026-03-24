@@ -1023,7 +1023,33 @@ async def schedule_auto_retry(call_log_id: UUID, bot_config_loader):
             if not call_log or not call_log.context_data:
                 return
 
-            # 2. Skip campaign calls — campaigns have their own retry logic
+            # 2. Skip if user asked not to be called again (DND / rejection)
+            meta = call_log.metadata_ or {}
+            llm_reason = (meta.get("llm_end_reason") or "").lower()
+            _DND_PHRASES = (
+                "don't call", "do not call", "stop calling", "not interested",
+                "wrong number", "not to be called", "asked not to",
+                "nahi chahiye", "zaroorat nahi", "mat karo call",
+            )
+            if any(phrase in llm_reason for phrase in _DND_PHRASES):
+                logger.info(
+                    "auto_retry_skip_dnd",
+                    call_log_id=str(call_log_id),
+                    phone=call_log.contact_phone,
+                    llm_end_reason=llm_reason,
+                )
+                return
+
+            if meta.get("dnd_detected"):
+                logger.info(
+                    "auto_retry_skip_dnd_flag",
+                    call_log_id=str(call_log_id),
+                    phone=call_log.contact_phone,
+                    dnd_reason=meta.get("dnd_reason"),
+                )
+                return
+
+            # 3. Skip campaign calls — campaigns have their own retry logic
             qc_result = await db.execute(
                 select(QueuedCall).where(
                     QueuedCall.call_log_id == call_log_id,
@@ -1051,13 +1077,12 @@ async def schedule_auto_retry(call_log_id: UUID, bot_config_loader):
             if original_qc and original_qc.source == "sequence":
                 return
 
-            # 6. Deduplication — skip if a queued auto_retry already exists
+            # 6. Deduplication — skip if ANY pending/queued call exists for this phone+bot
             existing = await db.execute(
                 select(QueuedCall.id).where(
                     QueuedCall.contact_phone == call_log.contact_phone,
                     QueuedCall.bot_id == call_log.bot_id,
-                    QueuedCall.source == "auto_retry",
-                    QueuedCall.status == "queued",
+                    QueuedCall.status.in_(["queued", "processing"]),
                 ).limit(1)
             )
             if existing.scalar():
@@ -1065,6 +1090,27 @@ async def schedule_auto_retry(call_log_id: UUID, bot_config_loader):
                     "auto_retry_dedup_skip",
                     call_log_id=str(call_log_id),
                     phone=call_log.contact_phone,
+                )
+                return
+
+            # 7. Rate limit — skip if any call to this phone+bot completed recently
+            delay_hours = getattr(bot_config, "callback_retry_delay_hours", 2.0)
+            min_gap = datetime.now(timezone.utc) - timedelta(hours=delay_hours)
+            recent_call = await db.execute(
+                select(CallLog.id).where(
+                    CallLog.contact_phone == call_log.contact_phone,
+                    CallLog.bot_id == call_log.bot_id,
+                    CallLog.created_at >= min_gap,
+                    CallLog.id != call_log_id,
+                    CallLog.status == "completed",
+                ).limit(1)
+            )
+            if recent_call.scalar():
+                logger.info(
+                    "auto_retry_rate_limit_skip",
+                    call_log_id=str(call_log_id),
+                    phone=call_log.contact_phone,
+                    min_gap_hours=delay_hours,
                 )
                 return
 

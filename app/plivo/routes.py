@@ -445,12 +445,14 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         llm_end_reason = pipeline_result.get("llm_end_reason")
         dnd_detected = pipeline_result.get("dnd_detected", False)
         dnd_reason = pipeline_result.get("dnd_reason")
+        termination_source = pipeline_result.get("termination_source")
         logger.info("post_call_pipeline_done", call_sid=call_sid, msg_count=len(conversation_messages),
                      end_reason=end_reason, llm_end_reason=llm_end_reason, dnd=dnd_detected)
 
         # If voicemail or hold/IVR detected, short-circuit post-call processing
         if end_reason in ("voicemail", "hold_ivr"):
-            await _update_call_status(call_sid, status="completed", outcome=end_reason, metadata={"end_reason": end_reason})
+            await _update_call_status(call_sid, status="completed", outcome=end_reason,
+                                      metadata={"end_reason": end_reason, "termination_source": termination_source or end_reason})
             await _post_ghl_outcome(ctx, outcome=end_reason)
             return
 
@@ -563,6 +565,9 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
             existing_meta["end_reason"] = end_reason
         if llm_end_reason:
             existing_meta["llm_end_reason"] = llm_end_reason
+        existing_meta["termination_source"] = termination_source or "unknown"
+        if termination_source is None:
+            logger.warning("unknown_termination_source", call_sid=call_sid)
 
         # Add analysis data to metadata if available
         if analysis:
@@ -693,7 +698,8 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
 
     except Exception as e:
         logger.error("pipeline_error", call_sid=call_sid, error=str(e), exc_info=True)
-        await _update_call_status(call_sid, status="error")
+        await _update_call_status(call_sid, status="error",
+                                  metadata={"termination_source": "pipeline_error"})
         await _post_ghl_outcome(ctx, outcome="error", error=str(e))
         # Record pipeline failure in circuit breaker
         try:
@@ -745,34 +751,9 @@ async def plivo_event(call_sid: str, request: Request):
                 reported_duration_seconds=duration_val,
             )
 
-    # Trigger engagement sequence if matching template exists
-    if call_log and call_log.metadata_:
-        try:
-            from app.services import sequence_engine
-            from app.models.lead import Lead
-            from app.database import get_db_session as _get_db
-            async with _get_db() as seq_db:
-                lead_result = await seq_db.execute(
-                    select(Lead).where(
-                        Lead.org_id == call_log.org_id,
-                        Lead.phone_number.contains(call_log.contact_phone[-10:]),
-                    ).limit(1)
-                )
-                lead = lead_result.scalar_one_or_none()
-                if lead and call_log.metadata_.get("goal_outcome"):
-                    from types import SimpleNamespace
-                    analysis = SimpleNamespace(
-                        goal_outcome=call_log.metadata_.get("goal_outcome", ""),
-                        interest_level=call_log.metadata_.get("interest_level", ""),
-                        captured_data=call_log.metadata_.get("captured_data", {}),
-                        sentiment=call_log.metadata_.get("sentiment", ""),
-                        summary=call_log.metadata_.get("summary", ""),
-                    )
-                    await sequence_engine.evaluate_trigger(
-                        seq_db, call_log.org_id, call_log.bot_id, analysis, lead, call_log
-                    )
-        except Exception:
-            logger.exception("sequence_trigger_failed", call_sid=call_sid)
+    # Sequence trigger is handled by the WebSocket post-call handler (above).
+    # Do NOT trigger here — plivo_event fires independently and would create
+    # duplicate sequence instances. See Shyamala incident (2026-03-24).
 
     # Auto-retry if no_answer and callback is enabled on the bot
     if call_log and mapped_status == "no_answer":
