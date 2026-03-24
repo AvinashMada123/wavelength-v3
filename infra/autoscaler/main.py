@@ -16,7 +16,9 @@ import logging
 import os
 import time
 
-from google.cloud import compute_v1, monitoring_v1
+import functions_framework
+from google.cloud import compute_v1
+from google.cloud import monitoring_v3 as monitoring
 from google.protobuf import timestamp_pb2
 
 logger = logging.getLogger(__name__)
@@ -42,7 +44,7 @@ MACHINE_TYPE_MAP = {
 
 def get_cpu_utilization() -> float | None:
     """Get average CPU utilization over the last 10 minutes."""
-    client = monitoring_v1.MetricServiceClient()
+    client = monitoring.MetricServiceClient()
 
     now = time.time()
     start = now - 600  # 10 minutes ago
@@ -52,7 +54,7 @@ def get_cpu_utilization() -> float | None:
     end_time = timestamp_pb2.Timestamp()
     end_time.FromSeconds(int(now))
 
-    interval = monitoring_v1.TimeInterval(
+    interval = monitoring.TimeInterval(
         start_time=start_time,
         end_time=end_time,
     )
@@ -65,7 +67,7 @@ def get_cpu_utilization() -> float | None:
                 f'AND resource.labels.instance_id = "{_get_instance_id()}"'
             ),
             "interval": interval,
-            "view": monitoring_v1.ListTimeSeriesRequest.TimeSeriesView.FULL,
+            "view": monitoring.ListTimeSeriesRequest.TimeSeriesView.FULL,
         }
     )
 
@@ -163,7 +165,8 @@ def determine_target_cpus(current_cpus: int, cpu_pct: float) -> int:
     return valid_cpus[-1]
 
 
-def autoscale_vm(request=None) -> str:
+@functions_framework.http
+def autoscale_vm(request) -> str:
     """Main Cloud Function entry point.
 
     Triggered by Cloud Scheduler every 5 minutes via HTTP.
