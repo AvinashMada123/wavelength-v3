@@ -15,6 +15,11 @@ export async function createFlow(data: { name: string; trigger_type: string }): 
   return apiFetch("/api/flows", { method: "POST", body: JSON.stringify(data) });
 }
 
+/** Delete a flow */
+export async function deleteFlow(flowId: string): Promise<void> {
+  return apiFetch(`/api/flows/${flowId}`, { method: "DELETE" });
+}
+
 /** Fetch a flow definition with its versions */
 export async function fetchFlow(flowId: string): Promise<FlowDefinition> {
   return apiFetch(`/api/flows/${flowId}`);
@@ -31,7 +36,7 @@ export async function saveGraph(
   versionId: string,
   graph: { nodes: FlowNodeData[]; edges: FlowEdgeData[] },
 ): Promise<void> {
-  return apiFetch(`/api/flows/${flowId}/versions/${versionId}/graph`, {
+  return apiFetch(`/api/flows/${flowId}/versions/${versionId}`, {
     method: "PUT",
     body: JSON.stringify(graph),
   });

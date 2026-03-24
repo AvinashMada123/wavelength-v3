@@ -55,7 +55,7 @@ import {
   updateTemplate,
   type SequenceTemplate,
 } from "@/lib/sequences-api";
-import { fetchFlows, createFlow } from "@/lib/flows-api";
+import { fetchFlows, createFlow, deleteFlow } from "@/lib/flows-api";
 import type { FlowDefinition } from "@/lib/flow-types";
 
 const PAGE_SIZE = 50;
@@ -152,6 +152,18 @@ export default function SequencesPage() {
       toast.error("Failed to create flow");
     } finally {
       setCreatingFlow(false);
+    }
+  }
+
+  async function handleDeleteFlow(flowId: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirm("Delete this flow? This cannot be undone.")) return;
+    try {
+      await deleteFlow(flowId);
+      setFlows((prev) => prev.filter((f) => f.id !== flowId));
+      toast.success("Flow deleted");
+    } catch {
+      toast.error("Failed to delete flow");
     }
   }
 
@@ -321,9 +333,18 @@ export default function SequencesPage() {
                           {flow.trigger_type === "post_call" ? "Post Call" : flow.trigger_type === "manual" ? "Manual" : flow.trigger_type}
                         </Badge>
                       </div>
-                      <Badge variant={flow.is_active ? "default" : "secondary"} className="text-xs">
-                        {flow.is_active ? "Active" : "Draft"}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={flow.is_active ? "default" : "secondary"} className="text-xs">
+                          {flow.is_active ? "Active" : "Draft"}
+                        </Badge>
+                        <button
+                          onClick={(e) => handleDeleteFlow(flow.id, e)}
+                          className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                          title="Delete flow"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
