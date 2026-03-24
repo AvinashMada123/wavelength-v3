@@ -72,6 +72,7 @@ class FlowVersionResponse(BaseModel):
 
 
 class FlowNodeCreate(BaseModel):
+    id: UUID | None = None
     node_type: str
     name: str
     position_x: float = 0
