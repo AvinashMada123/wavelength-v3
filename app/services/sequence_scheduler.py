@@ -194,7 +194,7 @@ async def _process_batch():
 
 async def _process_flow_batch() -> None:
     """Find and process all due flow touchpoints."""
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
 
     async with get_db_session() as db:
         result = await db.execute(
