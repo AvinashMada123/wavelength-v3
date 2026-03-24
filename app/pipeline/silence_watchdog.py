@@ -57,10 +57,15 @@ class SilenceWatchdog(FrameProcessor):
         self._started: bool = False
         self._watchdog_task: asyncio.Task | None = None
         self._pipeline_task = None  # Set after PipelineTask creation
+        self._call_guard = None  # Set after CallGuard creation
 
     def set_task(self, task) -> None:
         """Store a reference to the PipelineTask for proper EndFrame delivery."""
         self._pipeline_task = task
+
+    def set_call_guard(self, guard) -> None:
+        """Store a reference to CallGuard for termination_source tracking."""
+        self._call_guard = guard
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -129,6 +134,8 @@ class SilenceWatchdog(FrameProcessor):
                         call_sid=self._call_sid,
                         elapsed_s=round(elapsed, 1),
                     )
+                    if self._call_guard:
+                        self._call_guard.set_termination_source("silence_watchdog")
                     await self.push_frame(
                         TTSSpeakFrame(text=self._goodbye_text)
                     )

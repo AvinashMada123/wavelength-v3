@@ -281,6 +281,7 @@ async def run_pipeline(
         try:
             await asyncio.sleep(max_duration)
             logger.info("max_call_duration_reached", call_sid=ctx.call_sid, max_duration=max_duration)
+            guard.set_termination_source("max_duration")
             await task.queue_frame(EndFrame())
         except asyncio.CancelledError:
             pass
@@ -294,10 +295,12 @@ async def run_pipeline(
             try:
                 if websocket.client_state.name == "DISCONNECTED":
                     logger.info("ws_watchdog_disconnect", call_sid=ctx.call_sid)
+                    guard.set_termination_source("ws_disconnect")
                     await task.queue_frame(EndFrame())
                     return
             except Exception:
                 logger.info("ws_watchdog_disconnect_exception", call_sid=ctx.call_sid)
+                guard.set_termination_source("ws_disconnect")
                 await task.queue_frame(EndFrame())
                 return
 
@@ -321,6 +324,7 @@ async def run_pipeline(
         "dnd_detected": guard.dnd_detected,
         "dnd_reason": guard.dnd_reason,
         "realtime_red_flags": guard.detected_red_flags,
+        "termination_source": guard.termination_source,
     }
 
 

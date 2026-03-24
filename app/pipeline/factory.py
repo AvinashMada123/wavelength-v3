@@ -72,7 +72,9 @@ UNIVERSAL PHONE RULES (always follow):
 - HARD LIMIT: Maximum 2 sentences per turn, then STOP and let the customer speak.
 - Ask at most 1 question per turn.
 - NEVER repeat a question you already asked, even rephrased.
-- If the user says they already answered, already have the details, is not interested, asks not to be called again, or says they are busy, driving, or unwell, acknowledge briefly and end the call.
+- If the user EXPLICITLY says they are not interested, asks not to be called again, says stop calling, or says they are busy/driving/unwell, acknowledge briefly and use the end_call tool. You MUST end the call on explicit rejection — do not push further.
+- Do NOT end the call just because the user gave a short or one-word answer — many Indian users give brief replies but are still engaged.
+- Per-bot instructions about language barriers take precedence over these universal rules.
 
 """
 
@@ -1111,28 +1113,41 @@ def _build_end_call_tool():
         name="end_call",
         description=(
             "End the phone call. Call this ONLY when:\n"
-            "1) Both you AND the customer have exchanged EXPLICIT goodbye words "
-            "(bye/goodbye/take care/see you) — call end_call with NO additional text.\n"
-            "2) The customer says 'not interested', 'don't call me', 'wrong number', or any clear rejection "
-            "after you've attempted to address their concern.\n"
-            "3) The customer explicitly asks to hang up or end the call.\n\n"
-            "IMPORTANT: If you already said goodbye and the customer responds with "
-            "'bye'/'okay bye'/'thanks bye', call end_call IMMEDIATELY without saying anything else. "
-            "Do NOT say goodbye twice.\n\n"
+            "1) The customer said EXPLICIT goodbye words (bye/goodbye/take care/see you) — "
+            "call end_call IMMEDIATELY with NO additional text. Do NOT say goodbye twice.\n"
+            "2) The customer EXPLICITLY says 'not interested', 'don't call me', 'wrong number', "
+            "'nahi chahiye', 'zaroorat nahi', 'mat karo call', or any clear rejection — "
+            "you MUST end the call. Do not push further.\n"
+            "3) The customer explicitly asks to hang up or end the call.\n"
+            "4) The customer says they are busy, driving, or unwell.\n\n"
+            "AUDIO ISSUES: If you hear silence, garbled audio, or the customer says "
+            "'I can't hear you' / 'hello? hello?', ask 'Can you hear me now?' and wait. "
+            "You may ask this at most 2 times. If still no clear response after 2 attempts, "
+            "then end the call with reason 'customer_no_response'.\n\n"
+            "POSITIVE SHORT ANSWERS — these are engagement signals, NOT rejection:\n"
+            "'Super', 'Great', 'Perfect', 'Awesome', 'Good', 'Fine', 'Okay', 'Achha', "
+            "'Haan', 'Theek hai', 'Ji', 'Bilkul', 'Sahi hai', 'Ha', 'Yes', 'Yeah', "
+            "'Hmm', 'Thank you'. NEVER treat these as disinterest. Continue the conversation.\n\n"
             "NEVER end the call if:\n"
-            "- The customer only said 'yeah', 'yes', 'okay', 'thank you', 'good', 'fine', 'hmm', or any short acknowledgment — "
-            "these are NOT signs of disinterest. Many Indian users give brief replies but are still engaged. Continue the conversation.\n"
-            "- The customer is giving one-word or short answers — this is normal phone behavior, NOT rejection. "
-            "Keep asking questions and progressing through your flow.\n"
-            "- The customer is still mid-sentence, stuttering, or starting a new question.\n"
-            "- The customer is hesitant but has NOT explicitly said goodbye or rejected.\n"
-            "- You are unsure whether the customer wants to end — keep the conversation going instead.\n"
-            "- You have NOT completed your full conversation flow — finish all required steps first."
+            "- The customer is giving short or one-word answers — this is normal Indian phone behavior.\n"
+            "- The customer is hesitant but has NOT explicitly rejected or said goodbye.\n"
+            "- You are unsure — keep the conversation going instead.\n"
+            "- You have asked fewer than 3 questions and the customer has not explicitly rejected. "
+            "Give the conversation a fair chance before ending.\n"
+            "- You have NOT completed your conversation flow — finish all required steps first."
         ),
         properties={
             "reason": {
                 "type": "string",
-                "description": "Brief reason for ending the call (e.g., 'mutual_goodbye', 'not_interested', 'wrong_number')",
+                "description": "Why the call is ending.",
+                "enum": [
+                    "customer_goodbye",
+                    "customer_rejected",
+                    "customer_busy",
+                    "customer_requested_hangup",
+                    "customer_no_response",
+                    "bot_said_goodbye",
+                ],
             }
         },
         required=["reason"],
@@ -1580,12 +1595,22 @@ async def build_pipeline(
     llm_model = getattr(bot_config, "llm_model", "")
     _groq_no_tools = llm_provider == "groq" and "gpt-oss" in llm_model
 
+    _VALID_END_REASONS = {
+        "customer_goodbye", "customer_rejected", "customer_busy",
+        "customer_requested_hangup", "customer_no_response", "bot_said_goodbye",
+    }
+
     async def handle_end_call(params):
         reason = params.arguments.get("reason", "conversation_ended")
+        # Validate reason — map off-enum values to 'other'
+        if reason not in _VALID_END_REASONS:
+            logger.warning("end_call_invalid_reason", call_sid=call_context.call_sid,
+                           raw_reason=reason, mapped_to="other")
+            reason = f"other: {reason}"
         logger.info("end_call_triggered", call_sid=call_context.call_sid, reason=reason,
                      provider=llm_provider)
-        # Store LLM's reason on CallGuard so it's available in post-call metadata
         call_guard.llm_end_reason = reason
+        call_guard.set_termination_source("bot_end_call")
         await params.result_callback("Call ending now. Do not say anything else.")
         if _task_ref[0]:
             await _task_ref[0].queue_frame(EndFrame())
@@ -1792,5 +1817,6 @@ async def build_pipeline(
     # Set task ref so end_call handler and silence watchdog can queue EndFrame
     _task_ref[0] = task
     silence_watchdog.set_task(task)
+    silence_watchdog.set_call_guard(call_guard)
 
     return task, transport, context, call_guard

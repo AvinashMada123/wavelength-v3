@@ -115,6 +115,7 @@ class CallGuard(FrameProcessor):
       dnd_reason: str | None (e.g. "strong: stop calling")
       detected_red_flags: list[dict] — accumulated real-time red flag detections
       llm_end_reason: str | None — reason from LLM's end_call tool invocation
+      termination_source: str | None — which path ended the call (write-once)
     """
 
     def __init__(self, call_sid: str, goal_config: dict | None = None, **kwargs):
@@ -127,6 +128,7 @@ class CallGuard(FrameProcessor):
         self._dnd_reason: str | None = None
         self._ended = False
         self.llm_end_reason: str | None = None
+        self._termination_source: str | None = None
 
         # Custom keyword-based red flags from goal_config (realtime only)
         self._custom_realtime_flags: list[dict] = []
@@ -147,6 +149,15 @@ class CallGuard(FrameProcessor):
     @property
     def dnd_reason(self) -> str | None:
         return self._dnd_reason
+
+    @property
+    def termination_source(self) -> str | None:
+        return self._termination_source
+
+    def set_termination_source(self, source: str) -> None:
+        """Write-once setter — first caller wins to avoid race conditions."""
+        if self._termination_source is None:
+            self._termination_source = source
 
     async def process_frame(self, frame, direction: FrameDirection):
         from pipecat.frames.frames import BotStartedSpeakingFrame, StartFrame
@@ -190,6 +201,7 @@ class CallGuard(FrameProcessor):
                 if phrase in text:
                     logger.info("voicemail_detected", call_sid=self._call_sid, phrase=phrase, text=text[:100])
                     self._end_reason = "voicemail"
+                    self.set_termination_source("voicemail")
                     self._ended = True
                     await self.push_frame(EndFrame())
                     return
@@ -200,6 +212,7 @@ class CallGuard(FrameProcessor):
                     if phrase in text:
                         logger.info("voicemail_detected", call_sid=self._call_sid, phrase=phrase, text=text[:100])
                         self._end_reason = "voicemail"
+                        self.set_termination_source("voicemail")
                         self._ended = True
                         await self.push_frame(EndFrame())
                         return
@@ -211,6 +224,7 @@ class CallGuard(FrameProcessor):
                 if phrase in text:
                     logger.info("hold_ivr_detected", call_sid=self._call_sid, phrase=phrase, text=text[:100])
                     self._end_reason = "hold_ivr"
+                    self.set_termination_source("hold_ivr")
                     self._ended = True
                     await self.push_frame(EndFrame())
                     return
