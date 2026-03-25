@@ -21,11 +21,11 @@ CONDITION_NODE_TYPES = {"condition", "ab_split", "if_else"}
 # Action node types that should have a "failed" edge
 ACTION_NODE_TYPES = {"send_email", "send_sms", "make_call", "webhook", "update_field"}
 
-# The entry node type
-ENTRY_NODE_TYPE = "entry"
+# Trigger node types (treated as entry nodes)
+TRIGGER_NODE_TYPES = {"entry", "trigger_manual", "trigger_post_call", "trigger_campaign_complete"}
 
-# The end/exit node type
-END_NODE_TYPE = "end"
+# End/exit node types
+END_NODE_TYPES = {"end", "end_flow", "goal_met"}
 
 
 def validate_flow(
@@ -50,8 +50,8 @@ def validate_flow(
     node_types = {i: n.node_type for i, n in enumerate(nodes)}
     node_names = {i: n.name for i, n in enumerate(nodes)}
 
-    # --- Check: exactly one entry node ---
-    entry_nodes = [i for i, n in enumerate(nodes) if n.node_type == ENTRY_NODE_TYPE]
+    # --- Check: exactly one entry (trigger) node ---
+    entry_nodes = [i for i, n in enumerate(nodes) if n.node_type in TRIGGER_NODE_TYPES]
     if len(entry_nodes) == 0:
         errors.append({
             "code": "NO_ENTRY",
@@ -64,7 +64,7 @@ def validate_flow(
         })
 
     # --- Check: at least one end node ---
-    end_nodes = [i for i, n in enumerate(nodes) if n.node_type == END_NODE_TYPE]
+    end_nodes = [i for i, n in enumerate(nodes) if n.node_type in END_NODE_TYPES]
     if len(end_nodes) == 0:
         errors.append({
             "code": "NO_END",
