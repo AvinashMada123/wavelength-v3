@@ -428,26 +428,27 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
                     )
                     return
 
-            # Check calling window for ALL calls (webhook, manual, retry)
-            tz_name = getattr(bot_config, "callback_timezone", "Asia/Kolkata")
-            window_start = getattr(bot_config, "callback_window_start", 9)
-            window_end = getattr(bot_config, "callback_window_end", 20)
-            try:
-                from zoneinfo import ZoneInfo
-                tz = ZoneInfo(tz_name)
-                local_now = datetime.now(tz)
-                if not (window_start <= local_now.hour < window_end):
-                    # Outside calling window — revert to queued, will be picked up later
-                    queued_call.status = "queued"
-                    await db.commit()
-                    logger.info(
-                        "call_outside_window",
-                        queue_id=str(queue_id),
-                        source=queued_call.source,
-                        local_hour=local_now.hour,
-                        window=f"{window_start}-{window_end}",
-                    )
-                    return
+            # Check calling window — skip for manual calls (UI call button, admin tests)
+            if queued_call.source not in ("manual", "admin"):
+                tz_name = getattr(bot_config, "callback_timezone", "Asia/Kolkata")
+                window_start = getattr(bot_config, "callback_window_start", 9)
+                window_end = getattr(bot_config, "callback_window_end", 20)
+                try:
+                    from zoneinfo import ZoneInfo
+                    tz = ZoneInfo(tz_name)
+                    local_now = datetime.now(tz)
+                    if not (window_start <= local_now.hour < window_end):
+                        # Outside calling window — revert to queued, will be picked up later
+                        queued_call.status = "queued"
+                        await db.commit()
+                        logger.info(
+                            "call_outside_window",
+                            queue_id=str(queue_id),
+                            source=queued_call.source,
+                            local_hour=local_now.hour,
+                            window=f"{window_start}-{window_end}",
+                        )
+                        return
             except Exception as e:
                 logger.error("calling_window_check_failed", error=str(e))
                 # Proceed anyway on timezone errors

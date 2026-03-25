@@ -139,6 +139,7 @@ async def trigger_queued_call(
         raise HTTPException(status_code=400, detail=f"Cannot trigger call in '{call.status}' status")
 
     call.status = "processing"
+    call.source = "manual"  # Mark as manual so it bypasses calling window
     await db.commit()
 
     # Fire-and-forget: process this call in the background
