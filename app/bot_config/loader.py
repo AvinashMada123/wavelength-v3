@@ -52,8 +52,12 @@ class BotConfigLoader:
                     _BOT_CONFIG_UPDATES_CHANNEL,
                     self._handle_invalidation_notification,
                 )
-            finally:
+            except Exception:
+                logger.warning("bot_config_loader_listener_cleanup_failed", exc_info=True)
+            try:
                 await self._db_pool.release(conn)
+            except Exception:
+                pass
             logger.info("bot_config_loader_listener_stopped", channel=_BOT_CONFIG_UPDATES_CHANNEL)
 
     async def get(self, bot_id: str | uuid.UUID) -> BotConfig | None:
