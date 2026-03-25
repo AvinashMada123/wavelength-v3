@@ -91,7 +91,7 @@ async def create_bot(
     return bot
 
 
-@router.get("", response_model=list[BotConfigListItem])
+@router.get("", response_model=list[BotConfigResponse])
 async def list_bots(
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_current_org),
@@ -101,7 +101,13 @@ async def list_bots(
         .where(BotConfig.is_active == True, BotConfig.org_id == org_id)
         .order_by(BotConfig.created_at.desc())
     )
-    return result.scalars().all()
+    bots = result.scalars().all()
+    # Truncate system_prompt_template to 150 chars for list view performance
+    # Full prompt is available via GET /api/bots/{id}
+    for bot in bots:
+        if bot.system_prompt_template and len(bot.system_prompt_template) > 150:
+            bot.system_prompt_template = bot.system_prompt_template[:150] + "..."
+    return bots
 
 
 @router.get("/{bot_id}", response_model=BotConfigResponse)
