@@ -329,11 +329,10 @@ export function StepCard({
               onValueChange={(val) => {
                 setChannel(val);
                 const updates: Partial<SequenceStep> = { channel: val };
-                // Auto-set content_type for webhook and voice_call
+                // Auto-set content_type based on channel
                 if (val === "webhook") {
                   setContentType("webhook");
                   updates.content_type = "webhook";
-                  // Disable expects_reply for webhook
                   if (expectsReply) {
                     setExpectsReply(false);
                     updates.expects_reply = false;
@@ -341,6 +340,12 @@ export function StepCard({
                 } else if (val === "voice_call") {
                   setContentType("voice_call");
                   updates.content_type = "voice_call";
+                } else if (val === "whatsapp_session" || val === "sms") {
+                  setContentType("free_text");
+                  updates.content_type = "free_text";
+                } else if (val === "whatsapp_template") {
+                  setContentType("static_template");
+                  updates.content_type = "static_template";
                 }
                 onUpdate(step.id, updates);
               }}
