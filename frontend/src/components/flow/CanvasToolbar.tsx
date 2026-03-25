@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Rocket,
   Play,
+  Save,
   Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -32,8 +33,11 @@ interface CanvasToolbarProps {
   onValidate: () => void;
   onPublish: () => void;
   onSimulate: () => void;
+  onSave: () => void;
   isPublishing: boolean;
   isValidating: boolean;
+  isSaving: boolean;
+  isDirty: boolean;
   isDraft: boolean;
 }
 
@@ -46,8 +50,11 @@ export function CanvasToolbar({
   onValidate,
   onPublish,
   onSimulate,
+  onSave,
   isPublishing,
   isValidating,
+  isSaving,
+  isDirty,
   isDraft,
 }: CanvasToolbarProps) {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
@@ -89,19 +96,35 @@ export function CanvasToolbar({
         />
 
         {isDraft && (
-          <Button
-            size="sm"
-            onClick={onPublish}
-            disabled={isPublishing}
-            className="ml-1 h-7 gap-1.5 px-3 text-xs"
-          >
-            {isPublishing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Rocket className="h-3.5 w-3.5" />
-            )}
-            Publish
-          </Button>
+          <>
+            <Button
+              size="sm"
+              variant={isDirty ? "default" : "ghost"}
+              onClick={onSave}
+              disabled={isSaving || !isDirty}
+              className="ml-1 h-7 gap-1.5 px-3 text-xs"
+            >
+              {isSaving ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Save className="h-3.5 w-3.5" />
+              )}
+              {isSaving ? "Saving..." : "Save"}
+            </Button>
+            <Button
+              size="sm"
+              onClick={onPublish}
+              disabled={isPublishing}
+              className="ml-1 h-7 gap-1.5 px-3 text-xs"
+            >
+              {isPublishing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Rocket className="h-3.5 w-3.5" />
+              )}
+              Publish
+            </Button>
+          </>
         )}
       </div>
     </TooltipProvider>

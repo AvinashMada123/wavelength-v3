@@ -175,40 +175,38 @@ export function FlowCanvas({ flowId, flow, version, bots, onPublished }: FlowCan
   const isDraft = version.status === "draft";
 
   // -----------------------------------------------------------------------
-  // Auto-save with debounce
+  // Manual save + dirty tracking
   // -----------------------------------------------------------------------
-  const scheduleSave = useCallback(() => {
-    if (!isDraft) return;
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(async () => {
-      setIsSaving(true);
-      try {
-        await flowsApi.saveGraph(flowId, version.id, {
-          nodes: rfNodesToAPI(nodes, version.id),
-          edges: rfEdgesToAPI(edges, version.id),
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Unknown error";
-        toast.error(`Failed to save flow: ${msg}`);
-        console.error("[FlowCanvas] Save failed:", err);
-      } finally {
-        setIsSaving(false);
-      }
-    }, 1500);
-  }, [flowId, version.id, version.status, isDraft, nodes, edges]);
-
-  // Trigger save when nodes/edges change (but not on initial load)
+  const [isDirty, setIsDirty] = useState(false);
   const isInitialLoad = useRef(true);
+
+  // Track when nodes/edges change (skip initial load)
   useEffect(() => {
     if (isInitialLoad.current) {
       isInitialLoad.current = false;
       return;
     }
-    scheduleSave();
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    };
-  }, [nodes, edges, scheduleSave]);
+    if (isDraft) setIsDirty(true);
+  }, [nodes, edges, isDraft]);
+
+  const handleSave = useCallback(async () => {
+    if (!isDraft) return;
+    setIsSaving(true);
+    try {
+      await flowsApi.saveGraph(flowId, version.id, {
+        nodes: rfNodesToAPI(nodes, version.id),
+        edges: rfEdgesToAPI(edges, version.id),
+      });
+      setIsDirty(false);
+      toast.success("Flow saved");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      toast.error(`Failed to save flow: ${msg}`);
+      console.error("[FlowCanvas] Save failed:", err);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [flowId, version.id, isDraft, nodes, edges]);
 
   // -----------------------------------------------------------------------
   // Connection handler
@@ -491,18 +489,20 @@ export function FlowCanvas({ flowId, flow, version, bots, onPublished }: FlowCan
               onValidate={handleValidate}
               onPublish={handlePublish}
               onSimulate={handleSimulate}
+              onSave={handleSave}
               isPublishing={isPublishing}
               isValidating={isValidating}
+              isSaving={isSaving}
+              isDirty={isDirty}
               isDraft={isDraft}
             />
           </Panel>
 
-          {/* Save indicator */}
-          {isSaving && (
+          {/* Unsaved indicator */}
+          {isDirty && !isSaving && (
             <Panel position="top-right">
-              <div className="flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Saving...
+              <div className="rounded-md border border-yellow-500/50 bg-yellow-500/10 px-2 py-1 text-xs text-yellow-500">
+                Unsaved changes
               </div>
             </Panel>
           )}
