@@ -1569,11 +1569,14 @@ async def build_pipeline(
 
         thinking_enabled = getattr(bot_config, "llm_thinking_enabled", False)
         thinking_cfg = GoogleThinkingConfig(thinking_budget=-1) if thinking_enabled else None
+        llm_model = getattr(bot_config, "llm_model", "gemini-2.5-flash")
+        # Preview models (gemini-3-*) are only available on Vertex via "global" location
+        llm_location = "global" if llm_model.startswith("gemini-3") else settings.VERTEX_AI_LOCATION
         llm = GoogleVertexLLMService(
             credentials_path=settings.GOOGLE_APPLICATION_CREDENTIALS,
             project_id=settings.GOOGLE_CLOUD_PROJECT,
-            location=settings.VERTEX_AI_LOCATION,
-            model=getattr(bot_config, "llm_model", "gemini-2.5-flash"),
+            location=llm_location,
+            model=llm_model,
             params=GoogleLLMService.InputParams(
                 temperature=0.7,
                 max_tokens=256,
@@ -1581,7 +1584,7 @@ async def build_pipeline(
             ),
         )
         logger.info("llm_provider_selected", provider="google",
-                     model=getattr(bot_config, "llm_model", "gemini-2.5-flash"),
+                     model=llm_model, location=llm_location,
                      thinking_enabled=thinking_enabled)
 
     # --- End-call tool ---
