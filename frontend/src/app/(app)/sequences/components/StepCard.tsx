@@ -15,6 +15,7 @@ import {
   Send,
   Loader2,
   Globe,
+  Save,
 } from "lucide-react";
 import { toast } from "sonner";
 import { testStep } from "@/lib/sequences-api";
@@ -153,33 +154,46 @@ export function StepCard({
   isExpanded,
   onToggleExpand,
 }: StepCardProps) {
-  // -- Debounced auto-save helpers --
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // -- Manual save helpers --
   const pendingRef = useRef<Partial<SequenceStep>>({});
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
 
-  const flush = useCallback(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
+  const flush = useCallback(async () => {
     const data = pendingRef.current;
-    if (Object.keys(data).length > 0) {
-      pendingRef.current = {};
-      Promise.resolve(onUpdate(step.id, data)).catch(() => {
-        // Restore failed data so next edit retries it
-        pendingRef.current = { ...data, ...pendingRef.current };
-      });
+    if (Object.keys(data).length === 0) return;
+    setIsSaving(true);
+    pendingRef.current = {};
+    try {
+      await Promise.resolve(onUpdate(step.id, data));
+      setIsDirty(false);
+      toast.success("Step saved");
+    } catch {
+      // Restore failed data so next save retries it
+      pendingRef.current = { ...data, ...pendingRef.current };
+      setIsDirty(true);
+      toast.error("Failed to save step");
+    } finally {
+      setIsSaving(false);
     }
   }, [onUpdate, step.id]);
 
   const queueSave = useCallback(
     (patch: Partial<SequenceStep>) => {
       pendingRef.current = { ...pendingRef.current, ...patch };
-      if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(flush, 500);
+      setIsDirty(true);
     },
-    [flush],
+    [],
   );
 
-  // Flush on unmount
-  useEffect(() => () => flush(), [flush]);
+  // Warn if navigating away with unsaved changes
+  useEffect(() => () => {
+    if (Object.keys(pendingRef.current).length > 0) {
+      // Auto-flush on unmount as fallback
+      onUpdate(step.id, pendingRef.current);
+      pendingRef.current = {};
+    }
+  }, [onUpdate, step.id]);
 
   // Local state mirrors for controlled inputs
   const [name, setName] = useState(step.name);
@@ -879,17 +893,33 @@ export function StepCard({
           </div>
         )}
 
-        {/* Footer: Active toggle + Delete */}
+        {/* Footer: Save + Active toggle + Delete */}
         <div className="flex items-center justify-between border-t pt-4">
-          <div className="flex items-center gap-2">
-            <Switch
-              checked={isActive}
-              onCheckedChange={(checked) => {
-                setIsActive(checked);
-                onUpdate(step.id, { is_active: checked });
-              }}
-            />
-            <Label className="text-xs text-muted-foreground">Active</Label>
+          <div className="flex items-center gap-3">
+            <Button
+              size="sm"
+              variant={isDirty ? "default" : "outline"}
+              disabled={!isDirty || isSaving}
+              onClick={() => flush()}
+              className="h-7 gap-1.5 px-3 text-xs"
+            >
+              {isSaving ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Save className="h-3 w-3" />
+              )}
+              {isSaving ? "Saving..." : "Save"}
+            </Button>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={isActive}
+                onCheckedChange={(checked) => {
+                  setIsActive(checked);
+                  onUpdate(step.id, { is_active: checked });
+                }}
+              />
+              <Label className="text-xs text-muted-foreground">Active</Label>
+            </div>
           </div>
           <Button
             variant="ghost"
