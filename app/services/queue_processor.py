@@ -449,9 +449,9 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
                             window=f"{window_start}-{window_end}",
                         )
                         return
-            except Exception as e:
-                logger.error("calling_window_check_failed", error=str(e))
-                # Proceed anyway on timezone errors
+                except Exception as e:
+                    logger.error("calling_window_check_failed", error=str(e))
+                    # Proceed anyway on timezone errors
 
             # Check org has enough credits before dialing
             has_credits, balance = await check_org_credits(db, bot_config.org_id)
