@@ -155,7 +155,7 @@ def validate_flow(
     # --- Check: every path reaches End ---
     # Nodes with no outgoing edges that are NOT end nodes are dead ends
     for idx in node_ids:
-        if idx in reachable and not adjacency[idx] and node_types[idx] != END_NODE_TYPE:
+        if idx in reachable and not adjacency[idx] and node_types[idx] not in END_NODE_TYPES:
             errors.append({
                 "code": "DEAD_END",
                 "message": f"Node '{node_names[idx]}' has no outgoing edges and is not an End node.",
