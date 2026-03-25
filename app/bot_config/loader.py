@@ -31,13 +31,26 @@ class BotConfigLoader:
             if self._listener_conn is not None:
                 return
 
-            conn = await self._db_pool.acquire()
-            await conn.add_listener(
-                _BOT_CONFIG_UPDATES_CHANNEL,
-                self._handle_invalidation_notification,
-            )
-            self._listener_conn = conn
-            logger.info("bot_config_loader_listener_started", channel=_BOT_CONFIG_UPDATES_CHANNEL)
+            for attempt in range(3):
+                try:
+                    conn = await self._db_pool.acquire()
+                    await conn.add_listener(
+                        _BOT_CONFIG_UPDATES_CHANNEL,
+                        self._handle_invalidation_notification,
+                    )
+                    self._listener_conn = conn
+                    logger.info("bot_config_loader_listener_started", channel=_BOT_CONFIG_UPDATES_CHANNEL)
+                    return
+                except Exception:
+                    logger.warning(
+                        "bot_config_loader_listener_start_failed",
+                        attempt=attempt + 1,
+                        exc_info=True,
+                    )
+                    if attempt < 2:
+                        await asyncio.sleep(1)
+
+            logger.error("bot_config_loader_listener_start_gave_up")
 
     async def stop(self):
         """Stop listening for invalidation events and release the dedicated connection."""
@@ -48,9 +61,12 @@ class BotConfigLoader:
             conn = self._listener_conn
             self._listener_conn = None
             try:
-                await conn.remove_listener(
-                    _BOT_CONFIG_UPDATES_CHANNEL,
-                    self._handle_invalidation_notification,
+                await asyncio.wait_for(
+                    conn.remove_listener(
+                        _BOT_CONFIG_UPDATES_CHANNEL,
+                        self._handle_invalidation_notification,
+                    ),
+                    timeout=3.0,
                 )
             except Exception:
                 logger.warning("bot_config_loader_listener_cleanup_failed", exc_info=True)
