@@ -511,6 +511,11 @@ async def process_touchpoint(db: AsyncSession, touchpoint: SequenceTouchpoint) -
         await db.commit()
         return
 
+    # --- Free text: interpolate variables, no AI ---
+    if content_type == "free_text" and snapshot.get("ai_prompt"):
+        from app.services.anthropic_client import _interpolate_variables
+        touchpoint.generated_content = _interpolate_variables(snapshot["ai_prompt"], context)
+
     # --- Generate content if AI ---
     if content_type == "ai_generated" and snapshot.get("ai_prompt"):
         touchpoint.status = "generating"

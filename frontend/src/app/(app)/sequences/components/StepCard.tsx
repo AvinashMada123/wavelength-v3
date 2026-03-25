@@ -48,6 +48,7 @@ const CHANNEL_OPTIONS = [
 
 const CONTENT_TYPE_OPTIONS = [
   { value: "static_template", label: "Static Template" },
+  { value: "free_text", label: "Free Text" },
   { value: "ai_generated", label: "AI Generated" },
   { value: "voice_call", label: "Voice Call" },
   { value: "webhook", label: "Webhook" },
@@ -597,6 +598,27 @@ export function StepCard({
                 <p className="text-[10px] text-red-500">Invalid JSON — changes won&apos;t save until fixed</p>
               )}
             </div>
+          </div>
+        )}
+
+        {contentType === "free_text" && (
+          <div className="space-y-3 rounded-lg border p-4">
+            <Label className="text-xs flex items-center gap-1">
+              <MessageSquare className="h-3 w-3" /> Message Text
+            </Label>
+            <Textarea
+              rows={5}
+              placeholder="Hi {{contact_name}}, here's your result: {{webhook_8_message}}"
+              value={aiPrompt}
+              onChange={(e) => {
+                setAiPrompt(e.target.value);
+                updateField({ ai_prompt: e.target.value });
+              }}
+              onBlur={flush}
+            />
+            <p className="text-[10px] text-muted-foreground">
+              Use {"{{variable_name}}"} to insert lead data or webhook outputs
+            </p>
           </div>
         )}
 
