@@ -34,7 +34,7 @@ class SequenceTemplate(Base):
     variables: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     is_active: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(server_default=text("now()"))
-    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), onupdate=lambda: datetime.utcnow())
 
 
 class SequenceStep(Base):
@@ -69,7 +69,7 @@ class SequenceStep(Base):
     webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     webhook_headers: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=text("now()"))
-    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), onupdate=lambda: datetime.utcnow())
 
 
 class SequenceInstance(Base):
@@ -112,7 +112,7 @@ class SequenceInstance(Base):
     started_at: Mapped[datetime] = mapped_column(server_default=text("now()"))
     completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=text("now()"))
-    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), onupdate=lambda: datetime.utcnow())
 
 
 class SequenceTouchpoint(Base):
@@ -157,4 +157,4 @@ class SequenceTouchpoint(Base):
         UUID(as_uuid=True), ForeignKey("call_queue.id"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(server_default=text("now()"))
-    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), onupdate=lambda: datetime.utcnow())
