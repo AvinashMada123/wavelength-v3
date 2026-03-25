@@ -360,6 +360,8 @@ class BotConfigListItem(BaseModel):
     callback_enabled: bool
     circuit_breaker_enabled: bool
     max_concurrent_calls: int
+    goal_config: dict | None = None
+    sequence_template_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
 
