@@ -25,6 +25,11 @@ export async function fetchFlow(flowId: string): Promise<FlowDefinition> {
   return apiFetch(`/api/flows/${flowId}`);
 }
 
+/** Fetch a specific version with its nodes and edges */
+export async function fetchVersion(flowId: string, versionId: string): Promise<FlowVersion> {
+  return apiFetch(`/api/flows/${flowId}/versions/${versionId}`);
+}
+
 /** Create a new draft version (clones published) */
 export async function createDraftVersion(flowId: string): Promise<FlowVersion> {
   return apiFetch(`/api/flows/${flowId}/versions`, { method: "POST" });

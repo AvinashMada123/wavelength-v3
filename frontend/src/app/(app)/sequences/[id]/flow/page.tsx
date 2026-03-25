@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
 import type { FlowDefinition, FlowVersion } from "@/lib/flow-types";
-import { fetchFlow, createDraftVersion } from "@/lib/flows-api";
+import { fetchFlow, fetchVersion, createDraftVersion } from "@/lib/flows-api";
 import { fetchBots } from "@/lib/api";
 import { FlowCanvas } from "@/components/flow/FlowCanvas";
 
@@ -37,7 +37,10 @@ export default function FlowCanvasPage() {
         router.push("/sequences");
         return;
       }
-      setVersion(activeVersion);
+
+      // Fetch full version detail (with nodes and edges)
+      const fullVersion = await fetchVersion(flowId, activeVersion.id);
+      setVersion(fullVersion);
     } catch {
       toast.error("Failed to load flow");
       router.push("/sequences");
@@ -64,7 +67,9 @@ export default function FlowCanvasPage() {
     if (!flow) return;
     try {
       const newDraft = await createDraftVersion(flowId);
-      setVersion(newDraft);
+      // Fetch full version with nodes and edges
+      const fullDraft = await fetchVersion(flowId, newDraft.id);
+      setVersion(fullDraft);
       toast.success("Draft version created — you can now edit the flow");
     } catch (err: any) {
       toast.error(err.message || "Failed to create draft");
