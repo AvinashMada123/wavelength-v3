@@ -170,12 +170,14 @@ async def _process_batch():
                     try:
                         await sequence_engine.process_touchpoint(tp_db, tp)
                         # Record contact for rate limiting after successful send
-                        if tp.lead_id and tp.org_id:
+                        # Skip for webhook — it doesn't contact the lead
+                        tp_channel = tp.step_snapshot.get("channel", "unknown") if tp.step_snapshot else "unknown"
+                        if tp.lead_id and tp.org_id and tp_channel != "webhook":
                             rl = RateLimiter(db=tp_db)
                             await rl.record_contact(
                                 lead_id=str(tp.lead_id),
                                 org_id=str(tp.org_id),
-                                channel=tp.step_snapshot.get("channel", "unknown") if tp.step_snapshot else "unknown",
+                                channel=tp_channel,
                             )
                     except Exception:
                         logger.exception("sequence_touchpoint_processing_failed", touchpoint_id=str(tp_id))
@@ -295,6 +297,7 @@ async def _process_flow_events() -> None:
 
 async def _retry_failed():
     """Re-queue failed touchpoints that haven't hit max retries."""
+    now = datetime.utcnow()
     async with get_db_session() as db:
         result = await db.execute(
             select(SequenceTouchpoint).where(
@@ -305,6 +308,19 @@ async def _retry_failed():
         retryable = result.scalars().all()
         for tp in retryable:
             tp.status = "pending"
-            logger.info("sequence_touchpoint_retry", touchpoint_id=str(tp.id), retry=tp.retry_count)
+            # Webhook retries get exponential backoff to avoid hammering external services
+            tp_channel = tp.step_snapshot.get("channel", "") if tp.step_snapshot else ""
+            if tp_channel == "webhook":
+                from datetime import timedelta
+                backoff_minutes = 2 ** tp.retry_count  # 1, 2, 4 minutes
+                tp.scheduled_at = now + timedelta(minutes=backoff_minutes)
+                logger.info(
+                    "webhook_touchpoint_retry_backoff",
+                    touchpoint_id=str(tp.id),
+                    retry=tp.retry_count,
+                    backoff_minutes=backoff_minutes,
+                )
+            else:
+                logger.info("sequence_touchpoint_retry", touchpoint_id=str(tp.id), retry=tp.retry_count)
         if retryable:
             await db.commit()

@@ -1,9 +1,13 @@
 """Core sequence engine — trigger evaluation, instance creation, touchpoint processing, reply handling."""
 
+import asyncio
+import ipaddress
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
+import httpx
 import structlog
 from sqlalchemy import select, and_, func
 from sqlalchemy.exc import IntegrityError
@@ -162,7 +166,115 @@ def _snapshot_step(step: SequenceStep) -> dict:
         "expects_reply": step.expects_reply,
         "reply_handler": step.reply_handler,
         "skip_conditions": step.skip_conditions,
+        "webhook_url": step.webhook_url,
+        "webhook_headers": step.webhook_headers,
     }
+
+
+# ---------------------------------------------------------------------------
+# Webhook helpers
+# ---------------------------------------------------------------------------
+
+_WEBHOOK_TIMEOUT = 30  # seconds per attempt
+_WEBHOOK_MAX_RETRIES = 3
+_WEBHOOK_BACKOFF = [5, 15, 45]  # seconds between retries
+_WEBHOOK_MAX_RESPONSE_BYTES = 50 * 1024  # 50KB
+_WEBHOOK_MAX_KEYS = 20
+
+
+def _validate_webhook_url(url: str) -> str | None:
+    """Validate webhook URL for SSRF. Returns error string or None if safe."""
+    if not url or not url.startswith("https://"):
+        return "webhook_url must use HTTPS"
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if not hostname:
+            return "Invalid URL: no hostname"
+        # Block private/loopback IPs
+        try:
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+                return f"Blocked: {hostname} is a private/loopback address"
+        except ValueError:
+            # hostname is a domain, not an IP — check for localhost
+            if hostname in ("localhost", "127.0.0.1", "::1"):
+                return f"Blocked: {hostname} is a loopback address"
+    except Exception as e:
+        return f"Invalid URL: {e}"
+    return None
+
+
+def _flatten_response(data: dict, prefix: str) -> dict[str, str]:
+    """Flatten a JSON response dict and namespace keys with prefix.
+
+    Nested dicts are flattened with underscores. None values become empty strings.
+    Non-dict/list values are stringified.
+    """
+    result: dict[str, str] = {}
+
+    def _walk(obj: dict, key_prefix: str) -> None:
+        for k, v in obj.items():
+            full_key = f"{key_prefix}{k}"
+            if len(result) >= _WEBHOOK_MAX_KEYS:
+                break
+            if isinstance(v, dict):
+                _walk(v, f"{full_key}_")
+            elif v is None:
+                result[full_key] = ""
+            else:
+                result[full_key] = str(v)
+
+    _walk(data, prefix)
+    return result
+
+
+async def _call_webhook(
+    url: str,
+    payload: dict,
+    headers: dict | None,
+    touchpoint_id: str,
+    attempt: int,
+) -> tuple[dict | None, str | None]:
+    """POST to webhook URL with timeout and retry logic.
+
+    Returns (response_dict, error_string). One of them is None.
+    """
+    req_headers = {
+        "Content-Type": "application/json",
+        "X-Wavelength-Touchpoint-Id": touchpoint_id,
+        "X-Wavelength-Attempt": str(attempt),
+    }
+    if headers:
+        req_headers.update(headers)
+
+    try:
+        async with httpx.AsyncClient(timeout=_WEBHOOK_TIMEOUT) as client:
+            resp = await client.post(url, json=payload, headers=req_headers)
+
+        if resp.status_code >= 400:
+            return None, f"HTTP {resp.status_code}: {resp.text[:200]}"
+
+        # Check response size
+        if len(resp.content) > _WEBHOOK_MAX_RESPONSE_BYTES:
+            return None, f"Response too large ({len(resp.content)} bytes, max {_WEBHOOK_MAX_RESPONSE_BYTES})"
+
+        try:
+            data = resp.json()
+        except Exception:
+            return None, "Response is not valid JSON"
+
+        if not isinstance(data, dict):
+            return None, f"Expected JSON object, got {type(data).__name__}"
+
+        return data, None
+
+    except httpx.TimeoutException:
+        return None, f"Timeout after {_WEBHOOK_TIMEOUT}s"
+    except httpx.ConnectError as e:
+        return None, f"Connection failed: {e}"
+    except Exception as e:
+        return None, f"Webhook error: {e}"
 
 
 # ---------------------------------------------------------------------------
@@ -420,6 +532,94 @@ async def process_touchpoint(db: AsyncSession, touchpoint: SequenceTouchpoint) -
             return
 
     # --- Send via channel ---
+    if channel == "webhook":
+        webhook_url = snapshot.get("webhook_url", "")
+        webhook_headers = snapshot.get("webhook_headers")
+
+        # SSRF validation
+        ssrf_err = _validate_webhook_url(webhook_url)
+        if ssrf_err:
+            touchpoint.status = "failed"
+            touchpoint.error_message = ssrf_err
+            await db.commit()
+            return
+
+        # Build payload from context
+        payload = {
+            "touchpoint_id": str(touchpoint.id),
+            "instance_id": str(touchpoint.instance_id),
+            "step_name": snapshot.get("name", ""),
+            "step_order": touchpoint.step_order,
+            "lead": {
+                "name": context.get("contact_name", ""),
+                "phone": context.get("contact_phone", ""),
+            },
+            "context": context,
+        }
+
+        # Retry loop with backoff
+        response_data = None
+        last_error = None
+        for attempt in range(_WEBHOOK_MAX_RETRIES):
+            if attempt > 0:
+                await asyncio.sleep(_WEBHOOK_BACKOFF[attempt - 1])
+
+            try:
+                response_data, err = await asyncio.wait_for(
+                    _call_webhook(
+                        webhook_url, payload, webhook_headers,
+                        str(touchpoint.id), attempt + 1,
+                    ),
+                    timeout=_WEBHOOK_TIMEOUT + 5,  # buffer above httpx timeout
+                )
+            except asyncio.TimeoutError:
+                err = f"Overall timeout after {_WEBHOOK_TIMEOUT + 5}s"
+                response_data = None
+
+            if response_data is not None:
+                break
+            last_error = err
+            logger.warning(
+                "webhook_attempt_failed",
+                touchpoint_id=str(touchpoint.id),
+                attempt=attempt + 1,
+                error=err,
+            )
+
+        if response_data is None:
+            touchpoint.status = "failed"
+            touchpoint.error_message = f"Webhook failed after {_WEBHOOK_MAX_RETRIES} attempts: {last_error}"
+            touchpoint.retry_count += 1
+            await db.commit()
+            return
+
+        # Flatten response and merge into context_data
+        prefix = f"webhook_{touchpoint.step_order}_"
+        flattened = _flatten_response(response_data, prefix)
+
+        # Store raw response as generated_content for visibility
+        touchpoint.generated_content = json.dumps(response_data)[:5000]
+
+        # Merge into instance context_data
+        updated_context = dict(instance.context_data or {})
+        updated_context.update(flattened)
+        instance.context_data = updated_context
+
+        touchpoint.status = "sent"
+        touchpoint.sent_at = datetime.now(timezone.utc)
+        await db.commit()
+
+        logger.info(
+            "webhook_touchpoint_completed",
+            touchpoint_id=str(touchpoint.id),
+            webhook_url=webhook_url,
+            keys_merged=list(flattened.keys()),
+        )
+
+        # Check if sequence is complete
+        await _check_instance_completion(db, touchpoint.instance_id)
+        return
+
     if channel == "voice_call":
         # Create a QueuedCall for the specified bot
         bot_id = snapshot.get("voice_bot_id")

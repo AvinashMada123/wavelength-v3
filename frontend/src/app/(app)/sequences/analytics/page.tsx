@@ -146,6 +146,7 @@ const CHANNEL_LABELS: Record<string, string> = {
   whatsapp_session: "WhatsApp Session",
   sms: "SMS",
   voice_call: "Voice Call",
+  webhook: "Webhook",
 };
 
 // ---------------------------------------------------------------------------
@@ -456,6 +457,7 @@ export default function SequenceAnalyticsPage() {
                 </SelectItem>
                 <SelectItem value="sms">SMS</SelectItem>
                 <SelectItem value="voice_call">Voice Call</SelectItem>
+                <SelectItem value="webhook">Webhook</SelectItem>
               </SelectContent>
             </Select>
 

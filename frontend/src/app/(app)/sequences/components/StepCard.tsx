@@ -14,6 +14,7 @@ import {
   ToggleLeft,
   Send,
   Loader2,
+  Globe,
 } from "lucide-react";
 import { toast } from "sonner";
 import { testStep } from "@/lib/sequences-api";
@@ -42,12 +43,14 @@ const CHANNEL_OPTIONS = [
   { value: "whatsapp_session", label: "WhatsApp Session", icon: MessageSquare },
   { value: "voice_call", label: "Voice Call", icon: Phone },
   { value: "sms", label: "SMS", icon: Mail },
+  { value: "webhook", label: "Webhook (n8n)", icon: Globe },
 ];
 
 const CONTENT_TYPE_OPTIONS = [
   { value: "static_template", label: "Static Template" },
   { value: "ai_generated", label: "AI Generated" },
   { value: "voice_call", label: "Voice Call" },
+  { value: "webhook", label: "Webhook" },
 ];
 
 const TIMING_TYPE_OPTIONS = [
@@ -199,6 +202,13 @@ export function StepCard({
   const [aiPrompt, setAiPrompt] = useState(step.ai_prompt ?? "");
   const [aiModel, setAiModel] = useState(step.ai_model ?? "claude-sonnet");
   const [voiceBotId, setVoiceBotId] = useState(step.voice_bot_id ?? "");
+  const [webhookUrl, setWebhookUrl] = useState(step.webhook_url ?? "");
+  const [webhookHeaders, setWebhookHeaders] = useState(
+    step.webhook_headers ? JSON.stringify(step.webhook_headers, null, 2) : "",
+  );
+  const [webhookHeadersError, setWebhookHeadersError] = useState(false);
+  const [webhookTesting, setWebhookTesting] = useState(false);
+  const [webhookTestResult, setWebhookTestResult] = useState<string | null>(null);
   const [expectsReply, setExpectsReply] = useState(step.expects_reply);
   const [replyPrompt, setReplyPrompt] = useState(
     (step.reply_handler as Record<string, string>)?.ai_prompt ?? "",
@@ -303,7 +313,21 @@ export function StepCard({
               value={channel}
               onValueChange={(val) => {
                 setChannel(val);
-                onUpdate(step.id, { channel: val });
+                const updates: Partial<SequenceStep> = { channel: val };
+                // Auto-set content_type for webhook and voice_call
+                if (val === "webhook") {
+                  setContentType("webhook");
+                  updates.content_type = "webhook";
+                  // Disable expects_reply for webhook
+                  if (expectsReply) {
+                    setExpectsReply(false);
+                    updates.expects_reply = false;
+                  }
+                } else if (val === "voice_call") {
+                  setContentType("voice_call");
+                  updates.content_type = "voice_call";
+                }
+                onUpdate(step.id, updates);
               }}
             >
               <SelectTrigger className="w-full">
@@ -646,6 +670,99 @@ export function StepCard({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+        )}
+
+        {channel === "webhook" && (
+          <div className="space-y-3 rounded-lg border p-4">
+            <Label className="text-xs flex items-center gap-1">
+              <Globe className="h-3 w-3" /> Webhook Configuration
+            </Label>
+            <div className="space-y-1">
+              <Label className="text-[10px] text-muted-foreground">Webhook URL (HTTPS required)</Label>
+              <Input
+                placeholder="https://your-n8n.example.com/webhook/..."
+                value={webhookUrl}
+                onChange={(e) => {
+                  setWebhookUrl(e.target.value);
+                  updateField({ webhook_url: e.target.value });
+                }}
+                onBlur={flush}
+              />
+              {webhookUrl && !webhookUrl.startsWith("https://") && (
+                <p className="text-[10px] text-red-500">URL must start with https://</p>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] text-muted-foreground">
+                Custom Headers (JSON object, optional)
+              </Label>
+              <Textarea
+                rows={3}
+                className={`font-mono text-xs ${webhookHeadersError ? "border-red-500 focus-visible:ring-red-500" : ""}`}
+                placeholder='{"Authorization": "Bearer ..."}'
+                value={webhookHeaders}
+                onChange={(e) => {
+                  setWebhookHeaders(e.target.value);
+                  if (!e.target.value.trim()) {
+                    setWebhookHeadersError(false);
+                    updateField({ webhook_headers: null });
+                    return;
+                  }
+                  try {
+                    const parsed = JSON.parse(e.target.value);
+                    setWebhookHeadersError(false);
+                    updateField({ webhook_headers: parsed });
+                  } catch {
+                    setWebhookHeadersError(true);
+                  }
+                }}
+                onBlur={flush}
+              />
+              {webhookHeadersError && (
+                <p className="text-[10px] text-red-500">Invalid JSON</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!webhookUrl.startsWith("https://") || webhookTesting}
+                onClick={async () => {
+                  setWebhookTesting(true);
+                  setWebhookTestResult(null);
+                  try {
+                    const result = await testStep(step.id, "test");
+                    if (result.success) {
+                      setWebhookTestResult(JSON.stringify(result.webhook_response, null, 2));
+                      toast.success("Webhook responded successfully");
+                    } else {
+                      setWebhookTestResult(null);
+                      toast.error(result.error || "Webhook test failed");
+                    }
+                  } catch (err: any) {
+                    toast.error(err?.message || "Webhook test failed");
+                  } finally {
+                    setWebhookTesting(false);
+                  }
+                }}
+              >
+                {webhookTesting ? (
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                ) : (
+                  <Globe className="mr-1 h-3 w-3" />
+                )}
+                Test Webhook
+              </Button>
+              {webhookTestResult && (
+                <div className="space-y-1">
+                  <Label className="text-[10px] text-muted-foreground">Response (these become variables)</Label>
+                  <pre className="max-h-40 overflow-auto rounded bg-muted p-2 text-xs font-mono">
+                    {webhookTestResult}
+                  </pre>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

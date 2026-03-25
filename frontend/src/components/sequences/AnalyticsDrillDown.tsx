@@ -48,6 +48,7 @@ const CHANNEL_CONFIG: Record<string, { label: string; className: string }> = {
   whatsapp_session: { label: "WhatsApp Session", className: "bg-emerald-500/20 text-emerald-400" },
   sms: { label: "SMS", className: "bg-blue-500/20 text-blue-400" },
   voice_call: { label: "Voice Call", className: "bg-purple-500/20 text-purple-400" },
+  webhook: { label: "Webhook", className: "bg-orange-500/20 text-orange-400" },
 };
 
 const STATUS_CONFIG: Record<string, { label: string; className: string }> = {

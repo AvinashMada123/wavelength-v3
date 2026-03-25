@@ -39,6 +39,8 @@ export interface SequenceStep {
   voice_bot_id: string | null;
   expects_reply: boolean;
   reply_handler: Record<string, any> | null;
+  webhook_url: string | null;
+  webhook_headers: Record<string, any> | null;
 }
 
 export interface SequenceInstance {
@@ -158,7 +160,7 @@ export const advanceInstance = (id: string) =>
 
 // --- Step Testing ---
 export const testStep = (stepId: string, phone: string, variables?: Record<string, string>) =>
-  apiFetch<{ success: boolean; message_id?: string; error?: string }>(
+  apiFetch<{ success: boolean; message_id?: string; error?: string; webhook_response?: Record<string, any> }>(
     `/api/sequences/steps/${stepId}/test`,
     { method: "POST", body: JSON.stringify({ phone, variables: variables || {} }) }
   );

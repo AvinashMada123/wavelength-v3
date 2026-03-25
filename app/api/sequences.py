@@ -9,7 +9,7 @@ from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -136,6 +136,9 @@ class PaginatedTemplates(BaseModel):
     page_size: int
 
 
+VALID_CHANNELS = {"whatsapp_template", "whatsapp_session", "voice_call", "sms", "webhook"}
+
+
 class StepCreate(BaseModel):
     step_order: int
     name: str
@@ -151,6 +154,21 @@ class StepCreate(BaseModel):
     voice_bot_id: uuid.UUID | None = None
     expects_reply: bool = False
     reply_handler: dict[str, Any] | None = None
+    webhook_url: str | None = None
+    webhook_headers: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def validate_channel_rules(self):
+        if self.channel not in VALID_CHANNELS:
+            raise ValueError(f"Invalid channel '{self.channel}'. Must be one of: {', '.join(sorted(VALID_CHANNELS))}")
+        if self.channel == "webhook":
+            if not self.webhook_url:
+                raise ValueError("webhook_url is required when channel is 'webhook'")
+            if not self.webhook_url.startswith("https://"):
+                raise ValueError("webhook_url must use HTTPS")
+            if self.expects_reply:
+                raise ValueError("expects_reply cannot be True for webhook channel")
+        return self
 
 
 class StepUpdate(BaseModel):
@@ -168,6 +186,19 @@ class StepUpdate(BaseModel):
     expects_reply: bool | None = None
     reply_handler: dict[str, Any] | None = None
     is_active: bool | None = None
+    webhook_url: str | None = None
+    webhook_headers: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def validate_channel_rules(self):
+        if self.channel is not None and self.channel not in VALID_CHANNELS:
+            raise ValueError(f"Invalid channel '{self.channel}'. Must be one of: {', '.join(sorted(VALID_CHANNELS))}")
+        if self.channel == "webhook":
+            if self.webhook_url and not self.webhook_url.startswith("https://"):
+                raise ValueError("webhook_url must use HTTPS")
+            if self.expects_reply:
+                raise ValueError("expects_reply cannot be True for webhook channel")
+        return self
 
 
 class ReorderRequest(BaseModel):
@@ -271,6 +302,8 @@ class ImportStepData(BaseModel):
     ai_model: str | None = None
     expects_reply: bool = False
     reply_handler: dict[str, Any] | None = None
+    webhook_url: str | None = None
+    webhook_headers: dict[str, Any] | None = None
 
 
 class ImportRequest(BaseModel):
@@ -549,6 +582,8 @@ async def add_step(
         voice_bot_id=body.voice_bot_id,
         expects_reply=body.expects_reply,
         reply_handler=body.reply_handler,
+        webhook_url=body.webhook_url,
+        webhook_headers=body.webhook_headers,
     )
     db.add(step)
     await db.commit()
@@ -709,6 +744,30 @@ async def test_step(
 
     # Determine channel
     channel = step.channel
+    if channel == "webhook":
+        # Redirect to webhook-specific test logic
+        from app.services.sequence_engine import _validate_webhook_url, _call_webhook
+        webhook_url = step.webhook_url
+        if not webhook_url:
+            return {"success": False, "error": "No webhook_url configured on this step."}
+        ssrf_err = _validate_webhook_url(webhook_url)
+        if ssrf_err:
+            return {"success": False, "error": ssrf_err}
+        payload = {
+            "touchpoint_id": "test",
+            "instance_id": "test",
+            "step_name": step.name,
+            "step_order": step.step_order,
+            "lead": {"name": variables.get("contact_name", "Test Lead"), "phone": variables.get("contact_phone", body.phone)},
+            "context": variables,
+        }
+        response_data, err = await _call_webhook(
+            webhook_url, payload, step.webhook_headers, "test", 1,
+        )
+        if err:
+            return {"success": False, "error": err}
+        return {"success": True, "webhook_response": response_data}
+
     if channel not in ("whatsapp_template", "whatsapp_session", "sms"):
         if channel == "voice_call":
             return {"success": False, "error": "Voice call testing not supported yet — trigger a call instead."}
@@ -851,6 +910,8 @@ async def export_template(
                 "ai_model": s.ai_model,
                 "expects_reply": s.expects_reply,
                 "reply_handler": s.reply_handler,
+                "webhook_url": s.webhook_url,
+                "webhook_headers": s.webhook_headers,
             }
             for s in steps
         ],
@@ -932,7 +993,7 @@ async def import_preview(
     if dup.scalar_one_or_none() is not None:
         errors.append(f"Template named '{body.name}' already exists")
 
-    valid_channels = {"whatsapp_template", "whatsapp_session", "voice_call", "sms"}
+    valid_channels = VALID_CHANNELS
     channels_used: set[str] = set()
 
     for i, step in enumerate(body.steps):

@@ -5,6 +5,7 @@ import {
   MessageSquare,
   Phone,
   MessageCircle,
+  Globe,
   RotateCcw,
   Loader2,
 } from "lucide-react";
@@ -63,6 +64,9 @@ function ChannelIcon({ channel }: { channel: string }) {
   }
   if (channel === "voice_call") {
     return <Phone className="h-4 w-4 shrink-0" />;
+  }
+  if (channel === "webhook") {
+    return <Globe className="h-4 w-4 shrink-0" />;
   }
   // sms and fallback
   return <MessageCircle className="h-4 w-4 shrink-0" />;
