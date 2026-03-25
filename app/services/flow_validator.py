@@ -94,21 +94,12 @@ def validate_flow(
     # We use node list indices as canonical IDs for internal validation
     node_ids = set(range(len(nodes)))
 
-    # Map edge source/target to node indices via a lookup
-    # The edges use UUIDs; build a mapping from edge references to node indices
-    edge_node_refs: set[Any] = set()
-    for e in edges:
-        edge_node_refs.add(e.source_node_id)
-        edge_node_refs.add(e.target_node_id)
-
-    # If edges reference UUIDs, map them; if no nodes have IDs, use raw refs
+    # Map node UUIDs to indices — nodes now have optional id field
     ref_to_idx: dict[Any, int] = {}
-    raw_refs = sorted(edge_node_refs, key=str)
-    # Assign refs to node indices in order they appear (best-effort mapping)
-    # This works when the caller ensures edge refs match node ordering
-    for idx, ref in enumerate(raw_refs):
-        if idx < len(nodes):
-            ref_to_idx[ref] = idx
+    for idx, n in enumerate(nodes):
+        if n.id is not None:
+            ref_to_idx[n.id] = idx
+            ref_to_idx[str(n.id)] = idx
 
     # Validate edge references
     for e in edges:
