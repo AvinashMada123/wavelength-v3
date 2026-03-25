@@ -843,7 +843,7 @@ async def publish_version(
     ).scalars().all()
 
     validation = validate_flow(nodes, edges)
-    if not validation.is_valid:
+    if not validation.valid:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
