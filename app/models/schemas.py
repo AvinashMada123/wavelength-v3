@@ -343,6 +343,29 @@ class BotConfigResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class BotConfigListItem(BaseModel):
+    """Lightweight bot config for list views — excludes heavy fields like system_prompt_template."""
+    id: uuid.UUID
+    agent_name: str
+    company_name: str
+    location: str | None
+    event_name: str | None
+    language: str
+    telephony_provider: str
+    stt_provider: str
+    tts_provider: str
+    llm_provider: str
+    llm_model: str
+    is_active: bool
+    callback_enabled: bool
+    circuit_breaker_enabled: bool
+    max_concurrent_calls: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class CallLogListAnalytics(BaseModel):
     """Lightweight analytics for list view."""
     goal_outcome: str | None = None

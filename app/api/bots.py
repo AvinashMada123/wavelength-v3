@@ -14,7 +14,7 @@ from app.auth.dependencies import get_current_user, get_current_org
 from app.bot_config.loader import BotConfigLoader
 from app.database import get_db
 from app.models.bot_config import BotConfig
-from app.models.schemas import BotConfigResponse, CreateBotConfigRequest, GoalConfig, UpdateBotConfigRequest
+from app.models.schemas import BotConfigListItem, BotConfigResponse, CreateBotConfigRequest, GoalConfig, UpdateBotConfigRequest
 from app.models.user import User
 
 # Providers restricted to super_admin only
@@ -91,7 +91,7 @@ async def create_bot(
     return bot
 
 
-@router.get("", response_model=list[BotConfigResponse])
+@router.get("", response_model=list[BotConfigListItem])
 async def list_bots(
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_current_org),
