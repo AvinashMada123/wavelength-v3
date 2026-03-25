@@ -766,8 +766,8 @@ export function StepCard({
           </div>
         )}
 
-        {/* Reply handler */}
-        <div className="space-y-2">
+        {/* Reply handler — not applicable for webhook/voice_call */}
+        {channel !== "webhook" && channel !== "voice_call" && <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label className="text-xs flex items-center gap-1">
               <MessageSquare className="h-3 w-3" /> Reply Handler
@@ -815,10 +815,10 @@ export function StepCard({
               </div>
             </div>
           )}
-        </div>
+        </div>}
 
         {/* Send Test */}
-        {(step.channel === "whatsapp_template" || step.channel === "whatsapp_session") && (
+        {(channel === "whatsapp_template" || channel === "whatsapp_session") && (
           <div className="flex items-center gap-2 border-t pt-4">
             <Input
               className="h-8 text-xs max-w-[200px]"
