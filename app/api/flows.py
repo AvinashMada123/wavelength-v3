@@ -872,7 +872,7 @@ async def publish_version(
     # Publish this version
     version.status = "published"
     version.is_locked = True
-    version.published_at = datetime.now(timezone.utc)
+    version.published_at = datetime.utcnow()
     version.published_by = user.id
 
     await db.commit()
@@ -1311,7 +1311,7 @@ async def cancel_instance(
         )
 
     instance.status = "cancelled"
-    instance.completed_at = datetime.now(timezone.utc)
+    instance.completed_at = datetime.utcnow()
     await db.commit()
     await db.refresh(instance)
 
@@ -1378,7 +1378,7 @@ async def reenroll_instance(
     # Cancel current instance if still active
     if instance.status in ("active", "paused"):
         instance.status = "cancelled"
-        instance.completed_at = datetime.now(timezone.utc)
+        instance.completed_at = datetime.utcnow()
 
     # Get latest published version
     published = (
