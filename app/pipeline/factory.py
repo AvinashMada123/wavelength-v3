@@ -17,7 +17,7 @@ from deepgram import LiveOptions
 # Without this, Pipecat's default 0.35s triggers false "bot stopped speaking"
 # mid-sentence, clearing audio buffers and causing audible drops.
 # Safe because interruptions use MinWordsInterruptionStrategy (transcript-based),
-# not bot-speaking state. EchoGate is NOT in the pipeline.
+# not bot-speaking state. EchoGate is in the pipeline (before STT).
 _base_output.BOT_VAD_STOP_SECS = 1.5
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -1969,9 +1969,18 @@ async def build_pipeline(
     if tts_provider == "sarvam":
         tts_processors.append(TTSTailTrim(call_sid=call_context.call_sid))
 
+    # EchoGate: replaces incoming audio with silence while bot is speaking,
+    # preventing bot echo from reaching STT and causing hallucinated transcripts.
+    echo_gate = EchoGate(
+        echo_tail_ms=settings.ECHO_TAIL_MS,
+        call_sid=call_context.call_sid,
+        enabled=settings.ECHO_GATE_ENABLED,
+    )
+
     pipeline = Pipeline(
         [
             transport.input(),
+            echo_gate,
             stt,
             call_guard,
             tracker_post_stt,
