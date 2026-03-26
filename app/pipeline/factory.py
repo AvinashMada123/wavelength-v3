@@ -1996,11 +1996,17 @@ async def build_pipeline(
         ]
     )
 
+    # "Stop first, validate later" approach:
+    # No interruption_strategies → bot stops IMMEDIATELY on VAD detection.
+    # This stops the echo, so STT gets clean audio for the user's speech.
+    # Trade-off: echo may cause brief false pauses, but real interruptions
+    # work instantly. Previously MinWordsInterruptionStrategy(min_words=2)
+    # deferred interruptions, which meant the bot kept talking during user
+    # speech → echo corrupted STT → interruption rejected → user unheard.
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
             allow_interruptions=True,
-            interruption_strategies=[MinWordsInterruptionStrategy(min_words=2)],
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
