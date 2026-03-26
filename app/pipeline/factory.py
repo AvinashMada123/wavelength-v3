@@ -1539,7 +1539,7 @@ async def build_pipeline(
                 model="nova-3",
                 language=deepgram_language,
                 interim_results=True,
-                utterance_end_ms="500",
+                utterance_end_ms="1000",
                 endpointing=100,
                 punctuate=True,
                 smart_format=True,
