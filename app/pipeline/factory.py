@@ -1717,12 +1717,20 @@ async def build_pipeline(
             async def run_tts(self, text: str, context_id: str):
                 """Override to start a watchdog after sending text.
 
-                Also pads short texts to avoid min_buffer_size deadlock:
-                Sarvam buffers until min_buffer_size chars accumulate. If the
-                LLM sends a short final utterance (e.g. "Yeah."), no more text
-                follows and Sarvam never synthesizes. Pad with spaces to reach
-                the threshold.
+                Skips TTS for punctuation-only text (e.g. ".") that Sarvam
+                rejects with "must contain at least one character from allowed
+                languages". Also pads short texts with spaces to avoid
+                min_buffer_size deadlock.
                 """
+                import re
+                # Skip if text has no actual word characters (just punctuation/spaces)
+                if not re.search(r'[a-zA-Z\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F]', text):
+                    logger.info("sarvam_tts_skip_punctuation",
+                                call_sid=self._call_sid_tag, text=repr(text[:20]))
+                    yield TTSStartedFrame(context_id=context_id)
+                    yield TTSStoppedFrame(context_id=context_id)
+                    return
+
                 min_buf = 30  # matches min_buffer_size in InputParams
                 if len(text) < min_buf:
                     text = text + " " * (min_buf - len(text))
