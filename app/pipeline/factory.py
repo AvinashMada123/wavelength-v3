@@ -1969,18 +1969,16 @@ async def build_pipeline(
     if tts_provider == "sarvam":
         tts_processors.append(TTSTailTrim(call_sid=call_context.call_sid))
 
-    # EchoGate: replaces incoming audio with silence while bot is speaking,
-    # preventing bot echo from reaching STT and causing hallucinated transcripts.
-    echo_gate = EchoGate(
-        echo_tail_ms=settings.ECHO_TAIL_MS,
-        call_sid=call_context.call_sid,
-        enabled=settings.ECHO_GATE_ENABLED,
-    )
+    # EchoGate DISABLED: mutes ALL audio during bot speech, which prevents
+    # user interruptions entirely. Echo phantom words are handled instead by
+    # MinWordsInterruptionStrategy (ignores 1-word echo transcripts) and
+    # GreetingGuard (suppresses VAD during initial greeting).
+    # TODO: Implement smarter echo cancellation that preserves user speech
+    # (e.g. software AEC subtracting known bot audio from input stream).
 
     pipeline = Pipeline(
         [
             transport.input(),
-            echo_gate,
             stt,
             call_guard,
             tracker_post_stt,
