@@ -55,10 +55,16 @@ async def is_exempt(db: AsyncSession, bot_id) -> bool:
 
 
 async def is_open(db: AsyncSession, bot_id) -> bool:
-    """Check if circuit breaker is open (calls should be held)."""
-    if await is_exempt(db, bot_id):
-        return False
+    """Check if circuit breaker is open (calls should be held).
+
+    Manual pauses are always respected, even if circuit_breaker_enabled is False.
+    Only auto-tripping is skipped for exempt bots.
+    """
     cb = await get_or_create(db, bot_id)
+    if cb.state == "open" and cb.opened_by == "manual":
+        return True  # Manual pause always respected
+    if await is_exempt(db, bot_id):
+        return False  # Auto-trip exempt
     return cb.state == "open"
 
 
