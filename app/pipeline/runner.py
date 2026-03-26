@@ -243,7 +243,10 @@ async def run_pipeline(
         bot_config, ctx, websocket,
         provider=provider, stream_sid=stream_sid,
         plivo_stream_id=plivo_stream_id,
-        greeting_text=greeting_text,
+        # Only pre-seed greeting in LLM context when sent directly to Plivo
+        # (bypassing pipeline TTS). When sent via TTSSpeakFrame fallback,
+        # context_aggregator.assistant() captures it automatically.
+        greeting_text=greeting_text if greeting_sent_directly else "",
     )
 
     max_duration = getattr(bot_config, "max_call_duration", 480) or 480
