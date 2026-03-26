@@ -1646,6 +1646,7 @@ async def build_pipeline(
 
     if tts_provider == "sarvam":
         from pipecat.services.sarvam.tts import SarvamTTSService
+        from pipecat.frames.frames import TTSStartedFrame, TTSStoppedFrame, TTSAudioRawFrame
 
         # NOTE: TOKEN mode deadlocks with Sarvam's pause_frame_processing=True.
         # Each token triggers run_tts() which pauses the processor, but single
@@ -1653,10 +1654,137 @@ async def build_pipeline(
         # processor stays paused → no more tokens flow → deadlock.
         # SENTENCE mode (default) sends full sentences which always exceed
         # min_buffer_size, avoiding the deadlock.
+
+        class _SafeSarvamTTS(SarvamTTSService):
+            """Sarvam TTS with zombie WebSocket detection and auto-recovery.
+
+            Sarvam's TTS WebSocket can become a zombie mid-call: the connection
+            stays alive (accepts text, responds to pings) but silently stops
+            returning audio frames. This wrapper starts a watchdog timer after
+            each run_tts() call. If no TTSAudioRawFrame is pushed within
+            TTS_AUDIO_TIMEOUT_SECS, it force-disconnects, reconnects, and
+            re-sends the text.
+            """
+
+            TTS_AUDIO_TIMEOUT_SECS = 4.0
+            MAX_RETRIES = 1
+
+            def __init__(self, call_sid: str = "", **kwargs):
+                super().__init__(**kwargs)
+                self._call_sid_tag = call_sid
+                self._pending_text: str | None = None
+                self._pending_context_id: str | None = None
+                self._audio_received = asyncio.Event()
+                self._watchdog_task: asyncio.Task | None = None
+                self._retry_count = 0
+                self._total_recoveries = 0
+
+            async def run_tts(self, text: str, context_id: str):
+                """Override to start a watchdog after sending text."""
+                self._pending_text = text
+                self._pending_context_id = context_id
+                self._audio_received.clear()
+                self._retry_count = 0
+
+                # Cancel any previous watchdog
+                if self._watchdog_task and not self._watchdog_task.done():
+                    self._watchdog_task.cancel()
+                self._watchdog_task = asyncio.create_task(
+                    self._tts_audio_watchdog()
+                )
+
+                async for frame in super().run_tts(text, context_id):
+                    yield frame
+
+            async def push_frame(self, frame, direction=None):
+                """Intercept audio frames to cancel the watchdog."""
+                if isinstance(frame, TTSAudioRawFrame):
+                    self._audio_received.set()
+                    if self._watchdog_task and not self._watchdog_task.done():
+                        self._watchdog_task.cancel()
+                        self._watchdog_task = None
+                if direction is not None:
+                    await super().push_frame(frame, direction)
+                else:
+                    await super().push_frame(frame)
+
+            async def _tts_audio_watchdog(self):
+                """Fire if no audio frame arrives within timeout."""
+                try:
+                    await asyncio.sleep(self.TTS_AUDIO_TIMEOUT_SECS)
+                    if not self._audio_received.is_set():
+                        await self._handle_zombie()
+                except asyncio.CancelledError:
+                    pass  # Audio arrived in time, watchdog cancelled
+
+            async def _handle_zombie(self):
+                """Force reconnect and re-send the pending text."""
+                if self._retry_count >= self.MAX_RETRIES:
+                    logger.error(
+                        "sarvam_tts_zombie_unrecoverable",
+                        call_sid=self._call_sid_tag,
+                        text=self._pending_text[:80] if self._pending_text else "",
+                        retries=self._retry_count,
+                    )
+                    # Push a TTSStoppedFrame so the pipeline doesn't hang
+                    if self._pending_context_id:
+                        await super().push_frame(
+                            TTSStoppedFrame(context_id=self._pending_context_id)
+                        )
+                    return
+
+                self._retry_count += 1
+                self._total_recoveries += 1
+                logger.warning(
+                    "sarvam_tts_zombie_detected",
+                    call_sid=self._call_sid_tag,
+                    text=self._pending_text[:80] if self._pending_text else "",
+                    retry=self._retry_count,
+                    total_recoveries=self._total_recoveries,
+                )
+
+                # Force disconnect and reconnect
+                try:
+                    await self._disconnect()
+                except Exception as e:
+                    logger.warning("sarvam_tts_disconnect_error",
+                                   call_sid=self._call_sid_tag, error=str(e))
+                try:
+                    await self._connect()
+                except Exception as e:
+                    logger.error("sarvam_tts_reconnect_failed",
+                                 call_sid=self._call_sid_tag, error=str(e))
+                    if self._pending_context_id:
+                        await super().push_frame(
+                            TTSStoppedFrame(context_id=self._pending_context_id)
+                        )
+                    return
+
+                # Re-send the text
+                self._audio_received.clear()
+                logger.info("sarvam_tts_resending_text",
+                            call_sid=self._call_sid_tag,
+                            text=self._pending_text[:80] if self._pending_text else "")
+                try:
+                    self._context_id = self._pending_context_id
+                    await self._send_text(self._pending_text)
+                    # Start another watchdog for the retry
+                    self._watchdog_task = asyncio.create_task(
+                        self._tts_audio_watchdog()
+                    )
+                except Exception as e:
+                    logger.error("sarvam_tts_resend_failed",
+                                 call_sid=self._call_sid_tag, error=str(e))
+                    if self._pending_context_id:
+                        await super().push_frame(
+                            TTSStoppedFrame(context_id=self._pending_context_id)
+                        )
+
         tts_lang = "en-IN" if stt_language in ("unknown", "multi") else stt_language
         # TEMP: Disabled PhraseTextAggregator to test Sarvam's native chunking.
         # Previous config: text_aggregator=PhraseTextAggregator(min=30, subsequent=50)
-        tts = SarvamTTSService(
+        tts = _SafeSarvamTTS(
+            call_sid=call_context.call_sid,
             api_key=settings.SARVAM_API_KEY,
             model="bulbul:v3",
             voice_id=call_context.tts_voice,
@@ -1668,7 +1796,8 @@ async def build_pipeline(
                 temperature=0.7,
             ),
         )
-        logger.info("tts_sarvam_init", voice=call_context.tts_voice, model="bulbul:v3", chunking="sarvam_native")
+        logger.info("tts_sarvam_init", voice=call_context.tts_voice, model="bulbul:v3",
+                     chunking="sarvam_native", zombie_watchdog="enabled")
 
     elif tts_provider == "gemini":
         from pipecat.services.google.tts import GeminiTTSService
