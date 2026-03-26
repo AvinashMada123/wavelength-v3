@@ -1255,11 +1255,9 @@ async def build_pipeline(
         )
     else:
         # Deepgram: use local Silero VAD + SmartTurn for turn detection.
-        # Tuning history:
-        #   1.0s — interruptions broken (user had to wait 1s+ to be heard)
-        #   0.3s — too aggressive (cuts users off mid-sentence on thinking pauses)
-        #   0.5s — middle ground: allows ~500ms thinking pauses while still
-        #          enabling interruptions within ~700ms total latency
+        # Tuning: 0.3s for lowest latency. Risk of mid-sentence cutoffs is
+        # mitigated by SmartTurn's INCOMPLETE prediction and interim transcript
+        # processor that starts LLM before final transcript arrives.
         transport_params = FastAPIWebsocketParams(
             audio_out_enabled=True,
             audio_out_sample_rate=16000,
@@ -1269,11 +1267,11 @@ async def build_pipeline(
             vad_enabled=True,
             vad_audio_passthrough=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(
-                stop_secs=0.5,
+                stop_secs=0.3,
                 min_volume=0.5,
             )),
             turn_analyzer=LocalSmartTurnAnalyzerV3(
-                params=SmartTurnParams(stop_secs=0.5),
+                params=SmartTurnParams(stop_secs=0.3),
             ),
         )
 
@@ -1541,7 +1539,7 @@ async def build_pipeline(
                 model="nova-3",
                 language=deepgram_language,
                 interim_results=True,
-                utterance_end_ms="1000",
+                utterance_end_ms="500",
                 endpointing=100,
                 punctuate=True,
                 smart_format=True,
@@ -1976,10 +1974,19 @@ async def build_pipeline(
     # TODO: Implement smarter echo cancellation that preserves user speech
     # (e.g. software AEC subtracting known bot audio from input stream).
 
+    # InterimTranscriptPromoter: on VAD stop, promotes latest interim transcript
+    # to final immediately — saves 300-700ms vs waiting for Deepgram utterance_end.
+    from app.pipeline.interim_promoter import InterimTranscriptPromoter
+    interim_promoter = InterimTranscriptPromoter(
+        call_sid=call_context.call_sid,
+        enabled=(stt_provider == "deepgram"),  # Only for Deepgram (has interim results)
+    )
+
     pipeline = Pipeline(
         [
             transport.input(),
             stt,
+            interim_promoter,
             call_guard,
             tracker_post_stt,
             silence_watchdog,
