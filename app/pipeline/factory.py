@@ -605,7 +605,8 @@ class LatencyTracker(FrameProcessor):
         }
         cls._bot_stopped_type = BotStoppedSpeakingFrame
 
-    def __init__(self, position: str, call_sid: str, **kwargs):
+    def __init__(self, position: str, call_sid: str,
+                 user_speech_ts_ref: list[float] | None = None, **kwargs):
         super().__init__(name=f"LatencyTracker-{position}", **kwargs)
         self._position = position
         self._call_sid = call_sid
@@ -616,6 +617,9 @@ class LatencyTracker(FrameProcessor):
         # Delta computation timestamps (per-turn, reset on UserStoppedSpeaking)
         self._user_stopped_ts: float | None = None
         self._llm_start_ts: float | None = None
+
+        # Shared ref updated on every UserStoppedSpeaking for cross-pipeline access
+        self._user_speech_ts_ref = user_speech_ts_ref
 
         # Echo detection: track bot speaking state via upstream frames
         self._bot_is_speaking = False
@@ -648,6 +652,9 @@ class LatencyTracker(FrameProcessor):
             self._seen_this_turn = set()
             self._user_stopped_ts = now
             self._llm_start_ts = None
+            # Update shared ref so handle_end_call can check recency
+            if self._user_speech_ts_ref is not None:
+                self._user_speech_ts_ref[0] = now
 
         # Echo detection: log transcripts arriving while bot is speaking
         if (
@@ -1178,6 +1185,10 @@ async def build_pipeline(
         (task, transport, context, call_guard).
     """
 
+    # Shared mutable for tracking last user speech time across pipeline.
+    # Used by handle_end_call to guard against premature customer_no_response.
+    _last_user_speech_ts: list[float] = [0.0]  # list for mutability in closures
+
     # --- Serializer (provider-specific) ---
     if provider == "twilio":
         from pipecat.serializers.twilio import TwilioFrameSerializer
@@ -1603,6 +1614,9 @@ async def build_pipeline(
         "customer_requested_hangup", "customer_no_response", "bot_said_goodbye",
     }
 
+    # Guard: reject premature customer_no_response if user spoke recently
+    _NO_RESPONSE_COOLDOWN_SECS = 8.0
+
     async def handle_end_call(params):
         reason = params.arguments.get("reason", "conversation_ended")
         # Validate reason — map off-enum values to 'other'
@@ -1610,6 +1624,24 @@ async def build_pipeline(
             logger.warning("end_call_invalid_reason", call_sid=call_context.call_sid,
                            raw_reason=reason, mapped_to="other")
             reason = f"other: {reason}"
+
+        # Server-side guard: if LLM says customer_no_response but user spoke
+        # within the cooldown window, reject and tell LLM to continue.
+        if reason == "customer_no_response" and _last_user_speech_ts[0] > 0:
+            elapsed = time.monotonic() - _last_user_speech_ts[0]
+            if elapsed < _NO_RESPONSE_COOLDOWN_SECS:
+                logger.warning(
+                    "end_call_blocked_user_spoke_recently",
+                    call_sid=call_context.call_sid,
+                    reason=reason,
+                    seconds_since_speech=round(elapsed, 1),
+                )
+                await params.result_callback(
+                    "The user just spoke. Do NOT end the call. "
+                    "Continue the conversation naturally."
+                )
+                return
+
         logger.info("end_call_triggered", call_sid=call_context.call_sid, reason=reason,
                      provider=llm_provider)
         call_guard.llm_end_reason = reason
@@ -1680,7 +1712,18 @@ async def build_pipeline(
                 self._total_recoveries = 0
 
             async def run_tts(self, text: str, context_id: str):
-                """Override to start a watchdog after sending text."""
+                """Override to start a watchdog after sending text.
+
+                Also pads short texts to avoid min_buffer_size deadlock:
+                Sarvam buffers until min_buffer_size chars accumulate. If the
+                LLM sends a short final utterance (e.g. "Yeah."), no more text
+                follows and Sarvam never synthesizes. Pad with spaces to reach
+                the threshold.
+                """
+                min_buf = 30  # matches min_buffer_size in InputParams
+                if len(text) < min_buf:
+                    text = text + " " * (min_buf - len(text))
+
                 self._pending_text = text
                 self._pending_context_id = context_id
                 self._audio_received.clear()
@@ -1911,7 +1954,8 @@ async def build_pipeline(
     call_guard = CallGuard(call_sid=call_context.call_sid, goal_config=goal_cfg)
 
     # --- Latency trackers ---
-    tracker_post_stt = LatencyTracker(position="post_stt", call_sid=call_context.call_sid)
+    tracker_post_stt = LatencyTracker(position="post_stt", call_sid=call_context.call_sid,
+                                      user_speech_ts_ref=_last_user_speech_ts)
     tracker_post_tts = LatencyTracker(position="post_tts", call_sid=call_context.call_sid)
 
     # --- Pipeline ---
