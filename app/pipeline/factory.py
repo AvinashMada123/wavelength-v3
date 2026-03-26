@@ -1974,19 +1974,16 @@ async def build_pipeline(
     # TODO: Implement smarter echo cancellation that preserves user speech
     # (e.g. software AEC subtracting known bot audio from input stream).
 
-    # InterimTranscriptPromoter: on VAD stop, promotes latest interim transcript
-    # to final immediately — saves 300-700ms vs waiting for Deepgram utterance_end.
-    from app.pipeline.interim_promoter import InterimTranscriptPromoter
-    interim_promoter = InterimTranscriptPromoter(
-        call_sid=call_context.call_sid,
-        enabled=(stt_provider == "deepgram"),  # Only for Deepgram (has interim results)
-    )
+    # InterimTranscriptPromoter DISABLED: caused "finalize failed" error that
+    # broke LLM response flow. Needs investigation — the synthetic
+    # TranscriptionFrame may be missing required fields or conflicting with
+    # the aggregator's internal state.
+    # TODO: Fix TranscriptionFrame construction (may need language, user_id, etc.)
 
     pipeline = Pipeline(
         [
             transport.input(),
             stt,
-            interim_promoter,
             call_guard,
             tracker_post_stt,
             silence_watchdog,
