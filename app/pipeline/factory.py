@@ -1246,20 +1246,20 @@ async def build_pipeline(
             vad_enabled=True,
             vad_audio_passthrough=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(
-                stop_secs=0.3,
+                stop_secs=0.5,
                 min_volume=0.5,
             )),
             turn_analyzer=LocalSmartTurnAnalyzerV3(
-                params=SmartTurnParams(stop_secs=0.3),
+                params=SmartTurnParams(stop_secs=0.5),
             ),
         )
     else:
         # Deepgram: use local Silero VAD + SmartTurn for turn detection.
-        # stop_secs tuned for responsive interruptions:
-        # - VAD stop_secs=0.3: detect end-of-speech quickly
-        # - SmartTurn stop_secs=0.3: declare turn complete after 300ms silence
-        # Previously 0.5/1.0 which made interruptions feel broken — user had
-        # to be silent for 1s+ before the bot would stop speaking.
+        # Tuning history:
+        #   1.0s — interruptions broken (user had to wait 1s+ to be heard)
+        #   0.3s — too aggressive (cuts users off mid-sentence on thinking pauses)
+        #   0.5s — middle ground: allows ~500ms thinking pauses while still
+        #          enabling interruptions within ~700ms total latency
         transport_params = FastAPIWebsocketParams(
             audio_out_enabled=True,
             audio_out_sample_rate=16000,
@@ -1269,11 +1269,11 @@ async def build_pipeline(
             vad_enabled=True,
             vad_audio_passthrough=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(
-                stop_secs=0.3,
+                stop_secs=0.5,
                 min_volume=0.5,
             )),
             turn_analyzer=LocalSmartTurnAnalyzerV3(
-                params=SmartTurnParams(stop_secs=0.3),
+                params=SmartTurnParams(stop_secs=0.5),
             ),
         )
 
