@@ -127,7 +127,7 @@ class GreetingGuard(FrameProcessor):
             if self._start_time is not None:
                 elapsed = time.monotonic() - self._start_time
                 if elapsed < self._guard_duration:
-                    logger.debug(
+                    logger.info(
                         "greeting_guard_suppressed",
                         call_sid=self._call_sid,
                         elapsed=round(elapsed, 2),
@@ -1255,9 +1255,9 @@ async def build_pipeline(
         )
     else:
         # Deepgram: use local Silero VAD + SmartTurn for turn detection.
-        # Tuning: 0.3s for lowest latency. Risk of mid-sentence cutoffs is
-        # mitigated by SmartTurn's INCOMPLETE prediction and interim transcript
-        # processor that starts LLM before final transcript arrives.
+        # 0.5s balances responsiveness vs mid-sentence cutoffs.
+        # 0.3s caused sentence splits ("I'm busy. Can" / "call me back later?")
+        # 1.0s made interruptions feel broken.
         transport_params = FastAPIWebsocketParams(
             audio_out_enabled=True,
             audio_out_sample_rate=16000,
@@ -1267,11 +1267,11 @@ async def build_pipeline(
             vad_enabled=True,
             vad_audio_passthrough=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(
-                stop_secs=0.3,
+                stop_secs=0.5,
                 min_volume=0.5,
             )),
             turn_analyzer=LocalSmartTurnAnalyzerV3(
-                params=SmartTurnParams(stop_secs=0.3),
+                params=SmartTurnParams(stop_secs=0.5),
             ),
         )
 
@@ -1992,7 +1992,7 @@ async def build_pipeline(
     # pipeline start. Prevents echo from the greeting triggering a false
     # interruption that kills the greeting mid-sentence.
     greeting_guard = GreetingGuard(
-        guard_duration=5.0,
+        guard_duration=2.0,
         call_sid=call_context.call_sid,
     )
 
