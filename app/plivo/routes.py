@@ -378,15 +378,20 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         plivo_stream_id = ""
         greeting_audio = None
 
+        # Phase 3 direct play only works with HTTP-based TTS (not WebSocket).
+        # Sarvam (WebSocket) always fails with greeting_synth_empty because
+        # run_tts() doesn't yield audio for WS-based services.
+        # Gemini TTS also skipped (uses pipeline path).
+        _tts_prov = getattr(bot_config, "tts_provider", "sarvam")
         use_greeting_direct_play = settings.GREETING_DIRECT_PLAY and (
-            getattr(bot_config, "tts_provider", "sarvam") != "gemini"
+            _tts_prov not in ("gemini", "sarvam")
         )
 
         if settings.GREETING_DIRECT_PLAY and not use_greeting_direct_play:
             logger.info(
                 "greeting_direct_play_skipped",
                 call_sid=call_sid,
-                tts_provider=getattr(bot_config, "tts_provider", "sarvam"),
+                tts_provider=_tts_prov,
             )
 
         if use_greeting_direct_play:

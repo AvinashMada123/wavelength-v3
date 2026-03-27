@@ -1988,10 +1988,19 @@ async def build_pipeline(
     # the aggregator's internal state.
     # TODO: Fix TranscriptionFrame construction (may need language, user_id, etc.)
 
+    # GreetingGuard: suppresses UserStoppedSpeakingFrame for first 5s after
+    # pipeline start. Prevents echo from the greeting triggering a false
+    # interruption that kills the greeting mid-sentence.
+    greeting_guard = GreetingGuard(
+        guard_duration=5.0,
+        call_sid=call_context.call_sid,
+    )
+
     pipeline = Pipeline(
         [
             transport.input(),
             stt,
+            greeting_guard,
             call_guard,
             tracker_post_stt,
             silence_watchdog,
