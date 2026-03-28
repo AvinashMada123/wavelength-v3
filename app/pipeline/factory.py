@@ -1993,7 +1993,7 @@ async def build_pipeline(
     # pipeline start. Prevents echo from the greeting triggering a false
     # interruption that kills the greeting mid-sentence.
     greeting_guard = GreetingGuard(
-        guard_duration=0.5,
+        guard_duration=1.0,
         call_sid=call_context.call_sid,
     )
 
@@ -2001,7 +2001,7 @@ async def build_pipeline(
         [
             transport.input(),
             stt,
-            # greeting_guard,  # Disabled — testing without it
+            greeting_guard,
             call_guard,
             tracker_post_stt,
             silence_watchdog,
