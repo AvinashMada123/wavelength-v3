@@ -94,13 +94,13 @@ def build_deepgram_keywords(bot_config) -> list[str]:
         for kw in extra:
             if isinstance(kw, str) and kw.strip():
                 keywords.append(kw if ":" in kw else f"{kw}:3")
-    # Deduplicate preserving order
+    # Deduplicate by keyword word (ignoring boost value), preserving order
     seen: set[str] = set()
     unique: list[str] = []
     for kw in keywords:
-        kw_lower = kw.lower()
-        if kw_lower not in seen:
-            seen.add(kw_lower)
+        word_part = kw.split(":")[0].lower().strip()
+        if word_part and word_part not in seen:
+            seen.add(word_part)
             unique.append(kw)
     return unique
 

@@ -9,3 +9,4 @@ frontend
 .claude
 .vscode
 *.md
+scripts/stt_analysis

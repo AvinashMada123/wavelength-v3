@@ -9,3 +9,7 @@ debug_audio/
 recordings/
 *.tsbuildinfo
 credentials/
+
+# STT analysis (local-only artifacts)
+scripts/stt_analysis/output/
+scripts/stt_analysis/.venv/
