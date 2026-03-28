@@ -44,6 +44,7 @@ class SilenceWatchdog(FrameProcessor):
         call_sid: str = "",
         prompt_text: str = "Hello? Can you hear me?",
         goodbye_text: str = "Looks like this is not a good time. I will try again later. Take care!",
+        max_prompts: int = 2,
         **kwargs,
     ):
         super().__init__(name="SilenceWatchdog", **kwargs)
@@ -51,9 +52,11 @@ class SilenceWatchdog(FrameProcessor):
         self._call_sid = call_sid
         self._prompt_text = prompt_text
         self._goodbye_text = goodbye_text
+        self._max_prompts = max_prompts
         self._last_activity: float = 0.0
         self._bot_speaking: bool = False
         self._escalation: int = 0
+        self._total_prompts: int = 0
         self._started: bool = False
         self._watchdog_task: asyncio.Task | None = None
         self._pipeline_task = None  # Set after PipelineTask creation
@@ -119,20 +122,31 @@ class SilenceWatchdog(FrameProcessor):
                 self._escalation += 1
 
                 if self._escalation == 1:
-                    logger.info(
-                        "silence_watchdog_prompt",
-                        call_sid=self._call_sid,
-                        elapsed_s=round(elapsed, 1),
-                    )
-                    await self.push_frame(TTSSpeakFrame(text=self._prompt_text))
-                    # Reset activity so next timeout counts from now
-                    self._last_activity = time.monotonic()
+                    if self._total_prompts >= self._max_prompts:
+                        # Hard cap reached — skip to goodbye
+                        self._escalation = 2
+                    else:
+                        self._total_prompts += 1
+                        logger.info(
+                            "silence_watchdog_prompt",
+                            call_sid=self._call_sid,
+                            elapsed_s=round(elapsed, 1),
+                            total_prompts=self._total_prompts,
+                            max_prompts=self._max_prompts,
+                        )
+                        await self.push_frame(TTSSpeakFrame(text=self._prompt_text))
+                        # Reset activity so next timeout counts from now
+                        self._last_activity = time.monotonic()
 
-                elif self._escalation >= 2:
+                # IMPORTANT: `if` not `elif` — cap-triggered escalation=2
+                # must fall through to goodbye in the SAME iteration
+                if self._escalation >= 2:
                     logger.info(
                         "silence_watchdog_hangup",
                         call_sid=self._call_sid,
                         elapsed_s=round(elapsed, 1),
+                        total_prompts=self._total_prompts,
+                        trigger_reason="cap_reached" if self._total_prompts >= self._max_prompts else "consecutive_silence",
                     )
                     if self._call_guard:
                         self._call_guard.set_termination_source("silence_watchdog")

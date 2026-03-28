@@ -75,6 +75,11 @@ class Settings(BaseSettings):
     # Phase 4: Comfort noise during inter-sentence silence gaps
     COMFORT_NOISE_ENABLED: bool = False
 
+    # --- Turn-taking feature flags ---
+    HELLO_GUARD_ENABLED: bool = True
+    BACKCHANNEL_SUPPRESSION: bool = True
+    WATCHDOG_MAX_PROMPTS: int = 2
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 

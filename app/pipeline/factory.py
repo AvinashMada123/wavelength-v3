@@ -65,6 +65,71 @@ _DEFAULT_STYLE_PROMPT = (
     "Never robotic."
 )
 
+
+def build_deepgram_keywords(bot_config) -> list[str]:
+    """Build keyword boost list from bot config for Deepgram STT.
+
+    Extracts names from agent_name, company_name, event_name and any
+    custom keywords in context_variables.stt_keywords.
+    Returns deduplicated list in "word:boost" format.
+    """
+    keywords: list[str] = []
+    if getattr(bot_config, "agent_name", None):
+        keywords.append(f"{bot_config.agent_name}:5")
+        for part in bot_config.agent_name.split():
+            if len(part) > 2:
+                keywords.append(f"{part}:3")
+    if getattr(bot_config, "company_name", None):
+        keywords.append(f"{bot_config.company_name}:5")
+        for part in bot_config.company_name.split():
+            if len(part) > 2:
+                keywords.append(f"{part}:3")
+    if getattr(bot_config, "event_name", None):
+        keywords.append(f"{bot_config.event_name}:4")
+        for part in bot_config.event_name.split():
+            if len(part) > 2:
+                keywords.append(f"{part}:2")
+    extra = (getattr(bot_config, "context_variables", None) or {}).get("stt_keywords", [])
+    if isinstance(extra, list):
+        for kw in extra:
+            if isinstance(kw, str) and kw.strip():
+                keywords.append(kw if ":" in kw else f"{kw}:3")
+    # Deduplicate preserving order
+    seen: set[str] = set()
+    unique: list[str] = []
+    for kw in keywords:
+        kw_lower = kw.lower()
+        if kw_lower not in seen:
+            seen.add(kw_lower)
+            unique.append(kw)
+    return unique
+
+
+def build_entity_hint_suffix(bot_config) -> str:
+    """Build a system prompt suffix with entity hints for STT robustness.
+
+    Returns empty string if no entities to hint.
+    """
+    hints: list[str] = []
+    if getattr(bot_config, "agent_name", None):
+        hints.append(f"Your name is {bot_config.agent_name}")
+    if getattr(bot_config, "company_name", None):
+        hints.append(f"Company: {bot_config.company_name}")
+    if getattr(bot_config, "event_name", None):
+        hints.append(f"Event: {bot_config.event_name}")
+    extra = (getattr(bot_config, "context_variables", None) or {}).get("stt_keywords", [])
+    if isinstance(extra, list) and extra:
+        names = [kw.split(":")[0] if ":" in kw else kw for kw in extra if isinstance(kw, str)]
+        if names:
+            hints.append(f"Key terms: {', '.join(names)}")
+    if not hints:
+        return ""
+    return (
+        "\n\nNote: The customer's speech is transcribed via speech recognition. "
+        f"When the customer mentions names or terms, they may refer to: {'; '.join(hints)}. "
+        "Interpret accordingly."
+    )
+
 # Minimal universal guardrails appended to every system prompt.
 _CONVERSATION_RULES = """
 
@@ -269,6 +334,15 @@ class HelloGuard(FrameProcessor):
     """
 
     _HELLO_WORDS = frozenset({"hello", "hallo", "hi", "hey", "alo", "helo"})
+    _PURE_BACKCHANNELS = frozenset({"hmm", "hm", "mm", "mhm", "uh-huh", "uhuh", "ah"})
+    _AFFIRMATIVE_TOKENS = frozenset({
+        "yes", "yeah", "yep", "yah", "okay", "ok", "right", "sure",
+        "got it", "haan", "achha", "accha", "ji", "ha", "theek",
+    })
+    _STOP_WORDS = frozenset({
+        "no", "nah", "wait", "stop", "ruko", "nahi",
+        "listen", "sun", "suno",
+    })
 
     def __init__(self, call_sid: str = "", **kwargs):
         super().__init__(name="HelloGuard", **kwargs)
@@ -276,6 +350,41 @@ class HelloGuard(FrameProcessor):
         self._bot_speaking = False
         self._pending_llm = False  # True after real transcript sent, cleared on BotStartedSpeaking
         self._suppressed_hello = False
+
+    def _should_suppress(self, text: str) -> tuple[bool, str]:
+        """Determine if transcript should be suppressed. Returns (suppress, category)."""
+        if not settings.HELLO_GUARD_ENABLED:
+            return False, "disabled"
+
+        cleaned = text.strip().lower().rstrip("?.!,;: ")
+        words = cleaned.split()
+
+        if not words or len(words) > 2:
+            return False, "passthrough"
+
+        word_set = set(words)
+
+        # Stop words ALWAYS pass through
+        if word_set & self._STOP_WORDS:
+            return False, "stop_word"
+
+        # Hello words: suppress during bot_speaking or pending_llm
+        if word_set <= self._HELLO_WORDS:
+            return True, "hello"
+
+        if not settings.BACKCHANNEL_SUPPRESSION:
+            # Only suppress hello words, not backchannels
+            return False, "backchannel_disabled"
+
+        # Pure backchannels: suppress during bot_speaking or pending_llm
+        if word_set <= (self._HELLO_WORDS | self._PURE_BACKCHANNELS):
+            return True, "pure_backchannel"
+
+        # Affirmative tokens: suppress ONLY during bot_speaking, NOT pending_llm
+        if self._bot_speaking and word_set <= (self._HELLO_WORDS | self._PURE_BACKCHANNELS | self._AFFIRMATIVE_TOKENS):
+            return True, "affirmative_during_speech"
+
+        return False, "passthrough"
 
     async def process_frame(self, frame, direction: FrameDirection):
         from pipecat.frames.frames import (
@@ -344,18 +453,16 @@ class HelloGuard(FrameProcessor):
                 pending_llm=self._pending_llm,
             )
             if self._bot_speaking or self._pending_llm:
-                cleaned = frame.text.strip().lower().rstrip("?.!,;: ")
-                words = cleaned.split()
-                if (
-                    words
-                    and len(words) <= 2
-                    and all(w in self._HELLO_WORDS for w in words)
-                ):
+                should_suppress, category = self._should_suppress(frame.text)
+                if should_suppress:
                     self._suppressed_hello = True
                     logger.info(
                         "hello_guard_suppressed",
                         call_sid=self._call_sid,
                         text=frame.text,
+                        category=category,
+                        bot_speaking=self._bot_speaking,
+                        pending_llm=self._pending_llm,
                     )
                     return
             # Real (non-hello) transcript passed through — LLM will process it
@@ -1534,6 +1641,9 @@ async def build_pipeline(
     else:
         # nova-3: "unknown" → "multi" (auto-detect), otherwise respect user's choice
         deepgram_language = "multi" if stt_language == "unknown" else stt_language
+
+        unique_kw = build_deepgram_keywords(bot_config)
+
         stt = DeepgramSTTService(
             api_key=settings.DEEPGRAM_API_KEY,
             live_options=LiveOptions(
@@ -1544,9 +1654,17 @@ async def build_pipeline(
                 endpointing=100,
                 punctuate=True,
                 smart_format=True,
+                keywords=unique_kw if unique_kw else None,
             ),
         )
-        logger.info("stt_provider_selected", provider="deepgram", model="nova-3", language=deepgram_language)
+        logger.info(
+            "stt_provider_selected",
+            provider="deepgram",
+            model="nova-3",
+            language=deepgram_language,
+            keywords_count=len(unique_kw),
+            keywords=unique_kw[:10],  # Log first 10 for debugging
+        )
 
     # --- LLM ---
     llm_provider = getattr(bot_config, "llm_provider", "google")
@@ -1916,6 +2034,10 @@ async def build_pipeline(
     system_prompt = call_context.filled_prompt.strip()
     if _CONVERSATION_RULES.strip():
         system_prompt = f"{system_prompt}\n\n{_CONVERSATION_RULES.strip()}"
+
+    entity_suffix = build_entity_hint_suffix(bot_config)
+    if entity_suffix:
+        system_prompt += entity_suffix
     # Seed greeting into context so the LLM knows it was already spoken and
     # doesn't generate a second greeting on its first turn.
     # When greeting_text is provided AND greeting was sent directly (bypassing
@@ -1996,12 +2118,14 @@ async def build_pipeline(
         guard_duration=1.0,
         call_sid=call_context.call_sid,
     )
+    hello_guard = HelloGuard(call_sid=call_context.call_sid)
 
     pipeline = Pipeline(
         [
             transport.input(),
             stt,
             greeting_guard,
+            hello_guard,      # Backchannel suppression during bot speech
             call_guard,
             tracker_post_stt,
             silence_watchdog,
