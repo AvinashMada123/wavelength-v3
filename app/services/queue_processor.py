@@ -306,6 +306,26 @@ async def _process_batch(loader: BotConfigLoader):
     for bot_id in bot_ids:
         org_id = bot_org_map.get(bot_id)
 
+        # Check calling window at bot level BEFORE selecting calls.
+        # Prevents out-of-window bots from consuming batch slots.
+        bot_config = await loader.get(str(bot_id))
+        if bot_config:
+            tz_name = getattr(bot_config, "callback_timezone", "Asia/Kolkata")
+            w_start = getattr(bot_config, "callback_window_start", 9)
+            w_end = getattr(bot_config, "callback_window_end", 20)
+            try:
+                from zoneinfo import ZoneInfo
+                tz = ZoneInfo(tz_name)
+                local_now = datetime.now(tz)
+                if w_start < w_end:
+                    in_window = w_start <= local_now.hour < w_end
+                else:
+                    in_window = local_now.hour >= w_start or local_now.hour < w_end
+                if not in_window:
+                    continue  # Skip this bot entirely — outside calling window
+            except Exception:
+                pass  # Proceed on timezone errors
+
         # Check org-level concurrency limit
         if org_id and org_active_counts.get(org_id, 0) >= org_limits.get(org_id, 15):
             continue
