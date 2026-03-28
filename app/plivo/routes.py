@@ -408,7 +408,6 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
             )
 
         if use_greeting_direct_play:
-            import asyncio
             import json as _json
 
             async def _capture_start_event():
