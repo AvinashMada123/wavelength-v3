@@ -421,7 +421,7 @@ export default function CallDetailPage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => router.push("/call-logs")}
+              onClick={() => router.back()}
               className="mb-6 gap-1.5"
             >
               <ArrowLeft className="h-4 w-4" />
@@ -440,7 +440,7 @@ export default function CallDetailPage() {
                   variant="outline"
                   size="sm"
                   className="mt-4"
-                  onClick={() => router.push("/call-logs")}
+                  onClick={() => router.back()}
                 >
                   Go to Call Logs
                 </Button>
@@ -510,7 +510,7 @@ export default function CallDetailPage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => router.push("/call-logs")}
+              onClick={() => router.back()}
               className="gap-1.5 -ml-2"
             >
               <ArrowLeft className="h-4 w-4" />
