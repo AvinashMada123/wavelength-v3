@@ -2000,7 +2000,7 @@ async def build_pipeline(
         [
             transport.input(),
             stt,
-            greeting_guard,
+            # greeting_guard,  # Disabled — testing without it
             call_guard,
             tracker_post_stt,
             silence_watchdog,
