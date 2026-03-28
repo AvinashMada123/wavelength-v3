@@ -6,7 +6,7 @@ import uuid
 
 import structlog
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -277,13 +277,53 @@ async def trigger_call(
     return QueueEnqueueResponse(queue_id=queued_call.id, status="queued")
 
 
+def _range_response(data: bytes, content_type: str, range_header: str | None) -> Response:
+    """Return full or partial content based on Range header."""
+    total = len(data)
+    if not range_header or not range_header.startswith("bytes="):
+        return Response(
+            content=data,
+            media_type=content_type,
+            headers={
+                "content-length": str(total),
+                "accept-ranges": "bytes",
+            },
+        )
+
+    # Parse "bytes=START-END" (END is optional)
+    range_spec = range_header[6:]  # strip "bytes="
+    parts = range_spec.split("-", 1)
+    start = int(parts[0]) if parts[0] else 0
+    end = int(parts[1]) if parts[1] else total - 1
+    end = min(end, total - 1)
+
+    if start >= total or start > end:
+        return Response(
+            status_code=416,
+            headers={"content-range": f"bytes */{total}"},
+        )
+
+    chunk = data[start : end + 1]
+    return Response(
+        content=chunk,
+        status_code=206,
+        media_type=content_type,
+        headers={
+            "content-range": f"bytes {start}-{end}/{total}",
+            "content-length": str(len(chunk)),
+            "accept-ranges": "bytes",
+        },
+    )
+
+
 @router.get("/{call_sid}/recording")
 async def get_recording(
     call_sid: str,
+    request: Request,
     token: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Redirect to Plivo-hosted recording URL.
+    """Proxy recording with Range request support for <audio> playback.
 
     Accepts ?token= query param for auth since <audio> elements can't send headers.
     """
@@ -316,6 +356,8 @@ async def get_recording(
     if not recording_url:
         raise HTTPException(status_code=404, detail="Recording not available")
 
+    range_header = request.headers.get("range")
+
     # Twilio recording URLs require HTTP Basic Auth — proxy them server-side
     if "api.twilio.com" in recording_url or "twilio.com" in recording_url:
         result = await db.execute(select(Organization).where(Organization.id == org_id))
@@ -325,16 +367,18 @@ async def get_recording(
 
         twilio_auth = (org.twilio_account_sid, org.twilio_auth_token)
 
-        # Fetch entire recording and return it (avoids Content-Length mismatch with streaming)
         async with httpx.AsyncClient(follow_redirects=True) as client:
             resp = await client.get(recording_url, auth=twilio_auth)
             resp.raise_for_status()
 
         content_type = "audio/mpeg" if recording_url.endswith(".mp3") else "audio/wav"
-        return Response(
-            content=resp.content,
-            media_type=content_type,
-            headers={"content-length": str(len(resp.content))},
-        )
+        return _range_response(resp.content, content_type, range_header)
 
-    return RedirectResponse(url=recording_url)
+    # Plivo / other URLs — proxy to support Range requests (external redirects
+    # can fail due to CORS or expired signed URLs on subsequent Range fetches)
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        resp = await client.get(recording_url)
+        resp.raise_for_status()
+
+    content_type = resp.headers.get("content-type", "audio/wav")
+    return _range_response(resp.content, content_type, range_header)

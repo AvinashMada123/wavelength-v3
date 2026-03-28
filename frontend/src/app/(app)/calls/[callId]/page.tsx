@@ -105,6 +105,7 @@ function AudioPlayer({ callSid }: { callSid: string }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [audioError, setAudioError] = useState(false);
 
   const rates = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
@@ -185,7 +186,13 @@ function AudioPlayer({ callSid }: { callSid: string }) {
           onEnded={() => setPlaying(false)}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
+          onError={() => setAudioError(true)}
         />
+        {audioError && (
+          <p className="text-xs text-red-400">
+            Playback failed — try downloading instead.
+          </p>
+        )}
 
         <div className="flex items-center gap-3">
           <Button

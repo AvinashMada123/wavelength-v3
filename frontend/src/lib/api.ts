@@ -162,16 +162,22 @@ export function exportCallLogs(params?: {
   botId?: string;
   goalOutcome?: string;
   status?: string;
+  search?: string;
   dateFrom?: string;
   dateTo?: string;
+  durationMin?: number;
+  durationMax?: number;
   limit?: number;
 }): Promise<CallLog[]> {
   const sp = new URLSearchParams();
   if (params?.botId) sp.set("bot_id", params.botId);
   if (params?.goalOutcome) sp.set("goal_outcome", params.goalOutcome);
   if (params?.status) sp.set("status", params.status);
+  if (params?.search) sp.set("search", params.search);
   if (params?.dateFrom) sp.set("date_from", params.dateFrom);
   if (params?.dateTo) sp.set("date_to", params.dateTo);
+  if (params?.durationMin != null) sp.set("duration_min", String(params.durationMin));
+  if (params?.durationMax != null) sp.set("duration_max", String(params.durationMax));
   if (params?.limit != null) sp.set("limit", String(params.limit));
   const qs = sp.toString();
   return apiFetch(`/api/calls/export${qs ? `?${qs}` : ""}`);

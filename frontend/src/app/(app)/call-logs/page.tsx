@@ -24,7 +24,6 @@ import {
   Target,
   Database,
   ExternalLink,
-  MessageSquareText,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
@@ -177,8 +176,6 @@ function CallLogsPageInner() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectAllMatching, setSelectAllMatching] = useState(false);
 
-  // Transcript search
-  const [transcriptSearch, setTranscriptSearch] = useState("");
   // Expanded summary rows
   const [expandedSummaries, setExpandedSummaries] = useState<Set<string>>(new Set());
 
@@ -228,7 +225,7 @@ function CallLogsPageInner() {
       setCalls(data.items);
       setTotalCalls(data.total);
     } catch {
-      // silent
+      toast.error("Failed to load call logs");
     } finally {
       setLoading(false);
     }
@@ -298,38 +295,27 @@ function CallLogsPageInner() {
     return m;
   }, [bots]);
 
-  // ---------- Goal outcome options (derived from loaded calls) ----------
+  // ---------- Goal outcome options (derived from bot configs) ----------
 
-  const goalOutcomeOptions = [
-    "completed",
-    "callback_needed",
-    "info_delivered",
-    "interested",
-    "not_interested",
-    "voicemail",
-    "bad_audio",
-    "none",
-    "error",
-  ];
+  const { goalOutcomeOptions, goalOutcomeLabels } = useMemo(() => {
+    const ids = new Set<string>();
+    const labels = new Map<string, string>();
+    for (const bot of bots) {
+      if (bot.goal_config?.success_criteria) {
+        for (const sc of bot.goal_config.success_criteria) {
+          ids.add(sc.id);
+          if (sc.label && !labels.has(sc.id)) labels.set(sc.id, sc.label);
+        }
+      }
+    }
+    ids.add("none");
+    labels.set("none", "None");
+    return { goalOutcomeOptions: Array.from(ids), goalOutcomeLabels: labels };
+  }, [bots]);
 
   // ---------- Filtering ----------
 
-  const filteredCalls = useMemo(() => {
-    let result = calls;
-
-    // Search, status, date, and duration filters are all server-side now.
-    // Only transcript search remains client-side (needs full text content).
-    if (transcriptSearch.trim()) {
-      const tq = transcriptSearch.toLowerCase();
-      result = result.filter((c) =>
-        c.metadata?.transcript?.some((t) =>
-          t.content.toLowerCase().includes(tq)
-        )
-      );
-    }
-
-    return result;
-  }, [calls, transcriptSearch]);
+  const filteredCalls = calls;
 
   const totalPages = Math.ceil(totalCalls / PAGE_SIZE);
   const paginatedCalls = filteredCalls;
@@ -339,7 +325,7 @@ function CallLogsPageInner() {
     setPage(0);
     setSelectedIds(new Set());
     setSelectAllMatching(false);
-  }, [filterBotId, filterStatus, filterGoalOutcome, debouncedSearch, dateRange, filterDuration, transcriptSearch]);
+  }, [filterBotId, filterStatus, filterGoalOutcome, debouncedSearch, dateRange, filterDuration]);
 
   // ---------- Selection ----------
 
@@ -373,26 +359,27 @@ function CallLogsPageInner() {
   // ---------- Export ----------
 
   async function handleExport() {
+    // Parse duration filter into min/max
+    let exportDurationMin: number | undefined;
+    let exportDurationMax: number | undefined;
+    if (filterDuration === "<30") { exportDurationMax = 30; }
+    else if (filterDuration === "30-120") { exportDurationMin = 30; exportDurationMax = 120; }
+    else if (filterDuration === "120-300") { exportDurationMin = 120; exportDurationMax = 300; }
+    else if (filterDuration === ">300") { exportDurationMin = 300; }
+
     try {
       toast.info("Fetching full call data for export...");
       const fullCalls = await exportCallLogs({
         botId: filterBotId !== "all" ? filterBotId : undefined,
         goalOutcome: filterGoalOutcome !== "all" ? filterGoalOutcome : undefined,
         status: filterStatus !== "all" ? filterStatus : undefined,
+        search: debouncedSearch || undefined,
         dateFrom: dateRange.from ? new Date(dateRange.from).toISOString() : undefined,
         dateTo: dateRange.to ? new Date(dateRange.to).toISOString() : undefined,
+        durationMin: exportDurationMin,
+        durationMax: exportDurationMax,
       });
       let toExport = fullCalls;
-      // Client-side search filter (not available server-side)
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        toExport = toExport.filter(
-          (c) =>
-            c.contact_name.toLowerCase().includes(q) ||
-            c.contact_phone.includes(q) ||
-            (c.summary && c.summary.toLowerCase().includes(q))
-        );
-      }
       // Filter by selection only if not "select all matching"
       if (selectedIds.size > 0 && !selectAllMatching) {
         toExport = toExport.filter((c) => selectedIds.has(c.id));
@@ -408,16 +395,15 @@ function CallLogsPageInner() {
 
   const hasFilters =
     searchQuery ||
-    transcriptSearch ||
     filterStatus !== "all" ||
     filterBotId !== "all" ||
     filterGoalOutcome !== "all" ||
+    filterDuration !== "all" ||
     dateRange.from ||
     dateRange.to;
 
   function clearFilters() {
     setSearchQuery("");
-    setTranscriptSearch("");
     setFilterStatus("all");
     setFilterBotId("all");
     setFilterGoalOutcome("all");
@@ -561,7 +547,7 @@ function CallLogsPageInner() {
                       <SelectItem value="all">All outcomes</SelectItem>
                       {goalOutcomeOptions.map((o) => (
                         <SelectItem key={o} value={o}>
-                          {o.replace(/_/g, " ")}
+                          {goalOutcomeLabels.get(o) || o.replace(/_/g, " ")}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -587,27 +573,6 @@ function CallLogsPageInner() {
                       <SelectItem value=">300">&gt; 5m</SelectItem>
                     </SelectContent>
                   </Select>
-
-                  {/* Transcript search */}
-                  <div className="relative min-w-[180px]">
-                    <MessageSquareText className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      value={transcriptSearch}
-                      onChange={(e) => setTranscriptSearch(e.target.value)}
-                      placeholder="Search transcripts..."
-                      className="pl-8 h-9 text-xs"
-                    />
-                    {transcriptSearch && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="absolute right-0.5 top-1/2 -translate-y-1/2 h-7 w-7"
-                        onClick={() => setTranscriptSearch("")}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    )}
-                  </div>
 
                   {/* Clear filters */}
                   {hasFilters && (
@@ -639,9 +604,7 @@ function CallLogsPageInner() {
                 </div>
 
                 {/* Selection + count indicator */}
-                {(selectedIds.size > 0 ||
-                  selectAllMatching ||
-                  (hasFilters && filteredCalls.length !== calls.length)) && (
+                {(selectedIds.size > 0 || selectAllMatching) && (
                   <div className="flex items-center gap-3">
                     {(selectedIds.size > 0 || selectAllMatching) && (
                       <div className="flex items-center gap-2 text-xs">
@@ -678,14 +641,6 @@ function CallLogsPageInner() {
                         </Button>
                       </div>
                     )}
-                    {hasFilters &&
-                      filteredCalls.length !== calls.length &&
-                      selectedIds.size === 0 &&
-                      !selectAllMatching && (
-                        <p className="text-xs text-muted-foreground">
-                          Showing {filteredCalls.length} of {calls.length} calls
-                        </p>
-                      )}
                   </div>
                 )}
               </div>
@@ -702,12 +657,12 @@ function CallLogsPageInner() {
                 <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                   <PhoneOff className="mb-3 h-12 w-12 opacity-30" />
                   <p className="font-medium">
-                    {calls.length === 0 ? "No calls yet" : "No matching calls"}
+                    {hasFilters ? "No matching calls" : "No calls yet"}
                   </p>
                   <p className="text-sm mt-1">
-                    {calls.length === 0
-                      ? "Initiate your first call to see logs here."
-                      : "Try adjusting your filters."}
+                    {hasFilters
+                      ? "Try adjusting your filters."
+                      : "Initiate your first call to see logs here."}
                   </p>
                 </div>
               ) : (
@@ -771,12 +726,12 @@ function CallLogsPageInner() {
                             {formatPhoneNumber(call.contact_phone)}
                           </TableCell>
                           <TableCell>
-                            {botNameMap.get(call.bot_id) ? (
+                            {(call.bot_name || botNameMap.get(call.bot_id)) ? (
                               <Badge
                                 variant="outline"
                                 className="text-[10px] font-normal"
                               >
-                                {botNameMap.get(call.bot_id)}
+                                {call.bot_name || botNameMap.get(call.bot_id)}
                               </Badge>
                             ) : (
                               <span className="text-muted-foreground text-xs">
@@ -796,9 +751,9 @@ function CallLogsPageInner() {
                             <SentimentBadge sentiment={getCallSentiment(call)} />
                           </TableCell>
                           <TableCell>
-                            {call.outcome ? (
-                              <Badge variant="outline" className="text-xs">
-                                {call.outcome}
+                            {(call.analytics?.goal_outcome || call.outcome) ? (
+                              <Badge variant="outline" className="text-xs capitalize">
+                                {(call.analytics?.goal_outcome || call.outcome || "").replace(/_/g, " ")}
                               </Badge>
                             ) : (
                               <span className="text-muted-foreground">-</span>
