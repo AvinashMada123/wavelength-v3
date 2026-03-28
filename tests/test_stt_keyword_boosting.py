@@ -166,6 +166,12 @@ class TestBuildDeepgramKeywords:
         assert "Test:5" in kw
         assert "Co:5" in kw
 
+    def test_context_variables_is_string(self):
+        """Regression: context_variables can be a string in production DB."""
+        bot = _make_bot(context_variables="some string value")
+        kw = build_deepgram_keywords(bot)
+        assert "Sneha:5" in kw  # Should not crash
+
 
 # ===========================================================================
 # build_entity_hint_suffix

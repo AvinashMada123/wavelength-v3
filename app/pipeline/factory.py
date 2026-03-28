@@ -89,7 +89,10 @@ def build_deepgram_keywords(bot_config) -> list[str]:
         for part in bot_config.event_name.split():
             if len(part) > 2:
                 keywords.append(f"{part}:2")
-    extra = (getattr(bot_config, "context_variables", None) or {}).get("stt_keywords", [])
+    ctx_vars = getattr(bot_config, "context_variables", None)
+    if not isinstance(ctx_vars, dict):
+        ctx_vars = {}
+    extra = ctx_vars.get("stt_keywords", [])
     if isinstance(extra, list):
         for kw in extra:
             if isinstance(kw, str) and kw.strip():
@@ -117,7 +120,10 @@ def build_entity_hint_suffix(bot_config) -> str:
         hints.append(f"Company: {bot_config.company_name}")
     if getattr(bot_config, "event_name", None):
         hints.append(f"Event: {bot_config.event_name}")
-    extra = (getattr(bot_config, "context_variables", None) or {}).get("stt_keywords", [])
+    ctx_vars2 = getattr(bot_config, "context_variables", None)
+    if not isinstance(ctx_vars2, dict):
+        ctx_vars2 = {}
+    extra = ctx_vars2.get("stt_keywords", [])
     if isinstance(extra, list) and extra:
         names = [kw.split(":")[0] if ":" in kw else kw for kw in extra if isinstance(kw, str)]
         if names:
