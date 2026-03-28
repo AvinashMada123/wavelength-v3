@@ -36,21 +36,40 @@ def set_dependencies(loader: BotConfigLoader):
     bot_config_loader = loader
 
 
+def _parse_date(s: str | None):
+    """Parse date string robustly — handles ISO with Z suffix, date-only, etc."""
+    if not s:
+        return None
+    from datetime import datetime as dt, timezone as tz
+    # Strip trailing Z (fromisoformat doesn't handle it before Python 3.11)
+    s = s.rstrip("Z").replace("+00:00", "")
+    try:
+        parsed = dt.fromisoformat(s)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=tz.utc)
+        return parsed
+    except ValueError:
+        return None
+
+
 @router.get("")
 async def list_calls(
     bot_id: uuid.UUID | None = None,
     status: str | None = None,
     goal_outcome: str | None = None,
     contact_phone: str | None = None,
+    search: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    duration_min: int | None = None,
+    duration_max: int | None = None,
     limit: int = 50,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_current_org),
 ):
-    from datetime import datetime as dt
-    from sqlalchemy import func
+    from datetime import timedelta
+    from sqlalchemy import func, or_
 
     # Build base filter conditions (shared by count + data queries)
     base_query = (
@@ -66,17 +85,29 @@ async def list_calls(
     if goal_outcome:
         base_query = base_query.where(CallAnalytics.goal_outcome == goal_outcome)
     if contact_phone:
-        base_query = base_query.where(CallLog.contact_phone == contact_phone)
+        base_query = base_query.where(CallLog.contact_phone.ilike(f"%{contact_phone}%"))
+    if search:
+        q = f"%{search}%"
+        base_query = base_query.where(
+            or_(
+                CallLog.contact_name.ilike(q),
+                CallLog.contact_phone.ilike(q),
+                CallLog.summary.ilike(q),
+            )
+        )
     if date_from:
-        try:
-            base_query = base_query.where(CallLog.created_at >= dt.fromisoformat(date_from))
-        except ValueError:
-            pass
+        parsed = _parse_date(date_from)
+        if parsed:
+            base_query = base_query.where(CallLog.created_at >= parsed)
     if date_to:
-        try:
-            base_query = base_query.where(CallLog.created_at <= dt.fromisoformat(date_to))
-        except ValueError:
-            pass
+        parsed = _parse_date(date_to)
+        if parsed:
+            # End of day — include the entire selected date
+            base_query = base_query.where(CallLog.created_at < parsed + timedelta(days=1))
+    if duration_min is not None:
+        base_query = base_query.where(CallLog.call_duration >= duration_min)
+    if duration_max is not None:
+        base_query = base_query.where(CallLog.call_duration <= duration_max)
 
     # Count total matching rows
     count_query = select(func.count()).select_from(base_query.subquery())
@@ -110,14 +141,18 @@ async def export_calls(
     bot_id: uuid.UUID | None = None,
     goal_outcome: str | None = None,
     status: str | None = None,
+    search: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    duration_min: int | None = None,
+    duration_max: int | None = None,
     limit: int = 5000,
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_current_org),
 ):
     """Full call logs with metadata (transcript + recording) for CSV export."""
-    from datetime import datetime as dt
+    from datetime import timedelta
+    from sqlalchemy import or_
 
     query = (
         select(CallLog, BotConfig.agent_name.label("bot_name"))
@@ -132,16 +167,27 @@ async def export_calls(
         query = query.where(CallLog.bot_id == bot_id)
     if status:
         query = query.where(CallLog.status == status)
+    if search:
+        q = f"%{search}%"
+        query = query.where(
+            or_(
+                CallLog.contact_name.ilike(q),
+                CallLog.contact_phone.ilike(q),
+                CallLog.summary.ilike(q),
+            )
+        )
     if date_from:
-        try:
-            query = query.where(CallLog.created_at >= dt.fromisoformat(date_from))
-        except ValueError:
-            pass
+        parsed = _parse_date(date_from)
+        if parsed:
+            query = query.where(CallLog.created_at >= parsed)
     if date_to:
-        try:
-            query = query.where(CallLog.created_at <= dt.fromisoformat(date_to))
-        except ValueError:
-            pass
+        parsed = _parse_date(date_to)
+        if parsed:
+            query = query.where(CallLog.created_at < parsed + timedelta(days=1))
+    if duration_min is not None:
+        query = query.where(CallLog.call_duration >= duration_min)
+    if duration_max is not None:
+        query = query.where(CallLog.call_duration <= duration_max)
     query = query.order_by(CallLog.created_at.desc()).limit(limit)
     result = await db.execute(query)
     rows = result.all()

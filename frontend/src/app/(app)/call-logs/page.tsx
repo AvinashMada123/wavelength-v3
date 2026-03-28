@@ -193,14 +193,35 @@ function CallLogsPageInner() {
 
   // ---------- Data loading ----------
 
+  // Debounced search value — avoids API call on every keystroke
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Duration filter state
+  const [filterDuration, setFilterDuration] = useState("all");
+
   const loadCalls = useCallback(async () => {
+    // Parse duration filter into min/max
+    let durationMin: number | undefined;
+    let durationMax: number | undefined;
+    if (filterDuration === "<30") { durationMax = 30; }
+    else if (filterDuration === "30-120") { durationMin = 30; durationMax = 120; }
+    else if (filterDuration === "120-300") { durationMin = 120; durationMax = 300; }
+    else if (filterDuration === ">300") { durationMin = 300; }
+
     try {
       const data = await fetchCallLogs({
         botId: filterBotId !== "all" ? filterBotId : undefined,
         goalOutcome: filterGoalOutcome !== "all" ? filterGoalOutcome : undefined,
         status: filterStatus !== "all" ? filterStatus : undefined,
+        search: debouncedSearch || undefined,
         dateFrom: dateRange.from ? new Date(dateRange.from).toISOString() : undefined,
         dateTo: dateRange.to ? new Date(dateRange.to).toISOString() : undefined,
+        durationMin,
+        durationMax,
         limit: PAGE_SIZE,
         offset: page * PAGE_SIZE,
       });
@@ -211,7 +232,7 @@ function CallLogsPageInner() {
     } finally {
       setLoading(false);
     }
-  }, [filterBotId, filterGoalOutcome, filterStatus, dateRange, page]);
+  }, [filterBotId, filterGoalOutcome, filterStatus, debouncedSearch, dateRange, filterDuration, page]);
 
   useEffect(() => {
     fetchBots().then(setBots).catch(() => {});
@@ -279,32 +300,25 @@ function CallLogsPageInner() {
 
   // ---------- Goal outcome options (derived from loaded calls) ----------
 
-  const goalOutcomeOptions = useMemo(() => {
-    const outcomes = new Set<string>();
-    for (const c of calls) {
-      if (c.outcome) outcomes.add(c.outcome);
-    }
-    return Array.from(outcomes).sort();
-  }, [calls]);
+  const goalOutcomeOptions = [
+    "completed",
+    "callback_needed",
+    "info_delivered",
+    "interested",
+    "not_interested",
+    "voicemail",
+    "bad_audio",
+    "none",
+    "error",
+  ];
 
   // ---------- Filtering ----------
 
   const filteredCalls = useMemo(() => {
     let result = calls;
 
-    // Status and date filters are now server-side
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(
-        (c) =>
-          c.contact_name.toLowerCase().includes(q) ||
-          c.contact_phone.includes(q) ||
-          (c.summary && c.summary.toLowerCase().includes(q))
-      );
-    }
-
-    // Transcript content search
+    // Search, status, date, and duration filters are all server-side now.
+    // Only transcript search remains client-side (needs full text content).
     if (transcriptSearch.trim()) {
       const tq = transcriptSearch.toLowerCase();
       result = result.filter((c) =>
@@ -315,7 +329,7 @@ function CallLogsPageInner() {
     }
 
     return result;
-  }, [calls, filterStatus, searchQuery, dateRange, transcriptSearch]);
+  }, [calls, transcriptSearch]);
 
   const totalPages = Math.ceil(totalCalls / PAGE_SIZE);
   const paginatedCalls = filteredCalls;
@@ -325,7 +339,7 @@ function CallLogsPageInner() {
     setPage(0);
     setSelectedIds(new Set());
     setSelectAllMatching(false);
-  }, [filterBotId, filterStatus, filterGoalOutcome, searchQuery, dateRange, transcriptSearch]);
+  }, [filterBotId, filterStatus, filterGoalOutcome, debouncedSearch, dateRange, filterDuration, transcriptSearch]);
 
   // ---------- Selection ----------
 
@@ -407,6 +421,7 @@ function CallLogsPageInner() {
     setFilterStatus("all");
     setFilterBotId("all");
     setFilterGoalOutcome("all");
+    setFilterDuration("all");
     setDateRange({ from: null, to: null });
   }
 
@@ -558,6 +573,20 @@ function CallLogsPageInner() {
                     onChange={setDateRange}
                     className="h-9"
                   />
+
+                  {/* Duration filter */}
+                  <Select value={filterDuration} onValueChange={setFilterDuration}>
+                    <SelectTrigger className="w-36 h-9">
+                      <SelectValue placeholder="All durations" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All durations</SelectItem>
+                      <SelectItem value="<30">&lt; 30s</SelectItem>
+                      <SelectItem value="30-120">30s – 2m</SelectItem>
+                      <SelectItem value="120-300">2m – 5m</SelectItem>
+                      <SelectItem value=">300">&gt; 5m</SelectItem>
+                    </SelectContent>
+                  </Select>
 
                   {/* Transcript search */}
                   <div className="relative min-w-[180px]">
