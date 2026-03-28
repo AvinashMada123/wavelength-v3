@@ -1511,6 +1511,7 @@ async def build_pipeline(
                 high_vad_sensitivity=True,
             ),
             keepalive_timeout=30.0,
+            idle_user_timeout=600,
         )
         stt._call_sid_tag = call_context.call_sid
         logger.info(
@@ -1845,8 +1846,8 @@ async def build_pipeline(
             sample_rate=16000,
             params=SarvamTTSService.InputParams(
                 language=tts_lang,
-                min_buffer_size=30,
-                max_chunk_length=100,
+                min_buffer_size=50,
+                max_chunk_length=150,
                 temperature=0.65,
             ),
         )
