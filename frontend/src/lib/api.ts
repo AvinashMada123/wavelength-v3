@@ -136,6 +136,8 @@ export function fetchCallLogs(params?: {
   dateTo?: string;
   durationMin?: number;
   durationMax?: number;
+  sentiment?: string;
+  leadTemperature?: string;
   limit?: number;
   offset?: number;
 }): Promise<{ items: CallLog[]; total: number }> {
@@ -148,6 +150,8 @@ export function fetchCallLogs(params?: {
   if (params?.dateTo) sp.set("date_to", params.dateTo);
   if (params?.durationMin != null) sp.set("duration_min", String(params.durationMin));
   if (params?.durationMax != null) sp.set("duration_max", String(params.durationMax));
+  if (params?.sentiment) sp.set("sentiment", params.sentiment);
+  if (params?.leadTemperature) sp.set("lead_temperature", params.leadTemperature);
   if (params?.limit != null) sp.set("limit", String(params.limit));
   if (params?.offset != null) sp.set("offset", String(params.offset));
   const qs = sp.toString();
@@ -167,6 +171,8 @@ export function exportCallLogs(params?: {
   dateTo?: string;
   durationMin?: number;
   durationMax?: number;
+  sentiment?: string;
+  leadTemperature?: string;
   limit?: number;
 }): Promise<CallLog[]> {
   const sp = new URLSearchParams();
@@ -178,6 +184,8 @@ export function exportCallLogs(params?: {
   if (params?.dateTo) sp.set("date_to", params.dateTo);
   if (params?.durationMin != null) sp.set("duration_min", String(params.durationMin));
   if (params?.durationMax != null) sp.set("duration_max", String(params.durationMax));
+  if (params?.sentiment) sp.set("sentiment", params.sentiment);
+  if (params?.leadTemperature) sp.set("lead_temperature", params.leadTemperature);
   if (params?.limit != null) sp.set("limit", String(params.limit));
   const qs = sp.toString();
   return apiFetch(`/api/calls/export${qs ? `?${qs}` : ""}`);

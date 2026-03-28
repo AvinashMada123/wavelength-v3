@@ -164,13 +164,21 @@ function CallLogsPageInner() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Filters — initialize from URL params for deep linking
-  const [filterBotId, setFilterBotId] = useState(searchParams.get("bot_id") || "all");
-  const [filterStatus, setFilterStatus] = useState("all");
-  const [filterGoalOutcome, setFilterGoalOutcome] = useState(searchParams.get("goal_outcome") || "all");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null });
-  const [page, setPage] = useState(0);
+  // Derive filters directly from URL params — no useState needed
+  const filterBotId = searchParams.get("bot_id") || "all";
+  const filterStatus = searchParams.get("status") || "all";
+  const filterGoalOutcome = searchParams.get("goal_outcome") || "all";
+  const filterDuration = searchParams.get("duration") || "all";
+  const filterSentiment = searchParams.get("sentiment") || "all";
+  const filterInterest = searchParams.get("lead_temperature") || "all";
+  const page = parseInt(searchParams.get("page") || "0", 10);
+  const dateRange: DateRange = {
+    from: searchParams.get("date_from") || null,
+    to: searchParams.get("date_to") || null,
+  };
+
+  // Search needs local state for debounce, synced to URL
+  const [searchQuery, setSearchQuery] = useState(searchParams.get("search") || "");
 
   // Selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -190,37 +198,67 @@ function CallLogsPageInner() {
 
   // ---------- Data loading ----------
 
-  // Debounced search value — avoids API call on every keystroke
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  // Helper to update URL search params
+  function updateFilters(updates: Record<string, string | null>, resetPage = true) {
+    const params = new URLSearchParams(searchParams.toString());
+    for (const [key, value] of Object.entries(updates)) {
+      if (value && value !== "all" && value !== "") {
+        params.set(key, value);
+      } else {
+        params.delete(key);
+      }
+    }
+    if (resetPage && !("page" in updates)) {
+      params.delete("page");
+    }
+    router.replace(`/call-logs?${params.toString()}`, { scroll: false });
+  }
+
+  // Debounced search — syncs to URL after 300ms
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    const timer = setTimeout(() => {
+      updateFilters({ search: searchQuery });
+    }, 300);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery]);
 
-  // Duration filter state
-  const [filterDuration, setFilterDuration] = useState("all");
-
   const loadCalls = useCallback(async () => {
+    // Read all filters from searchParams inside the callback
+    const sp = searchParams;
+    const botId = sp.get("bot_id");
+    const goalOutcome = sp.get("goal_outcome");
+    const status = sp.get("status");
+    const search = sp.get("search");
+    const dateFrom = sp.get("date_from");
+    const dateTo = sp.get("date_to");
+    const duration = sp.get("duration") || "all";
+    const sentiment = sp.get("sentiment");
+    const leadTemperature = sp.get("lead_temperature");
+    const currentPage = parseInt(sp.get("page") || "0", 10);
+
     // Parse duration filter into min/max
     let durationMin: number | undefined;
     let durationMax: number | undefined;
-    if (filterDuration === "<30") { durationMax = 30; }
-    else if (filterDuration === "30-120") { durationMin = 30; durationMax = 120; }
-    else if (filterDuration === "120-300") { durationMin = 120; durationMax = 300; }
-    else if (filterDuration === ">300") { durationMin = 300; }
+    if (duration === "<30") { durationMax = 30; }
+    else if (duration === "30-120") { durationMin = 30; durationMax = 120; }
+    else if (duration === "120-300") { durationMin = 120; durationMax = 300; }
+    else if (duration === ">300") { durationMin = 300; }
 
     try {
       const data = await fetchCallLogs({
-        botId: filterBotId !== "all" ? filterBotId : undefined,
-        goalOutcome: filterGoalOutcome !== "all" ? filterGoalOutcome : undefined,
-        status: filterStatus !== "all" ? filterStatus : undefined,
-        search: debouncedSearch || undefined,
-        dateFrom: dateRange.from ? new Date(dateRange.from).toISOString() : undefined,
-        dateTo: dateRange.to ? new Date(dateRange.to).toISOString() : undefined,
+        botId: botId || undefined,
+        goalOutcome: goalOutcome || undefined,
+        status: status || undefined,
+        search: search || undefined,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
         durationMin,
         durationMax,
+        sentiment: sentiment || undefined,
+        leadTemperature: leadTemperature || undefined,
         limit: PAGE_SIZE,
-        offset: page * PAGE_SIZE,
+        offset: currentPage * PAGE_SIZE,
       });
       setCalls(data.items);
       setTotalCalls(data.total);
@@ -229,7 +267,8 @@ function CallLogsPageInner() {
     } finally {
       setLoading(false);
     }
-  }, [filterBotId, filterGoalOutcome, filterStatus, debouncedSearch, dateRange, filterDuration, page]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.toString()]);
 
   useEffect(() => {
     fetchBots().then(setBots).catch(() => {});
@@ -268,10 +307,6 @@ function CallLogsPageInner() {
     await loadCalls();
     setRefreshing(false);
     toast.success("Refreshed");
-  }
-
-  function navigateToDetail(call: CallLog) {
-    router.push(`/calls/${call.id}`);
   }
 
   async function openCallDetail(call: CallLog) {
@@ -320,12 +355,6 @@ function CallLogsPageInner() {
   const totalPages = Math.ceil(totalCalls / PAGE_SIZE);
   const paginatedCalls = filteredCalls;
 
-  // Reset page when filters change
-  useEffect(() => {
-    setPage(0);
-    setSelectedIds(new Set());
-    setSelectAllMatching(false);
-  }, [filterBotId, filterStatus, filterGoalOutcome, debouncedSearch, dateRange, filterDuration]);
 
   // ---------- Selection ----------
 
@@ -373,11 +402,13 @@ function CallLogsPageInner() {
         botId: filterBotId !== "all" ? filterBotId : undefined,
         goalOutcome: filterGoalOutcome !== "all" ? filterGoalOutcome : undefined,
         status: filterStatus !== "all" ? filterStatus : undefined,
-        search: debouncedSearch || undefined,
+        search: searchParams.get("search") || undefined,
         dateFrom: dateRange.from ? new Date(dateRange.from).toISOString() : undefined,
         dateTo: dateRange.to ? new Date(dateRange.to).toISOString() : undefined,
         durationMin: exportDurationMin,
         durationMax: exportDurationMax,
+        sentiment: filterSentiment !== "all" ? filterSentiment : undefined,
+        leadTemperature: filterInterest !== "all" ? filterInterest : undefined,
       });
       let toExport = fullCalls;
       // Filter by selection only if not "select all matching"
@@ -399,16 +430,14 @@ function CallLogsPageInner() {
     filterBotId !== "all" ||
     filterGoalOutcome !== "all" ||
     filterDuration !== "all" ||
+    filterSentiment !== "all" ||
+    filterInterest !== "all" ||
     dateRange.from ||
     dateRange.to;
 
   function clearFilters() {
     setSearchQuery("");
-    setFilterStatus("all");
-    setFilterBotId("all");
-    setFilterGoalOutcome("all");
-    setFilterDuration("all");
-    setDateRange({ from: null, to: null });
+    router.replace("/call-logs", { scroll: false });
   }
 
   function toggleSummaryExpand(id: string) {
@@ -509,7 +538,7 @@ function CallLogsPageInner() {
                   </div>
 
                   {/* Status filter */}
-                  <Select value={filterStatus} onValueChange={setFilterStatus}>
+                  <Select value={filterStatus} onValueChange={(v) => updateFilters({ status: v })}>
                     <SelectTrigger className="w-36 h-9">
                       <SelectValue placeholder="All statuses" />
                     </SelectTrigger>
@@ -524,7 +553,7 @@ function CallLogsPageInner() {
                   </Select>
 
                   {/* Bot filter */}
-                  <Select value={filterBotId} onValueChange={setFilterBotId}>
+                  <Select value={filterBotId} onValueChange={(v) => updateFilters({ bot_id: v })}>
                     <SelectTrigger className="w-40 h-9">
                       <SelectValue placeholder="All bots" />
                     </SelectTrigger>
@@ -539,7 +568,7 @@ function CallLogsPageInner() {
                   </Select>
 
                   {/* Goal outcome filter */}
-                  <Select value={filterGoalOutcome} onValueChange={setFilterGoalOutcome}>
+                  <Select value={filterGoalOutcome} onValueChange={(v) => updateFilters({ goal_outcome: v })}>
                     <SelectTrigger className="w-40 h-9">
                       <SelectValue placeholder="All outcomes" />
                     </SelectTrigger>
@@ -556,12 +585,12 @@ function CallLogsPageInner() {
                   {/* Date range */}
                   <DateRangePicker
                     value={dateRange}
-                    onChange={setDateRange}
+                    onChange={(range) => updateFilters({ date_from: range.from, date_to: range.to })}
                     className="h-9"
                   />
 
                   {/* Duration filter */}
-                  <Select value={filterDuration} onValueChange={setFilterDuration}>
+                  <Select value={filterDuration} onValueChange={(v) => updateFilters({ duration: v })}>
                     <SelectTrigger className="w-36 h-9">
                       <SelectValue placeholder="All durations" />
                     </SelectTrigger>
@@ -571,6 +600,33 @@ function CallLogsPageInner() {
                       <SelectItem value="30-120">30s – 2m</SelectItem>
                       <SelectItem value="120-300">2m – 5m</SelectItem>
                       <SelectItem value=">300">&gt; 5m</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {/* Sentiment filter */}
+                  <Select value={filterSentiment} onValueChange={(v) => updateFilters({ sentiment: v })}>
+                    <SelectTrigger className="w-36 h-9">
+                      <SelectValue placeholder="All sentiments" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All sentiments</SelectItem>
+                      <SelectItem value="positive">Positive</SelectItem>
+                      <SelectItem value="neutral">Neutral</SelectItem>
+                      <SelectItem value="negative">Negative</SelectItem>
+                      <SelectItem value="mixed">Mixed</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {/* Interest filter */}
+                  <Select value={filterInterest} onValueChange={(v) => updateFilters({ lead_temperature: v })}>
+                    <SelectTrigger className="w-36 h-9">
+                      <SelectValue placeholder="All interest" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All interest</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="low">Low</SelectItem>
                     </SelectContent>
                   </Select>
 
@@ -706,7 +762,19 @@ function CallLogsPageInner() {
                             "hover:bg-muted/50 border-b transition-colors cursor-pointer",
                             selectedIds.has(call.id) && "bg-violet-500/5"
                           )}
-                          onClick={() => navigateToDetail(call)}
+                          onClick={(e) => {
+                            if (e.metaKey || e.ctrlKey) {
+                              window.open(`/calls/${call.id}`, '_blank');
+                            } else {
+                              router.push(`/calls/${call.id}`);
+                            }
+                          }}
+                          onAuxClick={(e) => {
+                            if (e.button === 1) {
+                              e.preventDefault();
+                              window.open(`/calls/${call.id}`, '_blank');
+                            }
+                          }}
                         >
                           <TableCell onClick={(e) => e.stopPropagation()}>
                             <input
@@ -804,7 +872,11 @@ function CallLogsPageInner() {
                               className="h-7 w-7"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                navigateToDetail(call);
+                                if (e.metaKey || e.ctrlKey) {
+                                  window.open(`/calls/${call.id}`, '_blank');
+                                } else {
+                                  router.push(`/calls/${call.id}`);
+                                }
                               }}
                               title="View full details"
                             >
@@ -830,7 +902,7 @@ function CallLogsPageInner() {
                           size="icon"
                           className="h-8 w-8"
                           disabled={page === 0}
-                          onClick={() => setPage((p) => p - 1)}
+                          onClick={() => updateFilters({ page: String(page - 1) }, false)}
                         >
                           <ChevronLeft className="h-4 w-4" />
                         </Button>
@@ -848,7 +920,7 @@ function CallLogsPageInner() {
                               variant={pn === page + 1 ? "default" : "outline"}
                               size="icon"
                               className="h-8 w-8"
-                              onClick={() => setPage(pn - 1)}
+                              onClick={() => updateFilters({ page: String(pn - 1) }, false)}
                             >
                               {pn}
                             </Button>
@@ -859,7 +931,7 @@ function CallLogsPageInner() {
                           size="icon"
                           className="h-8 w-8"
                           disabled={page >= totalPages - 1}
-                          onClick={() => setPage((p) => p + 1)}
+                          onClick={() => updateFilters({ page: String(page + 1) }, false)}
                         >
                           <ChevronRight className="h-4 w-4" />
                         </Button>

@@ -10,10 +10,6 @@ import {
 } from "@/components/ui/dialog";
 
 const SHORTCUTS = [
-  { keys: ["D"], description: "Go to Dashboard" },
-  { keys: ["B"], description: "Go to Bots" },
-  { keys: ["L"], description: "Go to Call Logs" },
-  { keys: ["A"], description: "Go to Analytics" },
   { keys: ["\u2318", "K"], description: "Open command palette" },
   { keys: ["?"], description: "Show this help" },
 ];

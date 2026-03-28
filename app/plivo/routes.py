@@ -368,7 +368,8 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         return
 
     try:
-        await _update_call_status(call_sid, status="in_progress", started_at=datetime.now(timezone.utc))
+        _pipeline_start = datetime.now(timezone.utc)
+        await _update_call_status(call_sid, status="in_progress", started_at=_pipeline_start)
         logger.info("pipeline_call_started", call_sid=call_sid)
 
         # Run pre-call GHL workflows (tag contacts before call starts)
@@ -468,7 +469,9 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
 
         # If voicemail or hold/IVR detected, short-circuit post-call processing
         if end_reason in ("voicemail", "hold_ivr"):
+            _dur = int((datetime.now(timezone.utc) - _pipeline_start).total_seconds())
             await _update_call_status(call_sid, status="completed", outcome=end_reason,
+                                      call_duration=_dur,
                                       metadata={"end_reason": end_reason, "termination_source": termination_source or end_reason})
             await _post_ghl_outcome(ctx, outcome=end_reason)
             return
@@ -606,8 +609,10 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
                 existing_meta["buying_signals"] = analysis.buying_signals
 
         # Update call log with outcome + metadata
+        _dur = int((datetime.now(timezone.utc) - _pipeline_start).total_seconds())
         await _update_call_status(
-            call_sid, status="completed", outcome="completed", summary=summary, metadata=existing_meta
+            call_sid, status="completed", outcome="completed", summary=summary,
+            call_duration=_dur, metadata=existing_meta
         )
         logger.info("post_call_metadata_saved", call_sid=call_sid, turns=turn_count)
 

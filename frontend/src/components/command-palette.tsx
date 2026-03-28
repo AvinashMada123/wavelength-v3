@@ -24,23 +24,22 @@ import {
   CommandItem,
   CommandList,
   CommandSeparator,
-  CommandShortcut,
 } from "@/components/ui/command";
 
 interface NavItem {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   href: string;
-  shortcut?: string;
+
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard", shortcut: "D" },
-  { label: "Bots", icon: Bot, href: "/bots", shortcut: "B" },
+  { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
+  { label: "Bots", icon: Bot, href: "/bots" },
   { label: "Calls", icon: Phone, href: "/calls" },
   { label: "Call Queue", icon: ListOrdered, href: "/queue" },
-  { label: "Call Logs", icon: ClipboardList, href: "/call-logs", shortcut: "L" },
-  { label: "Analytics", icon: BarChart3, href: "/analytics", shortcut: "A" },
+  { label: "Call Logs", icon: ClipboardList, href: "/call-logs" },
+  { label: "Analytics", icon: BarChart3, href: "/analytics" },
   { label: "Leads", icon: ContactRound, href: "/leads" },
   { label: "Campaigns", icon: Megaphone, href: "/campaigns" },
   { label: "Team", icon: Users, href: "/team" },
@@ -91,9 +90,7 @@ export function CommandPalette() {
             >
               <item.icon className="mr-2 h-4 w-4" />
               <span>{item.label}</span>
-              {item.shortcut && (
-                <CommandShortcut>{item.shortcut}</CommandShortcut>
-              )}
+
             </CommandItem>
           ))}
         </CommandGroup>

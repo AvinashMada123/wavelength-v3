@@ -63,6 +63,8 @@ async def list_calls(
     date_to: str | None = None,
     duration_min: int | None = None,
     duration_max: int | None = None,
+    sentiment: str | None = None,
+    lead_temperature: str | None = None,
     limit: int = 50,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
@@ -108,6 +110,10 @@ async def list_calls(
         base_query = base_query.where(CallLog.call_duration >= duration_min)
     if duration_max is not None:
         base_query = base_query.where(CallLog.call_duration <= duration_max)
+    if sentiment:
+        base_query = base_query.where(CallAnalytics.sentiment == sentiment)
+    if lead_temperature:
+        base_query = base_query.where(CallAnalytics.lead_temperature == lead_temperature)
 
     # Count total matching rows
     count_query = select(func.count()).select_from(base_query.subquery())
@@ -146,6 +152,8 @@ async def export_calls(
     date_to: str | None = None,
     duration_min: int | None = None,
     duration_max: int | None = None,
+    sentiment: str | None = None,
+    lead_temperature: str | None = None,
     limit: int = 5000,
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_current_org),
@@ -159,10 +167,14 @@ async def export_calls(
         .outerjoin(BotConfig, BotConfig.id == CallLog.bot_id)
         .where(CallLog.org_id == org_id)
     )
-    if goal_outcome:
-        query = query.join(CallAnalytics, CallAnalytics.call_log_id == CallLog.id).where(
-            CallAnalytics.goal_outcome == goal_outcome
-        )
+    if goal_outcome or sentiment or lead_temperature:
+        query = query.join(CallAnalytics, CallAnalytics.call_log_id == CallLog.id)
+        if goal_outcome:
+            query = query.where(CallAnalytics.goal_outcome == goal_outcome)
+        if sentiment:
+            query = query.where(CallAnalytics.sentiment == sentiment)
+        if lead_temperature:
+            query = query.where(CallAnalytics.lead_temperature == lead_temperature)
     if bot_id:
         query = query.where(CallLog.bot_id == bot_id)
     if status:

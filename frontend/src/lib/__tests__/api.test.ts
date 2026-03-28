@@ -38,6 +38,7 @@ import {
   fetchBots,
   fetchBot,
   fetchCallLogs,
+  exportCallLogs,
   getRecordingUrl,
 } from "../api";
 
@@ -283,6 +284,67 @@ describe("convenience API wrappers", () => {
     const result = await fetchCallLogs({ limit: 25, offset: 50 });
     expect(mockFetch.mock.calls[0][0]).toBe("/api/calls?limit=25&offset=50");
     expect(result.total).toBe(100);
+  });
+
+  it("fetchCallLogs passes sentiment filter", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ items: [], total: 0 }));
+    await fetchCallLogs({ sentiment: "positive" });
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/calls?sentiment=positive");
+  });
+
+  it("fetchCallLogs passes lead_temperature filter", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ items: [], total: 0 }));
+    await fetchCallLogs({ leadTemperature: "high" });
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/calls?lead_temperature=high");
+  });
+
+  it("fetchCallLogs passes all filters together", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ items: [], total: 0 }));
+    await fetchCallLogs({
+      botId: "b1",
+      status: "completed",
+      sentiment: "negative",
+      leadTemperature: "low",
+    });
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain("bot_id=b1");
+    expect(url).toContain("status=completed");
+    expect(url).toContain("sentiment=negative");
+    expect(url).toContain("lead_temperature=low");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// exportCallLogs
+// ---------------------------------------------------------------------------
+
+describe("exportCallLogs", () => {
+  it("exportCallLogs passes sentiment and lead_temperature", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([]));
+    await exportCallLogs({ sentiment: "positive", leadTemperature: "high" });
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain("sentiment=positive");
+    expect(url).toContain("lead_temperature=high");
+  });
+
+  it("exportCallLogs passes all filters", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([]));
+    await exportCallLogs({
+      botId: "b1",
+      goalOutcome: "completed",
+      status: "completed",
+      search: "test",
+      sentiment: "negative",
+      leadTemperature: "low",
+      durationMin: 30,
+      durationMax: 120,
+    });
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain("/api/calls/export?");
+    expect(url).toContain("bot_id=b1");
+    expect(url).toContain("sentiment=negative");
+    expect(url).toContain("lead_temperature=low");
+    expect(url).toContain("duration_min=30");
   });
 });
 
