@@ -437,7 +437,13 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
                     from zoneinfo import ZoneInfo
                     tz = ZoneInfo(tz_name)
                     local_now = datetime.now(tz)
-                    if not (window_start <= local_now.hour < window_end):
+                    # Handle wrap-around windows (e.g. 20-8 means 8PM to 8AM)
+                    if window_start < window_end:
+                        in_window = window_start <= local_now.hour < window_end
+                    else:
+                        # Wrap-around: e.g. 20-8 → allow 20-23 and 0-7
+                        in_window = local_now.hour >= window_start or local_now.hour < window_end
+                    if not in_window:
                         # Outside calling window — revert to queued, will be picked up later
                         queued_call.status = "queued"
                         await db.commit()
