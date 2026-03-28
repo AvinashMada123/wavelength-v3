@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +16,7 @@ from app.bot_config.loader import BotConfigLoader
 from app.database import get_db
 from app.models.bot_config import BotConfig
 from app.models.schemas import BotConfigListItem, BotConfigResponse, CreateBotConfigRequest, GoalConfig, UpdateBotConfigRequest
+from app.services.n8n_webhook import build_payload, _send_webhook
 from app.models.user import User
 
 # Providers restricted to super_admin only
@@ -226,6 +228,7 @@ async def clone_bot(
         ghl_location_id=original.ghl_location_id,
         ghl_post_call_tag=original.ghl_post_call_tag,
         ghl_workflows=original.ghl_workflows,
+        n8n_automations=original.n8n_automations,
         max_call_duration=original.max_call_duration,
         telephony_provider=original.telephony_provider,
         phone_number_id=original.phone_number_id,
@@ -261,3 +264,76 @@ async def delete_bot(
         await bot_config_loader.publish_invalidation(str(bot_id))
 
     logger.info("bot_config_deleted", bot_id=str(bot_id))
+
+
+class TestN8nWebhookRequest(BaseModel):
+    automation_index: int
+
+
+@router.post("/{bot_id}/test-n8n-webhook")
+async def test_n8n_webhook(
+    bot_id: uuid.UUID,
+    body: TestN8nWebhookRequest,
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_org),
+):
+    """Send a test payload to an n8n webhook to verify connectivity."""
+    result = await db.execute(select(BotConfig).where(BotConfig.id == bot_id, BotConfig.org_id == org_id))
+    bot = result.scalar_one_or_none()
+    if not bot:
+        raise HTTPException(status_code=404, detail="Bot config not found")
+
+    automations = bot.n8n_automations or []
+    if body.automation_index < 0 or body.automation_index >= len(automations):
+        raise HTTPException(status_code=422, detail="Invalid automation index")
+
+    automation = automations[body.automation_index]
+    webhook_url = automation.get("webhook_url")
+    if not webhook_url:
+        raise HTTPException(status_code=422, detail="Automation has no webhook_url configured")
+
+    # Build sample payload with test flag
+    sample_call_data = {
+        "call_sid": "test_" + uuid.uuid4().hex[:12],
+        "call_duration": 65,
+        "outcome": "completed",
+        "recording_url": None,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "ended_at": datetime.now(timezone.utc).isoformat(),
+    }
+    sample_analysis = {
+        "summary": "This is a test webhook from Wavelength. No real call data.",
+        "sentiment": "positive",
+        "sentiment_score": 8,
+        "lead_temperature": "warm",
+        "goal_outcome": "success",
+        "interest_level": "high",
+        "captured_data": {"sample_field": "sample_value"},
+        "red_flags": [],
+        "objections": [],
+        "buying_signals": ["expressed interest"],
+    }
+    sample_contact = {
+        "contact_name": "Test Contact",
+        "contact_phone": "+1234567890",
+        "ghl_contact_id": None,
+    }
+    bot_config_data = {
+        "agent_name": bot.agent_name,
+        "company_name": bot.company_name,
+        "context_variables": bot.context_variables,
+        "goal_config": bot.goal_config,
+        "language": bot.language,
+    }
+
+    payload = build_payload(
+        automation=automation,
+        call_data=sample_call_data,
+        analysis=sample_analysis,
+        contact=sample_contact,
+        bot_config_data=bot_config_data,
+    )
+    payload["test"] = True
+
+    success = await _send_webhook(webhook_url, payload, automation.get("id", "test"), max_retries=0)
+    return {"success": success, "webhook_url": webhook_url}

@@ -86,6 +86,28 @@ class GoalConfig(BaseModel):
         return self
 
 
+# --- n8n Automation schemas ---
+
+
+class N8nCondition(BaseModel):
+    field: str
+    operator: Literal["equals", "not_equals", "in", "not_in", "contains", "exists"]
+    value: Any = None
+
+
+class N8nAutomation(BaseModel):
+    id: str
+    name: str = ""
+    webhook_url: str
+    timing: Literal["pre_call", "post_call"]
+    enabled: bool = True
+    conditions: list[N8nCondition] = Field(default_factory=list)
+    condition_logic: Literal["all", "any"] = "all"
+    payload_sections: list[str] = Field(default_factory=lambda: ["call", "analysis", "contact", "bot_config"])
+    include_transcript: bool = False
+    custom_fields: dict[str, str] = Field(default_factory=dict)
+
+
 # --- Call Analysis schemas (output of post-call analyzer) ---
 
 
@@ -202,6 +224,7 @@ class CreateBotConfigRequest(BaseModel):
     ghl_location_id: str | None = None
     ghl_post_call_tag: str | None = None
     ghl_workflows: list[dict] = Field(default_factory=list)
+    n8n_automations: list[N8nAutomation | dict] = Field(default_factory=list)
     max_call_duration: int = 480
     telephony_provider: str = "plivo"
     plivo_auth_id: str | None = None
@@ -254,6 +277,7 @@ class UpdateBotConfigRequest(BaseModel):
     ghl_location_id: str | None = None
     ghl_post_call_tag: str | None = None
     ghl_workflows: list[dict] | None = None
+    n8n_automations: list[N8nAutomation | dict] | None = None
     max_call_duration: int | None = None
     telephony_provider: str | None = None
     plivo_auth_id: str | None = None
@@ -316,6 +340,7 @@ class BotConfigResponse(BaseModel):
     ghl_location_id: str | None
     ghl_post_call_tag: str | None
     ghl_workflows: list[dict]
+    n8n_automations: list[dict] = Field(default_factory=list)
     max_call_duration: int
     telephony_provider: str
     plivo_caller_id: str | None = None

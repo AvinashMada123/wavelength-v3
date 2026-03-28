@@ -8,6 +8,7 @@ Twilio webhook and WebSocket routes.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 
@@ -24,6 +25,7 @@ from app.ghl.client import GHLClient
 from app.models.call_log import CallLog
 from app.models.schemas import CallContext
 from app.pipeline import session_limiter
+from app.services.n8n_webhook import fire_n8n_automations
 from app.pipeline.runner import generate_call_summary, run_pipeline
 from app.plivo.routes import (
     _compute_agent_word_share,
@@ -146,6 +148,18 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
         # Run pre-call GHL workflows
         await _run_ghl_workflows(ctx, bot_config, "pre_call")
 
+        # Fire n8n pre-call webhooks (fire-and-forget)
+        asyncio.create_task(fire_n8n_automations(
+            timing="pre_call",
+            bot_config=bot_config,
+            call_data={"call_sid": ctx.call_sid, "outcome": "initiated"},
+            contact={
+                "contact_name": ctx.contact_name,
+                "contact_phone": getattr(call_log, "contact_phone", ""),
+                "ghl_contact_id": ctx.ghl_contact_id,
+            },
+        ))
+
         # Run pipeline (provider="twilio" tells factory to use TwilioFrameSerializer)
         pipeline_result = await run_pipeline(websocket, ctx, bot_config, provider="twilio", stream_sid=stream_sid)
         conversation_messages = pipeline_result["messages"]
@@ -244,6 +258,39 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
         await _post_ghl_outcome(ctx, outcome="completed", summary=summary, metadata=call_metadata)
         await _run_ghl_workflows(ctx, bot_config, "post_call")
 
+        # Fire n8n post-call webhooks (fire-and-forget)
+        n8n_analysis = None
+        if analysis:
+            n8n_analysis = {
+                "summary": summary,
+                "sentiment": getattr(analysis, "sentiment", None),
+                "sentiment_score": getattr(analysis, "sentiment_score", None),
+                "lead_temperature": getattr(analysis, "lead_temperature", None),
+                "goal_outcome": getattr(analysis, "goal_outcome", None),
+                "interest_level": getattr(analysis, "interest_level", None),
+                "captured_data": getattr(analysis, "captured_data", None),
+                "red_flags": [rf.model_dump() for rf in analysis.red_flags] if analysis.red_flags else [],
+                "objections": getattr(analysis, "objections", None),
+                "buying_signals": getattr(analysis, "buying_signals", None),
+            }
+        asyncio.create_task(fire_n8n_automations(
+            timing="post_call",
+            bot_config=bot_config,
+            call_data={
+                "call_sid": call_sid,
+                "call_duration": call_metadata.get("call_metrics", {}).get("turn_count"),
+                "outcome": "completed",
+                "recording_url": call_metadata.get("recording_url"),
+            },
+            analysis=n8n_analysis,
+            contact={
+                "contact_name": ctx.contact_name,
+                "contact_phone": getattr(existing_log, "contact_phone", ""),
+                "ghl_contact_id": ctx.ghl_contact_id,
+            },
+            transcript=transcript_entries if transcript_entries else None,
+        ))
+
         # Write to call_analytics table if goal-based analysis was performed
         if analysis and analysis.goal_outcome is not None and goal_cfg:
             try:
@@ -317,6 +364,17 @@ async def twilio_websocket(websocket: WebSocket, call_sid: str):
         logger.error("twilio_pipeline_error", call_sid=call_sid, error=str(e))
         await _update_call_status(call_sid, status="error")
         await _post_ghl_outcome(ctx, outcome="error", error=str(e))
+        # Fire n8n error webhooks (fire-and-forget, no analysis available)
+        asyncio.create_task(fire_n8n_automations(
+            timing="post_call",
+            bot_config=bot_config,
+            call_data={"call_sid": call_sid, "outcome": "error", "error": str(e)[:500]},
+            contact={
+                "contact_name": ctx.contact_name,
+                "contact_phone": "",
+                "ghl_contact_id": ctx.ghl_contact_id,
+            },
+        ))
         # Record pipeline failure in circuit breaker
         try:
             from app.services import circuit_breaker

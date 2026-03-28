@@ -23,6 +23,7 @@ from app.config import settings
 from app.database import get_db, get_db_session
 from app.ghl.client import GHLClient
 from app.pipeline import session_limiter
+from app.services.n8n_webhook import fire_n8n_automations
 from app.models.call_log import CallLog
 from app.models.schemas import CallContext
 from app.models.call_analytics import CallAnalytics
@@ -373,6 +374,18 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         # Run pre-call GHL workflows (tag contacts before call starts)
         await _run_ghl_workflows(ctx, bot_config, "pre_call")
 
+        # Fire n8n pre-call webhooks (fire-and-forget to avoid delaying greeting)
+        asyncio.create_task(fire_n8n_automations(
+            timing="pre_call",
+            bot_config=bot_config,
+            call_data={"call_sid": ctx.call_sid, "outcome": "initiated"},
+            contact={
+                "contact_name": ctx.contact_name,
+                "contact_phone": getattr(call_log, "contact_phone", ""),
+                "ghl_contact_id": ctx.ghl_contact_id,
+            },
+        ))
+
         # Phase 3: Capture Plivo start event and synthesize greeting BEFORE pipeline.
         # These run concurrently: reading first WS message + TTS synthesis overlap.
         plivo_stream_id = ""
@@ -648,6 +661,39 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
                 ctx, outcome="completed", summary=summary, metadata=existing_meta
             )
             await _run_ghl_workflows(ctx, bot_config, "post_call")
+
+            # Fire n8n post-call webhooks (fire-and-forget)
+            n8n_analysis = None
+            if analysis:
+                n8n_analysis = {
+                    "summary": summary,
+                    "sentiment": getattr(analysis, "sentiment", None),
+                    "sentiment_score": getattr(analysis, "sentiment_score", None),
+                    "lead_temperature": getattr(analysis, "lead_temperature", None),
+                    "goal_outcome": getattr(analysis, "goal_outcome", None),
+                    "interest_level": getattr(analysis, "interest_level", None),
+                    "captured_data": getattr(analysis, "captured_data", None),
+                    "red_flags": [rf.model_dump() for rf in analysis.red_flags] if analysis.red_flags else [],
+                    "objections": getattr(analysis, "objections", None),
+                    "buying_signals": getattr(analysis, "buying_signals", None),
+                }
+            asyncio.create_task(fire_n8n_automations(
+                timing="post_call",
+                bot_config=bot_config,
+                call_data={
+                    "call_sid": call_sid,
+                    "call_duration": existing_meta.get("call_metrics", {}).get("turn_count"),
+                    "outcome": "completed",
+                    "recording_url": existing_meta.get("recording_url"),
+                },
+                analysis=n8n_analysis,
+                contact={
+                    "contact_name": ctx.contact_name,
+                    "contact_phone": getattr(existing_log, "contact_phone", ""),
+                    "ghl_contact_id": ctx.ghl_contact_id,
+                },
+                transcript=transcript_entries if transcript_entries else None,
+            ))
         except Exception as e:
             logger.error("post_call_ghl_error", call_sid=call_sid, error=str(e), exc_info=True)
 
@@ -706,6 +752,17 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
         await _update_call_status(call_sid, status="error",
                                   metadata={"termination_source": "pipeline_error"})
         await _post_ghl_outcome(ctx, outcome="error", error=str(e))
+        # Fire n8n error webhooks (fire-and-forget, no analysis available)
+        asyncio.create_task(fire_n8n_automations(
+            timing="post_call",
+            bot_config=bot_config,
+            call_data={"call_sid": call_sid, "outcome": "error", "error": str(e)[:500]},
+            contact={
+                "contact_name": ctx.contact_name,
+                "contact_phone": "",
+                "ghl_contact_id": ctx.ghl_contact_id,
+            },
+        ))
         # Record pipeline failure in circuit breaker
         try:
             from app.services import circuit_breaker

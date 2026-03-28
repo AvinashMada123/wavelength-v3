@@ -53,7 +53,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { useBot, useBots, useCreateBot, useUpdateBot } from "@/hooks/use-bots";
 import { usePhoneNumbers } from "@/hooks/use-settings";
 import { GEMINI_VOICE_GROUPS, SARVAM_VOICE_GROUPS, ELEVENLABS_VOICE_GROUPS, SARVAM_LANGUAGE_OPTIONS, DEEPGRAM_LANGUAGE_OPTIONS, BUILTIN_VARIABLES, TTS_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS, STT_PROVIDER_OPTIONS_CLIENT, LLM_PROVIDER_OPTIONS, LLM_MODEL_OPTIONS } from "@/lib/constants";
-import type { BotConfig, GHLWorkflow, GoalConfig, SuccessCriterion, RedFlagConfig, DataCaptureField, CallbackSchedule, RetryStep } from "@/types/api";
+import type { BotConfig, GHLWorkflow, GoalConfig, SuccessCriterion, RedFlagConfig, DataCaptureField, CallbackSchedule, RetryStep, N8nAutomation, N8nCondition } from "@/types/api";
 import { fetchTemplates, type SequenceTemplate } from "@/lib/sequences-api";
 
 // ---------------------------------------------------------------------------
@@ -121,6 +121,7 @@ interface BotForm {
   ghl_webhook_url: string;
   ghl_post_call_tag: string;
   ghl_workflows: GHLWorkflow[];
+  n8n_automations: N8nAutomation[];
   max_call_duration: number;
   telephony_provider: "plivo" | "twilio";
   phone_number_id: string | null;
@@ -172,6 +173,7 @@ const EMPTY_FORM: BotForm = {
   ghl_webhook_url: "",
   ghl_post_call_tag: "",
   ghl_workflows: [],
+  n8n_automations: [],
   max_call_duration: 480,
   telephony_provider: "plivo",
   phone_number_id: null,
@@ -258,6 +260,7 @@ function botToForm(bot: BotConfig): BotForm {
     ghl_webhook_url: bot.ghl_webhook_url || "",
     ghl_post_call_tag: bot.ghl_post_call_tag || "",
     ghl_workflows: bot.ghl_workflows || [],
+    n8n_automations: bot.n8n_automations || [],
     max_call_duration: bot.max_call_duration ?? 480,
     telephony_provider: bot.telephony_provider || "plivo",
     phone_number_id: bot.phone_number_id || null,
@@ -565,6 +568,83 @@ export default function BotEditorPage() {
     }));
   }
 
+  // ---- n8n automation helpers ----
+
+  function addN8nAutomation() {
+    setForm((prev) => ({
+      ...prev,
+      n8n_automations: [
+        ...prev.n8n_automations,
+        {
+          id: crypto.randomUUID(),
+          name: "",
+          webhook_url: "",
+          timing: "post_call" as const,
+          enabled: true,
+          conditions: [],
+          condition_logic: "all" as const,
+          payload_sections: ["call", "analysis", "contact", "bot_config"],
+          include_transcript: false,
+          custom_fields: {},
+        },
+      ],
+    }));
+  }
+
+  function updateN8nAutomation(id: string, updates: Partial<N8nAutomation>) {
+    setForm((prev) => ({
+      ...prev,
+      n8n_automations: prev.n8n_automations.map((a) =>
+        a.id === id ? { ...a, ...updates } : a,
+      ),
+    }));
+  }
+
+  function removeN8nAutomation(id: string) {
+    setForm((prev) => ({
+      ...prev,
+      n8n_automations: prev.n8n_automations.filter((a) => a.id !== id),
+    }));
+  }
+
+  function addN8nCondition(automationId: string) {
+    setForm((prev) => ({
+      ...prev,
+      n8n_automations: prev.n8n_automations.map((a) =>
+        a.id === automationId
+          ? { ...a, conditions: [...a.conditions, { field: "goal_outcome", operator: "equals" as const, value: "" }] }
+          : a,
+      ),
+    }));
+  }
+
+  function updateN8nCondition(automationId: string, conditionIndex: number, updates: Partial<N8nCondition>) {
+    setForm((prev) => ({
+      ...prev,
+      n8n_automations: prev.n8n_automations.map((a) =>
+        a.id === automationId
+          ? {
+              ...a,
+              conditions: a.conditions.map((c, i) =>
+                i === conditionIndex ? { ...c, ...updates } : c,
+              ),
+            }
+          : a,
+      ),
+    }));
+  }
+
+  function removeN8nCondition(automationId: string, conditionIndex: number) {
+    setForm((prev) => ({
+      ...prev,
+      n8n_automations: prev.n8n_automations.map((a) =>
+        a.id === automationId
+          ? { ...a, conditions: a.conditions.filter((_, i) => i !== conditionIndex) }
+          : a,
+      ),
+    }));
+  }
+
   // ---- Bot switch target helpers ----
 
   function addSwitchTarget() {
@@ -713,7 +793,7 @@ export default function BotEditorPage() {
     try {
       const payload: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(form)) {
-        if (k === "context_variables" || k === "ghl_workflows" || k === "allowed_languages" || k === "bot_switch_targets") {
+        if (k === "context_variables" || k === "ghl_workflows" || k === "n8n_automations" || k === "allowed_languages" || k === "bot_switch_targets") {
           payload[k] = v;
         } else if (
           typeof v === "string" &&
@@ -1620,6 +1700,195 @@ export default function BotEditorPage() {
                                 </p>
                               </div>
                             )}
+                          </div>
+                        ))}
+                      </CardContent>
+                    </Card>
+
+                    {/* n8n Webhook Automations */}
+                    <Card>
+                      <CardContent className="pt-6 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h3 className="text-sm font-semibold">n8n Webhook Automations</h3>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              Trigger n8n workflows via webhooks at different call stages
+                            </p>
+                          </div>
+                          <Button type="button" variant="outline" size="sm" onClick={addN8nAutomation}>
+                            <Plus className="mr-1 h-3.5 w-3.5" /> Add Automation
+                          </Button>
+                        </div>
+
+                        {form.n8n_automations.length === 0 && (
+                          <div className="rounded-lg border border-dashed p-8 text-center">
+                            <Webhook className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
+                            <p className="text-sm text-muted-foreground">
+                              No n8n automations configured.
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+                              Add one to trigger webhooks on call events.
+                            </p>
+                          </div>
+                        )}
+
+                        {form.n8n_automations.map((automation) => (
+                          <div key={automation.id} className="rounded-lg border p-4 space-y-3">
+                            <div className="flex items-start gap-3">
+                              <div className="flex-1 space-y-3">
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <Label className="text-xs">Name</Label>
+                                    <Input
+                                      placeholder="Automation name"
+                                      value={automation.name}
+                                      onChange={(e) => updateN8nAutomation(automation.id, { name: e.target.value })}
+                                      className="h-8 text-sm"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs">Webhook URL</Label>
+                                    <Input
+                                      placeholder="https://n8n.example.com/webhook/..."
+                                      value={automation.webhook_url}
+                                      onChange={(e) => updateN8nAutomation(automation.id, { webhook_url: e.target.value })}
+                                      className="h-8 text-sm font-mono"
+                                    />
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-4">
+                                  <div className="flex items-center gap-2">
+                                    <Switch
+                                      checked={automation.enabled}
+                                      onCheckedChange={(checked) => updateN8nAutomation(automation.id, { enabled: checked })}
+                                    />
+                                    <span className="text-xs text-muted-foreground w-6">
+                                      {automation.enabled ? "On" : "Off"}
+                                    </span>
+                                  </div>
+                                  <div className="flex gap-1">
+                                    {(["pre_call", "post_call"] as const).map((t) => (
+                                      <Button
+                                        key={t}
+                                        type="button"
+                                        size="sm"
+                                        variant={automation.timing === t ? "default" : "outline"}
+                                        onClick={() => updateN8nAutomation(automation.id, { timing: t })}
+                                        className="h-7 text-xs px-3"
+                                      >
+                                        {t === "pre_call" ? "Pre-Call" : "Post-Call"}
+                                      </Button>
+                                    ))}
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 shrink-0 ml-auto text-destructive"
+                                    onClick={() => removeN8nAutomation(automation.id)}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+
+                                {/* Payload sections */}
+                                <div>
+                                  <Label className="text-xs">Payload Sections</Label>
+                                  <div className="flex flex-wrap gap-2 mt-1">
+                                    {["call", "analysis", "contact", "bot_config"].map((section) => (
+                                      <label key={section} className="flex items-center gap-1 text-xs">
+                                        <input
+                                          type="checkbox"
+                                          checked={automation.payload_sections.includes(section)}
+                                          onChange={(e) => {
+                                            const sections = e.target.checked
+                                              ? [...automation.payload_sections, section]
+                                              : automation.payload_sections.filter((s) => s !== section);
+                                            updateN8nAutomation(automation.id, { payload_sections: sections });
+                                          }}
+                                        />
+                                        {section === "bot_config" ? "Bot Config" : section.charAt(0).toUpperCase() + section.slice(1)}
+                                      </label>
+                                    ))}
+                                    <label className="flex items-center gap-1 text-xs">
+                                      <input
+                                        type="checkbox"
+                                        checked={automation.include_transcript}
+                                        onChange={(e) => updateN8nAutomation(automation.id, { include_transcript: e.target.checked })}
+                                      />
+                                      Include Transcript
+                                    </label>
+                                  </div>
+                                </div>
+
+                                {/* Conditions (only for post_call) */}
+                                {automation.timing === "post_call" && (
+                                  <div className="space-y-2">
+                                    <div className="flex items-center gap-2">
+                                      <Label className="text-xs">Conditions</Label>
+                                      <select
+                                        className="text-xs border rounded px-1 py-0.5"
+                                        value={automation.condition_logic}
+                                        onChange={(e) => updateN8nAutomation(automation.id, { condition_logic: e.target.value as "all" | "any" })}
+                                      >
+                                        <option value="all">Match ALL</option>
+                                        <option value="any">Match ANY</option>
+                                      </select>
+                                      <Button type="button" variant="outline" size="sm" className="text-xs ml-auto" onClick={() => addN8nCondition(automation.id)}>
+                                        + Condition
+                                      </Button>
+                                    </div>
+                                    {automation.conditions.length === 0 && (
+                                      <p className="text-xs text-muted-foreground">No conditions — webhook fires on every post-call.</p>
+                                    )}
+                                    {automation.conditions.map((cond, idx) => (
+                                      <div key={idx} className="flex items-center gap-2">
+                                        <select
+                                          className="text-xs border rounded px-2 py-1 flex-1"
+                                          value={cond.field}
+                                          onChange={(e) => updateN8nCondition(automation.id, idx, { field: e.target.value })}
+                                        >
+                                          <option value="goal_outcome">Goal Outcome</option>
+                                          <option value="sentiment">Sentiment</option>
+                                          <option value="lead_temperature">Lead Temperature</option>
+                                          <option value="interest_level">Interest Level</option>
+                                          <option value="outcome">Call Outcome</option>
+                                        </select>
+                                        <select
+                                          className="text-xs border rounded px-2 py-1"
+                                          value={cond.operator}
+                                          onChange={(e) => updateN8nCondition(automation.id, idx, { operator: e.target.value as N8nCondition["operator"] })}
+                                        >
+                                          <option value="equals">equals</option>
+                                          <option value="not_equals">not equals</option>
+                                          <option value="in">in</option>
+                                          <option value="not_in">not in</option>
+                                          <option value="contains">contains</option>
+                                          <option value="exists">exists</option>
+                                        </select>
+                                        {cond.operator !== "exists" && (
+                                          <Input
+                                            className="text-xs flex-1 h-8"
+                                            placeholder="Value"
+                                            value={typeof cond.value === "string" ? cond.value : Array.isArray(cond.value) ? cond.value.join(", ") : ""}
+                                            onChange={(e) => {
+                                              const val = cond.operator === "in" || cond.operator === "not_in"
+                                                ? e.target.value.split(",").map((s) => s.trim())
+                                                : e.target.value;
+                                              updateN8nCondition(automation.id, idx, { value: val });
+                                            }}
+                                          />
+                                        )}
+                                        <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => removeN8nCondition(automation.id, idx)}>
+                                          <Trash2 className="h-3 w-3" />
+                                        </Button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         ))}
                       </CardContent>

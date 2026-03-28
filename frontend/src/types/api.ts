@@ -7,6 +7,25 @@ export interface GHLWorkflow {
   trigger_description?: string;
 }
 
+export interface N8nCondition {
+  field: string;
+  operator: "equals" | "not_equals" | "in" | "not_in" | "contains" | "exists";
+  value: string | string[] | null;
+}
+
+export interface N8nAutomation {
+  id: string;
+  name: string;
+  webhook_url: string;
+  timing: "pre_call" | "post_call";
+  enabled: boolean;
+  conditions: N8nCondition[];
+  condition_logic: "all" | "any";
+  payload_sections: string[];
+  include_transcript: boolean;
+  custom_fields: Record<string, string>;
+}
+
 export interface RetryStep {
   delay_hours?: number;
   delay_type?: "next_day";
@@ -45,6 +64,7 @@ export interface BotConfig {
   ghl_location_id: string | null;
   ghl_post_call_tag: string | null;
   ghl_workflows: GHLWorkflow[];
+  n8n_automations: N8nAutomation[];
   max_call_duration: number;
   telephony_provider: "plivo" | "twilio";
   phone_number_id: string | null;
@@ -95,6 +115,7 @@ export interface CreateBotConfigRequest {
   ghl_location_id?: string | null;
   ghl_post_call_tag?: string | null;
   ghl_workflows?: GHLWorkflow[];
+  n8n_automations?: N8nAutomation[];
   max_call_duration?: number;
   telephony_provider?: "plivo" | "twilio";
   plivo_auth_id?: string;
@@ -134,6 +155,7 @@ export interface UpdateBotConfigRequest {
   ghl_location_id?: string | null;
   ghl_post_call_tag?: string | null;
   ghl_workflows?: GHLWorkflow[] | null;
+  n8n_automations?: N8nAutomation[] | null;
   max_call_duration?: number | null;
   telephony_provider?: "plivo" | "twilio" | null;
   plivo_auth_id?: string | null;

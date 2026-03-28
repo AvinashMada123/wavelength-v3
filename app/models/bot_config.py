@@ -36,6 +36,7 @@ class BotConfig(Base):
     ghl_location_id: Mapped[str | None] = mapped_column(Text)
     ghl_post_call_tag: Mapped[str | None] = mapped_column(Text)
     ghl_workflows: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    n8n_automations: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     max_call_duration: Mapped[int] = mapped_column(Integer, nullable=False, server_default="480")
     telephony_provider: Mapped[str] = mapped_column(Text, nullable=False, server_default="plivo")
     plivo_auth_id: Mapped[str | None] = mapped_column(Text)
