@@ -374,11 +374,5 @@ async def get_recording(
         content_type = "audio/mpeg" if recording_url.endswith(".mp3") else "audio/wav"
         return _range_response(resp.content, content_type, range_header)
 
-    # Plivo / other URLs — proxy to support Range requests (external redirects
-    # can fail due to CORS or expired signed URLs on subsequent Range fetches)
-    async with httpx.AsyncClient(follow_redirects=True) as client:
-        resp = await client.get(recording_url)
-        resp.raise_for_status()
-
-    content_type = resp.headers.get("content-type", "audio/wav")
-    return _range_response(resp.content, content_type, range_header)
+    # Plivo / other URLs — redirect to the hosted recording
+    return RedirectResponse(url=recording_url)
