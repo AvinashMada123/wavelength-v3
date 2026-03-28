@@ -1660,7 +1660,7 @@ async def build_pipeline(
                 endpointing=100,
                 punctuate=True,
                 smart_format=True,
-                keywords=unique_kw if unique_kw else None,
+                keyterm=[kw.split(":")[0] for kw in unique_kw] if unique_kw else None,
             ),
         )
         logger.info(
