@@ -1992,7 +1992,7 @@ async def build_pipeline(
     # pipeline start. Prevents echo from the greeting triggering a false
     # interruption that kills the greeting mid-sentence.
     greeting_guard = GreetingGuard(
-        guard_duration=2.0,
+        guard_duration=0.5,
         call_sid=call_context.call_sid,
     )
 
