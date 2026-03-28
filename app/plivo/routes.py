@@ -788,15 +788,28 @@ async def plivo_event(call_sid: str, request: Request):
 
     mapped_status = _map_plivo_status(call_status)
     duration_val = int(duration) if duration else None
-    await _update_call_status(
-        call_sid,
-        status=mapped_status,
-        call_duration=duration_val,
-        ended_at=datetime.now(timezone.utc),
-    )
 
+    # Don't overwrite status if pipeline already set it to a terminal state.
+    # The pipeline sets "completed"/"error" with full metadata; Plivo's hangup
+    # callback fires independently and would clobber that with "picked_up".
     async with get_db_session() as db:
         call_log = await _get_call_log(db, call_sid)
+
+    existing_status = call_log.status if call_log else None
+    if existing_status in ("completed", "error"):
+        # Pipeline already finalized — only update duration and ended_at
+        await _update_call_status(
+            call_sid,
+            call_duration=duration_val,
+            ended_at=datetime.now(timezone.utc),
+        )
+    else:
+        await _update_call_status(
+            call_sid,
+            status=mapped_status,
+            call_duration=duration_val,
+            ended_at=datetime.now(timezone.utc),
+        )
         if call_log and duration_val:
             updated_meta = dict(call_log.metadata_ or {})
             updated_meta.setdefault("call_metrics", {})["total_duration_s"] = duration_val
