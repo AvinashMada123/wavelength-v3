@@ -158,6 +158,32 @@ async def _synthesize_greeting(
         return None
 
 
+def _mix_ambient_into_greeting(pcm_bytes: bytes, preset_name: str, volume: float) -> bytes:
+    """Mix ambient noise into greeting PCM bytes. Returns original on error."""
+    try:
+        import numpy as np
+
+        from app.audio.ambient import get_preset
+
+        buf = get_preset(preset_name)
+        if buf is None or len(pcm_bytes) < 2:
+            return pcm_bytes
+
+        volume = min(max(volume, 0.0), 0.3)
+        speech = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32)
+        n_samples = len(speech)
+
+        # Tile noise buffer to match greeting length
+        repeats = (n_samples // len(buf)) + 1
+        noise = np.tile(buf.astype(np.float32), repeats)[:n_samples]
+
+        mixed = speech + noise * volume
+        return np.clip(mixed, -32768, 32767).astype(np.int16).tobytes()
+    except Exception:
+        logger.exception("ambient_greeting_mix_failed")
+        return pcm_bytes
+
+
 async def _send_greeting_to_plivo(
     websocket: WebSocket,
     pcm_bytes: bytes,
@@ -228,6 +254,14 @@ async def run_pipeline(
     # Phase 3: Send pre-synthesized greeting directly to Plivo if available
     greeting_sent_directly = False
     if settings.GREETING_DIRECT_PLAY and greeting_audio is not None:
+        # Mix ambient noise into greeting so it matches pipeline TTS output
+        if settings.AMBIENT_SOUND_ENABLED:
+            ambient_preset = getattr(bot_config, "ambient_sound", None)
+            if ambient_preset:
+                ambient_vol = getattr(bot_config, "ambient_sound_volume", None) or 0.08
+                greeting_audio = _mix_ambient_into_greeting(
+                    greeting_audio, ambient_preset, ambient_vol
+                )
         greeting_sent_directly = await _send_greeting_to_plivo(
             websocket, greeting_audio, ctx.call_sid
         )

@@ -70,3 +70,18 @@ cd frontend && npm run build && pm2 restart wavelength-frontend
 - Cloud Run secrets: managed via GCP Secret Manager (see cloudbuild.yaml `--set-secrets`)
 - NEVER commit `.env` files or credentials to git
 - Credentials directory mounted read-only: `./credentials:/credentials:ro`
+
+## Ambient Sound Rollback
+
+If ambient sound causes issues in production:
+
+1. **Instant disable** (no deploy needed):
+   Set `AMBIENT_SOUND_ENABLED=false` in `.env`, restart service
+2. **Per-bot disable**:
+   `UPDATE bot_configs SET ambient_sound = NULL WHERE id = '<bot_id>';`
+3. **Full rollback order** (CRITICAL — follow this exact order):
+   a. Set `AMBIENT_SOUND_ENABLED=false` in `.env`
+   b. Deploy previous code version
+   c. Run: `alembic downgrade 036`
+   d. Restart service
+   - **NEVER** rollback migration without code rollback (causes total outage — code tries to read dropped columns)

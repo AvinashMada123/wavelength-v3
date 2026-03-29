@@ -23,9 +23,15 @@ app/                              — FastAPI backend
     health.py                     — Health check endpoints
     leads.py                      — Lead management endpoints
 
+  audio/                           — Audio assets and loaders
+    ambient.py                    — Singleton WAV loader for ambient presets
+    presets/                      — WAV files (16kHz mono 16-bit PCM)
+      static.wav                  — Phone line static noise (60s loop)
+      office_hum.wav              — HVAC hum + room tone (60s loop)
   pipeline/                       — Pipecat call pipeline orchestration
     factory.py                    — Per-call pipeline construction
     runner.py                     — Pipeline execution and greeting playback
+    ambient_mixer.py              — Ambient background noise mixer (Phase 5)
     call_guard.py                 — Call validation and filtering
     session_limiter.py            — Concurrent call limits
     silence_watchdog.py           — Silence detection and handling

@@ -2104,6 +2104,22 @@ async def build_pipeline(
     if tts_provider == "sarvam":
         tts_processors.append(TTSTailTrim(call_sid=call_context.call_sid))
 
+    # --- Ambient sound mixer (Phase 5) ---
+    ambient_processors: list = []
+    if settings.AMBIENT_SOUND_ENABLED:
+        ambient_preset = getattr(bot_config, "ambient_sound", None)
+        if ambient_preset:
+            from app.pipeline.ambient_mixer import AmbientSoundMixer
+
+            ambient_volume = getattr(bot_config, "ambient_sound_volume", None) or 0.08
+            ambient_processors = [
+                AmbientSoundMixer(
+                    preset=ambient_preset,
+                    volume=ambient_volume,
+                    call_sid=call_context.call_sid,
+                )
+            ]
+
     # EchoGate DISABLED: mutes ALL audio during bot speech, which prevents
     # user interruptions entirely. Echo phantom words are handled instead by
     # MinWordsInterruptionStrategy (ignores 1-word echo transcripts) and
@@ -2138,6 +2154,7 @@ async def build_pipeline(
             context_aggregator.user(),
             llm,
             *tts_processors,
+            *ambient_processors,
             tracker_post_tts,
             transport.output(),
             context_aggregator.assistant(),

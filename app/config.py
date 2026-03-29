@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     ADAPTIVE_PHRASE_CHARS: bool = True
     # Phase 4: Comfort noise during inter-sentence silence gaps
     COMFORT_NOISE_ENABLED: bool = False
+    # Phase 5: Ambient background noise mixed into TTS output
+    AMBIENT_SOUND_ENABLED: bool = False
+    AMBIENT_PRESETS_DIR: str = ""  # Override path; empty = app/audio/presets/
 
     # --- Turn-taking feature flags ---
     HELLO_GUARD_ENABLED: bool = True
