@@ -21,7 +21,7 @@ EXPECTED_SAMPLE_WIDTH = 2  # 16-bit PCM
 # SHA-256 checksums of known-good WAV files (prevents silent corruption)
 CHECKSUMS: dict[str, str] = {
     "static": "b612c336ca3cf99904e04cbba60ffe8162754f696958dcfcdf697ce710bee424",
-    "office_hum": "21b525c9c3e1b8804044499e02bc973279a0b0bfe5778a5908e57a5db6d9db1f",
+    "office_hum": "a307cac3d95428680768b5b74328f114aba1ed98d02bc9729b5941b9f5d0e949",
 }
 
 # Module-level singleton: preset_name -> numpy int16 array
