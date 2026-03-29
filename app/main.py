@@ -72,10 +72,10 @@ async def lifespan(app: FastAPI):
     twilio_routes.set_dependencies(loader=bot_config_loader, ghl=ghl_client)
 
     # Load ambient sound presets (singleton buffers shared across calls)
-    if settings.AMBIENT_SOUND_ENABLED:
+    if _settings.AMBIENT_SOUND_ENABLED:
         from app.audio.ambient import load_presets
 
-        load_presets(settings.AMBIENT_PRESETS_DIR or None)
+        load_presets(_settings.AMBIENT_PRESETS_DIR or None)
 
     # Start background queue processor
     queue_processor.start(bot_config_loader)
