@@ -61,8 +61,9 @@ class AmbientSoundMixer(FrameProcessor):
 
     async def process_frame(self, frame, direction: FrameDirection):
         """Process a pipeline frame. Mix noise into TTS audio; pass all else through."""
-        # StartFrame: required by Pipecat lifecycle
+        # StartFrame: must call super() for Pipecat lifecycle initialization
         if isinstance(frame, StartFrame):
+            await super().process_frame(frame, direction)
             await self.push_frame(frame, direction)
             return
 
