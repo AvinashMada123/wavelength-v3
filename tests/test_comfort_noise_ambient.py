@@ -231,8 +231,8 @@ class TestComfortNoiseAmbient:
         # Set last audio 10 seconds ago
         serializer._last_audio_sent_ts = time.monotonic() - 10.0
         gap = time.monotonic() - serializer._last_audio_sent_ts
-        # Ambient mode: inject when gap > 0.05
-        should_inject = gap > 0.05
+        # Ambient mode: inject when gap > injector._gap_threshold_s
+        should_inject = gap > injector._gap_threshold_s
         assert should_inject is True
         assert injector._ambient_mode is True
 
@@ -319,8 +319,8 @@ class TestComfortNoiseAmbient:
             last_audio_ts=now,
         )
         gap = time.monotonic() - serializer._last_audio_sent_ts
-        # Ambient: inject only when gap > 0.05 — near-zero gap means no injection
-        should_inject = gap > 0.05
+        # Ambient: inject only when gap > injector._gap_threshold_s — near-zero gap means no injection
+        should_inject = gap > injector._gap_threshold_s
         assert should_inject is False
 
     def test_ambient_silence_volume_compensation(self):
@@ -337,7 +337,7 @@ class TestComfortNoiseAmbient:
         injector, serializer, _ = _make_injector(ambient_preset="static")
         serializer._last_audio_sent_ts = time.monotonic() - 60.0
         gap = time.monotonic() - serializer._last_audio_sent_ts
-        should_inject = gap > 0.05
+        should_inject = gap > injector._gap_threshold_s
         assert should_inject is True
         assert injector._ambient_mode is True
 

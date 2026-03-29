@@ -359,8 +359,10 @@ class ComfortNoiseInjector:
 
                 # Determine if we should inject
                 if self._ambient_mode:
-                    # Ambient: inject during ALL silence (50ms tight handoff)
-                    should_inject = gap > 0.05
+                    # Ambient: inject during ALL silence (no upper bound).
+                    # Use 200ms threshold (not 50ms) to avoid triggering during
+                    # TTS inter-batch gaps (Gemini sends in 50-80ms bursts).
+                    should_inject = gap > self._gap_threshold_s
                 else:
                     # Legacy: only inter-sentence gaps (with upper bound)
                     should_inject = (
