@@ -1282,6 +1282,7 @@ async def build_pipeline(
     stream_sid: str = "",
     plivo_stream_id: str = "",
     greeting_text: str = "",
+    ambient_cursor=None,
 ) -> tuple[PipelineTask, FastAPIWebsocketTransport, OpenAILLMContext, CallGuard]:
     """
     Construct an isolated Pipecat pipeline for a single call.
@@ -2117,6 +2118,7 @@ async def build_pipeline(
                     preset=ambient_preset,
                     volume=ambient_volume,
                     call_sid=call_context.call_sid,
+                    loop_cursor=ambient_cursor,
                 )
             ]
 

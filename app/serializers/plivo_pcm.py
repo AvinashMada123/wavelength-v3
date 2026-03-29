@@ -211,19 +211,30 @@ class PlivoPCMFrameSerializer(FrameSerializer):
 
 
 class ComfortNoiseInjector:
-    """Inject low-level pink noise during inter-sentence silence gaps.
+    """Inject audio during silence gaps — pink noise (legacy) or ambient preset.
 
     Runs as a background asyncio task. Monitors the serializer's
-    _last_audio_sent_ts and sends comfort noise directly to the WebSocket
-    when a gap > gap_threshold_ms is detected.
+    _last_audio_sent_ts and sends audio directly to the WebSocket
+    when a silence gap is detected.
 
     Crucially, this bypasses the Pipecat pipeline entirely — frames go
     straight to the WebSocket. This avoids resetting BOT_VAD_STOP_SECS
     timer in BaseOutputTransport._handle_bot_speech(), so
     BotStoppedSpeakingFrame fires normally and the echo gate opens on schedule.
 
-    Comfort noise is ~-55 dBFS pink noise (amplitude ~36 for int16).
+    Two modes:
+    - Legacy (comfort noise): Pink noise ~-55 dBFS during inter-sentence gaps only
+    - Ambient: Looping WAV preset during ALL silence periods (continuous noise)
+
+    SAFETY: Both pipeline serializer and this injector send to the same
+    WebSocket. Safe because both run on the same asyncio event loop (no
+    concurrent send_text calls). If ever moved to threads, add a lock.
     """
+
+    # Hard cap matching AmbientSoundMixer.MAX_VOLUME
+    _MAX_VOLUME = 0.3
+    # Masking compensation: noise sounds louder during silence (no speech to mask it)
+    _SILENCE_VOLUME_RATIO = 0.65
 
     def __init__(
         self,
@@ -232,6 +243,9 @@ class ComfortNoiseInjector:
         bot_vad_stop_secs: float = 1.5,
         gap_threshold_ms: float = 200.0,
         enabled: bool = False,
+        ambient_preset: str | None = None,
+        ambient_volume: float = 0.08,
+        loop_cursor=None,
     ):
         self._ws = websocket
         self._serializer = serializer
@@ -240,7 +254,38 @@ class ComfortNoiseInjector:
         self._enabled = enabled
         self._task: asyncio.Task | None = None
         self._total_noise_ms: float = 0.0
-        # Pre-generate one frame of pink noise (~-55 dBFS)
+
+        # --- Ambient mode ---
+        self._ambient_mode = False
+        self._ambient_buffer = None
+        self._ambient_volume = 0.0
+
+        if ambient_preset:
+            from app.audio.ambient import AmbientLoopCursor, get_preset
+
+            buf = get_preset(ambient_preset)
+            if buf is not None:
+                self._ambient_mode = True
+                self._ambient_buffer = buf
+                # Volume with masking compensation (silence sounds louder)
+                self._ambient_volume = min(
+                    ambient_volume * self._SILENCE_VOLUME_RATIO, self._MAX_VOLUME
+                )
+                self._enabled = True  # Auto-enable when ambient is configured
+                self._cursor = loop_cursor or AmbientLoopCursor()
+                logger.info(
+                    "comfort_noise_ambient_mode",
+                    preset=ambient_preset,
+                    volume=round(self._ambient_volume, 4),
+                )
+            else:
+                logger.warning(
+                    "comfort_noise_ambient_fallback",
+                    preset=ambient_preset,
+                    reason="preset_not_loaded",
+                )
+
+        # Pre-generate one frame of pink noise for legacy mode (~-55 dBFS)
         self._noise_frame = self._generate_noise_frame()
 
     @staticmethod
@@ -262,6 +307,29 @@ class ComfortNoiseInjector:
             pink = (b0 + b1 + b2 + white * 0.1848) * 0.11
             samples.append(int(max(-32768, min(32767, pink * amplitude))))
         return struct.pack(f"<{n_samples}h", *samples)
+
+    def _get_ambient_frame(self) -> bytes:
+        """Extract one 20ms frame from the looping ambient buffer, scaled by volume."""
+        import numpy as np
+
+        n_samples = PLIVO_FRAME_BYTES // 2  # 320
+        buf = self._ambient_buffer
+        buf_len = len(buf)
+        result = np.empty(n_samples, dtype=np.float32)
+
+        written = 0
+        while written < n_samples:
+            remaining = n_samples - written
+            available = buf_len - self._cursor.pos
+            chunk = min(remaining, available)
+            result[written : written + chunk] = buf[
+                self._cursor.pos : self._cursor.pos + chunk
+            ].astype(np.float32)
+            self._cursor.pos = (self._cursor.pos + chunk) % buf_len
+            written += chunk
+
+        scaled = np.clip(result * self._ambient_volume, -32768, 32767).astype(np.int16)
+        return scaled.tobytes()
 
     def start(self):
         """Start the background comfort noise task."""
@@ -289,11 +357,23 @@ class ComfortNoiseInjector:
                 now = time.monotonic()
                 gap = now - last_sent
 
-                # Only inject during inter-sentence gaps:
-                # gap > threshold AND gap < BOT_VAD_STOP_SECS
-                # (after BOT_VAD_STOP_SECS, bot speech is truly over — no noise needed)
-                if gap > self._gap_threshold_s and gap < self._bot_vad_stop_s:
-                    payload = base64.b64encode(self._noise_frame).decode("utf-8")
+                # Determine if we should inject
+                if self._ambient_mode:
+                    # Ambient: inject during ALL silence (50ms tight handoff)
+                    should_inject = gap > 0.05
+                else:
+                    # Legacy: only inter-sentence gaps (with upper bound)
+                    should_inject = (
+                        gap > self._gap_threshold_s and gap < self._bot_vad_stop_s
+                    )
+
+                if should_inject:
+                    frame_bytes = (
+                        self._get_ambient_frame()
+                        if self._ambient_mode
+                        else self._noise_frame
+                    )
+                    payload = base64.b64encode(frame_bytes).decode("utf-8")
                     msg = json.dumps({
                         "event": "playAudio",
                         "media": {

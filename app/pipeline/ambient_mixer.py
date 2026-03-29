@@ -1,10 +1,11 @@
 """AmbientSoundMixer — mixes looping background noise into TTS audio frames.
 
 Phase 0: Speech-only mixing. Only processes TTSAudioRawFrame.
-Silence gaps between utterances get no noise injection.
+Combined with ComfortNoiseInjector's ambient mode for continuous noise.
 
 The mixer reads from a shared read-only numpy buffer (loaded at app startup)
-and maintains a per-instance loop position so concurrent calls don't interfere.
+and uses a shared AmbientLoopCursor so the ComfortNoiseInjector can continue
+from the same position during silence periods — no audible jump.
 """
 
 import numpy as np
@@ -12,7 +13,7 @@ import structlog
 from pipecat.frames.frames import EndFrame, StartFrame, TTSAudioRawFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
-from app.audio.ambient import get_preset
+from app.audio.ambient import AmbientLoopCursor, get_preset
 
 logger = structlog.get_logger(__name__)
 
@@ -23,8 +24,8 @@ MAX_VOLUME = 0.3
 class AmbientSoundMixer(FrameProcessor):
     """Mix looping ambient noise into TTS audio frames.
 
-    Each call instance gets its own loop position cursor into the shared
-    preset buffer. The buffer is read-only; no mutation occurs.
+    Each call instance uses a shared AmbientLoopCursor so the
+    ComfortNoiseInjector can continue seamlessly during silence.
     """
 
     def __init__(
@@ -32,6 +33,7 @@ class AmbientSoundMixer(FrameProcessor):
         preset: str,
         volume: float = 0.08,
         call_sid: str = "",
+        loop_cursor: AmbientLoopCursor | None = None,
         **kwargs,
     ):
         super().__init__(name="AmbientSoundMixer", **kwargs)
@@ -39,7 +41,7 @@ class AmbientSoundMixer(FrameProcessor):
         self._volume = min(max(volume, 0.0), MAX_VOLUME)
         self._preset_name = preset
         self._buffer: np.ndarray | None = get_preset(preset)
-        self._loop_pos: int = 0
+        self._cursor = loop_cursor or AmbientLoopCursor()
         self._frames_mixed: int = 0
         self._active = self._buffer is not None
 
@@ -116,12 +118,12 @@ class AmbientSoundMixer(FrameProcessor):
         written = 0
         while written < n_samples:
             remaining = n_samples - written
-            available = buf_len - self._loop_pos
+            available = buf_len - self._cursor.pos
             chunk = min(remaining, available)
             result[written : written + chunk] = buf[
-                self._loop_pos : self._loop_pos + chunk
+                self._cursor.pos : self._cursor.pos + chunk
             ].astype(np.float32)
-            self._loop_pos = (self._loop_pos + chunk) % buf_len
+            self._cursor.pos = (self._cursor.pos + chunk) % buf_len
             written += chunk
 
         return result

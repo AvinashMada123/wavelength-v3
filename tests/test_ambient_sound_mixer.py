@@ -340,14 +340,14 @@ class TestFrameProcessing:
     async def test_multiple_frames_advance_loop_pos(self):
         """Processing multiple frames advances the loop position."""
         mixer = _make_mixer(noise_samples=1600)
-        assert mixer._loop_pos == 0
+        assert mixer._cursor.pos == 0
         frame1 = _FakeTTSAudioRawFrame(audio=_pcm_bytes(160), sample_rate=16000, num_channels=1)
         await mixer.process_frame(frame1, DOWNSTREAM)
-        assert mixer._loop_pos == 160
+        assert mixer._cursor.pos == 160
 
         frame2 = _FakeTTSAudioRawFrame(audio=_pcm_bytes(160), sample_rate=16000, num_channels=1)
         await mixer.process_frame(frame2, DOWNSTREAM)
-        assert mixer._loop_pos == 320
+        assert mixer._cursor.pos == 320
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +390,7 @@ class TestMixingCorrectness:
         pcm = _pcm_bytes(250, amplitude=3000)
         mixed = mixer._mix(pcm)
         assert len(mixed) == 500  # 250 samples * 2 bytes
-        assert mixer._loop_pos == 250 % 100  # 50
+        assert mixer._cursor.pos == 250 % 100  # 50
 
     def test_concurrent_instances_independent(self):
         """Two mixer instances have independent loop positions."""
@@ -398,12 +398,12 @@ class TestMixingCorrectness:
         mixer_b = _make_mixer(call_sid="call-b", noise_samples=1600)
 
         mixer_a._mix(_pcm_bytes(160))
-        assert mixer_a._loop_pos == 160
-        assert mixer_b._loop_pos == 0
+        assert mixer_a._cursor.pos == 160
+        assert mixer_b._cursor.pos == 0
 
         mixer_b._mix(_pcm_bytes(80))
-        assert mixer_b._loop_pos == 80
-        assert mixer_a._loop_pos == 160
+        assert mixer_b._cursor.pos == 80
+        assert mixer_a._cursor.pos == 160
 
 
 # ---------------------------------------------------------------------------

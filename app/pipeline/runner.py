@@ -273,6 +273,18 @@ async def run_pipeline(
             except Exception:
                 pass
 
+    # Prepare shared ambient cursor for mixer + injector synchronization
+    ambient_preset = None
+    ambient_vol = 0.08
+    ambient_cursor = None
+    if settings.AMBIENT_SOUND_ENABLED:
+        ambient_preset = getattr(bot_config, "ambient_sound", None)
+        if ambient_preset:
+            ambient_vol = getattr(bot_config, "ambient_sound_volume", None) or 0.08
+            from app.audio.ambient import create_loop_cursor
+
+            ambient_cursor = create_loop_cursor()
+
     task, transport, context, guard = await build_pipeline(
         bot_config, ctx, websocket,
         provider=provider, stream_sid=stream_sid,
@@ -281,6 +293,7 @@ async def run_pipeline(
         # (bypassing pipeline TTS). When sent via TTSSpeakFrame fallback,
         # context_aggregator.assistant() captures it automatically.
         greeting_text=greeting_text if greeting_sent_directly else "",
+        ambient_cursor=ambient_cursor,
     )
 
     max_duration = getattr(bot_config, "max_call_duration", 480) or 480
@@ -294,13 +307,20 @@ async def run_pipeline(
 
     runner = PipelineRunner()
 
-    # Phase 4b: Comfort noise injector (sends directly to WS, bypasses pipeline)
+    # Phase 4b: Comfort noise / ambient noise injector (sends directly to WS)
     comfort_noise = None
     if provider == "plivo" and hasattr(transport, '_params') and hasattr(transport._params, 'serializer'):
+        serializer = transport._params.serializer
+        # Seed serializer timestamp after greeting so injector knows audio was playing
+        if greeting_sent_directly:
+            serializer._last_audio_sent_ts = time.monotonic()
         comfort_noise = ComfortNoiseInjector(
             websocket=websocket,
-            serializer=transport._params.serializer,
+            serializer=serializer,
             enabled=settings.COMFORT_NOISE_ENABLED,
+            ambient_preset=ambient_preset,
+            ambient_volume=ambient_vol,
+            loop_cursor=ambient_cursor,
         )
         comfort_noise.start()
 

@@ -126,6 +126,25 @@ def _validate_and_load(path: Path, expected_checksum: str | None) -> Optional[np
         return None
 
 
+class AmbientLoopCursor:
+    """Shared loop position for mixer + injector.
+
+    Single-threaded asyncio — no lock needed. Both AmbientSoundMixer
+    (pipeline processor) and ComfortNoiseInjector (background task) read/write
+    `pos` to keep the ambient loop seamless across speech↔silence transitions.
+    """
+
+    __slots__ = ("pos",)
+
+    def __init__(self) -> None:
+        self.pos: int = 0
+
+
+def create_loop_cursor() -> AmbientLoopCursor:
+    """Create a new shared cursor for one call's ambient noise loop."""
+    return AmbientLoopCursor()
+
+
 def get_preset(name: str) -> Optional[np.ndarray]:
     """Return the loaded numpy buffer for a preset, or None if not found."""
     return _presets.get(name)
