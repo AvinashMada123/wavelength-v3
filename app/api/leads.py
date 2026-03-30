@@ -13,6 +13,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_org, get_current_user
+from app.services.dnc_service import get_dnc_status
 from app.database import get_db
 from app.models.call_log import CallLog
 from app.models.lead import Lead
@@ -78,6 +79,8 @@ class LeadResponse(BaseModel):
     created_by: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
+    dnc_blocked: bool = False
+    dnc_reason: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -193,7 +196,14 @@ async def get_lead(
     lead = result.scalar_one_or_none()
     if lead is None:
         raise HTTPException(status_code=404, detail="Lead not found")
-    return lead
+
+    # Enrich with DNC status
+    response = LeadResponse.model_validate(lead)
+    dnc_entry = await get_dnc_status(db, org_id, lead.phone_number)
+    if dnc_entry:
+        response.dnc_blocked = True
+        response.dnc_reason = dnc_entry.reason
+    return response
 
 
 @router.put("/{lead_id}", response_model=LeadResponse)

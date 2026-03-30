@@ -403,6 +403,32 @@ export interface Lead {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  dnc_blocked: boolean;
+  dnc_reason: string | null;
+}
+
+export interface DncCheckResponse {
+  phone_number: string;
+  is_blocked: boolean;
+  reason: string | null;
+  source: string | null;
+  created_at: string | null;
+  created_by: string | null;
+}
+
+export interface DncListItem {
+  id: string;
+  phone_number: string;
+  reason: string;
+  source: string;
+  created_by: string;
+  created_at: string;
+  source_call_log_id: string | null;
+}
+
+export interface DncListResponse {
+  total: number;
+  items: DncListItem[];
 }
 
 export interface PaginatedLeads {

@@ -28,7 +28,7 @@ if _env_file.exists():
             if key and key not in os.environ:
                 os.environ[key] = value
 
-from app.api import admin, analytics, billing, bots, calls, campaigns, flow_migration, flows, health, leads, messaging_providers, payments, queue, sequence_analytics, sequences, telephony, webhook, webhooks
+from app.api import admin, analytics, billing, bots, calls, campaigns, dnc, flow_migration, flows, health, leads, messaging_providers, payments, queue, sequence_analytics, sequences, telephony, webhook, webhooks
 from app.auth import router as auth_router
 from app.bot_config.loader import BotConfigLoader
 from app.database import close_asyncpg_pool, init_asyncpg_pool
@@ -111,6 +111,7 @@ app.include_router(webhook.router)
 app.include_router(queue.router)
 app.include_router(analytics.router)
 app.include_router(leads.router)
+app.include_router(dnc.router)
 app.include_router(campaigns.router)
 app.include_router(admin.router)
 app.include_router(billing.router)

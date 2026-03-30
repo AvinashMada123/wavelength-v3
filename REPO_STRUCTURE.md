@@ -19,6 +19,7 @@ app/                              — FastAPI backend
     webhook.py                    — External webhook handlers
     sequence_analytics.py         — Analytics aggregation
     telephony.py                  — Phone number management
+    dnc.py                        — Do Not Call list endpoints
     messaging_providers.py        — Third-party messaging integrations
     health.py                     — Health check endpoints
     leads.py                      — Lead management endpoints
@@ -47,6 +48,7 @@ app/                              — FastAPI backend
     callback_scheduler.py         — Callback scheduling with timezone support
     call_analyzer.py              — Real-time call quality analysis
     call_memory.py                — Conversation context management
+    dnc_service.py                — Do Not Call check/add/remove with normalization
     sequence_analytics.py         — Analytics calculations
     lead_sync.py                  — GHL lead sync and webhooks
     anthropic_client.py           — Anthropic API wrapper
@@ -68,6 +70,7 @@ app/                              — FastAPI backend
     lead.py                       — Lead/contact records
     call_log.py                   — Call history and metadata
     call_queue.py                 — Call queue entries
+    do_not_call.py                — Persistent Do Not Call list
     call_analytics.py             — Call performance metrics
     phone_number.py               — Phone number assignments
     messaging_provider.py         — Third-party provider configs

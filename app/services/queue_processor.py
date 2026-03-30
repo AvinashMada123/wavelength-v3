@@ -31,6 +31,7 @@ from app.models.organization import Organization
 from app.models.phone_number import PhoneNumber
 from app.plivo.client import make_outbound_call as plivo_make_call
 from app.services import circuit_breaker
+from app.services.dnc_service import check_dnc
 from app.services.billing import check_org_credits
 from app.twilio.client import make_outbound_call as twilio_make_call
 from app.utils import normalize_phone_india
@@ -447,6 +448,21 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
                         retry_count=queued_call.retry_count,
                     )
                     return
+
+            # DNC gate — block calls to numbers on the Do Not Call list
+            if await check_dnc(db, bot_config.org_id, queued_call.contact_phone):
+                queued_call.status = "cancelled"
+                queued_call.error_message = "Contact is on Do Not Call list"
+                queued_call.processed_at = datetime.now(timezone.utc)
+                await db.commit()
+                logger.info(
+                    "call_blocked_dnc",
+                    queue_id=str(queue_id),
+                    phone=queued_call.contact_phone,
+                    bot_id=str(bot_id),
+                    source=queued_call.source,
+                )
+                return
 
             # Check calling window — skip for manual calls (UI call button, admin tests)
             if queued_call.source not in ("manual", "admin"):

@@ -23,6 +23,7 @@ from app.config import settings
 from app.database import get_db, get_db_session
 from app.ghl.client import GHLClient
 from app.pipeline import session_limiter
+from app.services.dnc_service import add_dnc, has_manual_override
 from app.services.n8n_webhook import fire_n8n_automations
 from app.models.call_log import CallLog
 from app.models.schemas import CallContext
@@ -615,6 +616,37 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
             call_duration=_dur, metadata=existing_meta
         )
         logger.info("post_call_metadata_saved", call_sid=call_sid, turns=turn_count)
+
+        # Auto-add to DNC if strong transcript DND detected
+        if dnd_detected and dnd_reason and dnd_reason.startswith("strong:") and existing_log:
+            try:
+                async with get_db_session() as dnc_db:
+                    override = await has_manual_override(
+                        dnc_db, existing_log.org_id, existing_log.contact_phone
+                    )
+                    if not override:
+                        await add_dnc(
+                            dnc_db,
+                            org_id=existing_log.org_id,
+                            phone=existing_log.contact_phone,
+                            reason=f"strong_dnd: {dnd_reason}",
+                            source="auto_transcript",
+                            source_call_log_id=existing_log.id,
+                        )
+                        await dnc_db.commit()
+                        logger.info(
+                            "dnc_auto_added",
+                            call_sid=call_sid,
+                            phone=existing_log.contact_phone,
+                        )
+                    else:
+                        logger.info(
+                            "dnc_auto_skipped_manual_override",
+                            call_sid=call_sid,
+                            phone=existing_log.contact_phone,
+                        )
+            except Exception as e:
+                logger.error("dnc_auto_add_failed", call_sid=call_sid, error=str(e))
 
         # Update lead with call results
         try:
