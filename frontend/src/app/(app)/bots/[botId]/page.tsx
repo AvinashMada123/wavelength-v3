@@ -815,7 +815,7 @@ export default function BotEditorPage() {
       // Transform ambient toggle to API fields
       if (form.ambient_sound_enabled) {
         payload.ambient_sound = "office_hum";
-        payload.ambient_sound_volume = 0.18;
+        payload.ambient_sound_volume = 0.15;
       } else {
         payload.ambient_sound = null;
         payload.ambient_sound_volume = null;
