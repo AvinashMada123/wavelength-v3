@@ -14,26 +14,75 @@ from app.models.lead import Lead
 
 logger = structlog.get_logger(__name__)
 
+# Day-of-week name → weekday int (Monday=0)
+_WEEKDAYS = {
+    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+    "friday": 4, "saturday": 5, "sunday": 6,
+}
+
+# Time-of-day keywords → hour
+_TOD = {"morning": 10, "afternoon": 14, "evening": 18}
+
+_DEFAULT_HOUR = 10  # Used when only a day is specified
+
+
+def _parse_hour_ampm(hour: int, ampm: str) -> int:
+    """Convert hour + am/pm to 24-hour format."""
+    if ampm == "pm" and hour != 12:
+        hour += 12
+    elif ampm == "am" and hour == 12:
+        hour = 0
+    return hour
+
+
+def _extract_tod(text: str) -> int | None:
+    """Extract time-of-day hour from text, or None."""
+    for keyword, hour in _TOD.items():
+        if keyword in text:
+            return hour
+
+    # Try "at X PM/AM" or "at X:MM PM/AM" pattern
+    at_match = re.search(r"at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", text, re.IGNORECASE)
+    if at_match:
+        hour = int(at_match.group(1))
+        ampm = (at_match.group(3) or "").lower()
+        hour = _parse_hour_ampm(hour, ampm)
+        if 0 <= hour <= 23:
+            return hour
+
+    return None
+
+
+def _next_weekday(now: datetime, target_weekday: int) -> datetime:
+    """Return next occurrence of target_weekday. If today == target, push to next week."""
+    days_ahead = target_weekday - now.weekday()
+    if days_ahead <= 0:  # Target day is today or already passed this week
+        days_ahead += 7
+    return now + timedelta(days=days_ahead)
+
 
 def parse_callback_time(
     time_str: str | None,
     tz_name: str = "Asia/Kolkata",
     default_delay_hours: float = 2.0,
+    now: datetime | None = None,
 ) -> datetime:
     """Parse a natural language time string into an absolute datetime.
 
     Falls back to now + default_delay_hours if time_str is None or unparseable.
     """
     tz = ZoneInfo(tz_name)
-    now = datetime.now(tz)
+    now = now or datetime.now(tz)
 
     if not time_str or not time_str.strip():
         return now + timedelta(hours=default_delay_hours)
 
     text = time_str.strip().lower()
 
-    # Relative: "in X hours/minutes"
-    rel_match = re.match(r"in\s+(\d+(?:\.\d+)?)\s*(hours?|hrs?|minutes?|mins?)", text)
+    # --- 1. Relative hours/minutes: "in X hours", "after X minutes" ---
+    rel_match = re.match(
+        r"(?:in|after)\s+(\d+(?:\.\d+)?)\s*(hours?|hrs?|minutes?|mins?)", text
+    )
     if rel_match:
         amount = float(rel_match.group(1))
         unit = rel_match.group(2)
@@ -41,41 +90,70 @@ def parse_callback_time(
             return now + timedelta(minutes=amount)
         return now + timedelta(hours=amount)
 
-    # Relative: "after X hours/minutes"
-    rel_match2 = re.match(r"after\s+(\d+(?:\.\d+)?)\s*(hours?|hrs?|minutes?|mins?)", text)
-    if rel_match2:
-        amount = float(rel_match2.group(1))
-        unit = rel_match2.group(2)
-        if unit.startswith("min"):
-            return now + timedelta(minutes=amount)
-        return now + timedelta(hours=amount)
-
-    # "tomorrow morning/afternoon/evening"
-    if "tomorrow" in text:
+    # --- 2. "tomorrow [TOD]" / "tomorrow at X" ---
+    if text.startswith("tomorrow"):
         tomorrow = now + timedelta(days=1)
-        if "morning" in text:
-            return tomorrow.replace(hour=10, minute=0, second=0, microsecond=0)
-        if "afternoon" in text:
-            return tomorrow.replace(hour=14, minute=0, second=0, microsecond=0)
-        if "evening" in text:
-            return tomorrow.replace(hour=18, minute=0, second=0, microsecond=0)
-        return tomorrow.replace(hour=10, minute=0, second=0, microsecond=0)
+        tod = _extract_tod(text)
+        hour = tod if tod is not None else _DEFAULT_HOUR
+        return tomorrow.replace(hour=hour, minute=0, second=0, microsecond=0)
 
-    # Try dateutil for specific times like "3 PM", "15:00", "3:30 PM"
-    try:
-        from dateutil import parser as dateutil_parser
-        parsed = dateutil_parser.parse(text, dayfirst=True, fuzzy=True)
-        # Apply timezone and set date to today (or tomorrow if time already passed)
-        result = now.replace(
-            hour=parsed.hour, minute=parsed.minute, second=0, microsecond=0
-        )
+    # --- 3. "day after tomorrow [TOD]" ---
+    if "day after tomorrow" in text:
+        day = now + timedelta(days=2)
+        tod = _extract_tod(text)
+        hour = tod if tod is not None else _DEFAULT_HOUR
+        return day.replace(hour=hour, minute=0, second=0, microsecond=0)
+
+    # --- 4. "this afternoon/evening" ---
+    this_match = re.match(r"this\s+(afternoon|evening)", text)
+    if this_match:
+        target_hour = _TOD[this_match.group(1)]
+        result = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
         if result <= now:
-            result += timedelta(days=1)
+            # Already past that time — schedule 1 hour from now
+            result = now + timedelta(hours=1)
+            result = result.replace(minute=0, second=0, microsecond=0)
         return result
-    except (ValueError, OverflowError):
-        pass
 
-    # Fallback: default delay
+    # --- 5. "next week" → next Monday ---
+    if "next week" in text:
+        next_monday = _next_weekday(now, 0)
+        tod = _extract_tod(text)
+        hour = tod if tod is not None else _DEFAULT_HOUR
+        return next_monday.replace(hour=hour, minute=0, second=0, microsecond=0)
+
+    # --- 6. "in a couple of days" / "in a few days" ---
+    if "couple of days" in text or "couple days" in text:
+        day = now + timedelta(days=2)
+        return day.replace(hour=_DEFAULT_HOUR, minute=0, second=0, microsecond=0)
+    if "few days" in text:
+        day = now + timedelta(days=3)
+        return day.replace(hour=_DEFAULT_HOUR, minute=0, second=0, microsecond=0)
+
+    # --- 7. Day-of-week: "monday", "on friday", "next wednesday" ---
+    cleaned = re.sub(r"^(on|next)\s+", "", text)
+    for day_name, weekday_int in _WEEKDAYS.items():
+        if cleaned.startswith(day_name) or cleaned == day_name:
+            target_day = _next_weekday(now, weekday_int)
+            tod = _extract_tod(text)
+            hour = tod if tod is not None else _DEFAULT_HOUR
+            result = target_day.replace(hour=hour, minute=0, second=0, microsecond=0)
+            return result
+
+    # --- 8. Specific time: "3 PM", "15:00", "3:30 PM" (no dateutil) ---
+    time_match = re.match(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$", text, re.IGNORECASE)
+    if time_match:
+        hour = int(time_match.group(1))
+        minute = int(time_match.group(2) or 0)
+        ampm = (time_match.group(3) or "").lower()
+        hour = _parse_hour_ampm(hour, ampm)
+        if 0 <= hour <= 23:
+            result = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if result <= now:
+                result += timedelta(days=1)
+            return result
+
+    # --- 9. Fallback: default delay ---
     logger.warning("callback_time_unparseable", raw=time_str)
     return now + timedelta(hours=default_delay_hours)
 

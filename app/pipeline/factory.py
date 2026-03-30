@@ -1017,8 +1017,10 @@ def _build_callback_tool(bot_config: BotConfig, call_context: CallContext):
             "callback_time": {
                 "type": "string",
                 "description": (
-                    "When the person wants to be called back, e.g. '3 PM', 'tomorrow morning', "
-                    "'in 2 hours', 'after 30 minutes'. Leave empty if they didn't specify a time."
+                    "When the person wants to be called back. Always pass this in English "
+                    "regardless of conversation language. Examples: '3 PM', 'tomorrow morning', "
+                    "'in 2 hours', 'next Monday', 'Friday afternoon', 'next week', "
+                    "'day after tomorrow'. Leave empty if they didn't specify a time."
                 ),
             },
             "reason": {
