@@ -487,6 +487,22 @@ export function deleteLead(id: string): Promise<void> {
   return apiFetch(`/api/leads/${id}`, { method: "DELETE" });
 }
 
+// --- DNC ---
+
+export function addDnc(phone: string, reason: string): Promise<DncCheckResponse> {
+  return apiFetch("/api/dnc", {
+    method: "POST",
+    body: JSON.stringify({ phone, reason }),
+  });
+}
+
+export function removeDnc(phone: string): Promise<DncCheckResponse> {
+  return apiFetch("/api/dnc", {
+    method: "DELETE",
+    body: JSON.stringify({ phone }),
+  });
+}
+
 export function importLeads(leads: Array<{
   phone_number: string;
   contact_name: string;

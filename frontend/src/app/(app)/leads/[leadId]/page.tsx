@@ -17,6 +17,8 @@ import {
   Hash,
   Tag,
   ExternalLink,
+  ShieldAlert,
+  ShieldOff,
 } from "lucide-react";
 import { format } from "date-fns";
 import { Header } from "@/components/layout/header";
@@ -34,9 +36,20 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useLead, useLeadCalls } from "@/hooks/use-leads";
+import { addDnc, removeDnc } from "@/lib/api";
 import { formatDuration, formatDate } from "@/lib/utils";
 import type { CallLog } from "@/types/api";
 import { SequencesTab } from "@/app/(app)/leads/components/SequencesTab";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 const STATUS_COLORS: Record<string, string> = {
   new: "bg-blue-500/15 text-blue-400 border-blue-500/25",
@@ -156,9 +169,32 @@ export default function LeadDetailPage() {
   const leadId = params.leadId as string;
 
   const { data: lead, isLoading, error } = useLead(leadId);
+  const queryClient = useQueryClient();
+  const [dncLoading, setDncLoading] = useState(false);
+  const [showDncConfirm, setShowDncConfirm] = useState<"add" | "remove" | null>(null);
+  const [dncReason, setDncReason] = useState("");
 
   // Fetch calls for this lead via dedicated API endpoint
   const { data: leadCalls = [], isLoading: callsLoading } = useLeadCalls(leadId);
+
+  const handleDncToggle = async () => {
+    if (!lead) return;
+    setDncLoading(true);
+    try {
+      if (lead.dnc_blocked) {
+        await removeDnc(lead.phone_number);
+      } else {
+        await addDnc(lead.phone_number, dncReason || "Manually blocked via UI");
+      }
+      queryClient.invalidateQueries({ queryKey: ["lead", leadId] });
+    } catch (err) {
+      console.error("DNC toggle failed:", err);
+    } finally {
+      setDncLoading(false);
+      setShowDncConfirm(null);
+      setDncReason("");
+    }
+  };
 
   if (isLoading) {
     return (
@@ -252,6 +288,11 @@ export default function LeadDetailPage() {
               >
                 {lead.status}
               </Badge>
+              {lead.dnc_blocked && (
+                <Badge variant="outline" className="bg-red-500/15 text-red-400 border-red-500/25">
+                  DNC
+                </Badge>
+              )}
               {lead.qualification_level && (
                 <Badge
                   variant="outline"
@@ -268,6 +309,75 @@ export default function LeadDetailPage() {
               )}
             </div>
           </div>
+
+          {/* DNC Banner */}
+          {lead.dnc_blocked && (
+            <div className="flex items-center justify-between rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <ShieldAlert className="h-5 w-5 text-red-400" />
+                <div>
+                  <p className="text-sm font-medium text-red-400">Do Not Call</p>
+                  <p className="text-xs text-red-400/70">
+                    {lead.dnc_reason || "This contact is on the Do Not Call list"}
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-red-500/30 text-red-400 hover:bg-red-500/10"
+                onClick={() => setShowDncConfirm("remove")}
+                disabled={dncLoading}
+              >
+                <ShieldOff className="mr-1 h-3.5 w-3.5" />
+                Remove from DNC
+              </Button>
+            </div>
+          )}
+
+          {/* DNC Add/Remove Confirmation Dialog */}
+          <Dialog open={showDncConfirm !== null} onOpenChange={() => setShowDncConfirm(null)}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>
+                  {showDncConfirm === "remove"
+                    ? "Remove from Do Not Call list?"
+                    : "Add to Do Not Call list?"}
+                </DialogTitle>
+                <DialogDescription>
+                  {showDncConfirm === "remove" ? (
+                    <>
+                      This contact previously said: &ldquo;{lead.dnc_reason || "Do not call"}&rdquo;.
+                      Removing will allow future calls and prevent automatic re-addition.
+                    </>
+                  ) : (
+                    <>
+                      This will block all future calls to {lead.contact_name} across all bots and campaigns.
+                      <input
+                        type="text"
+                        placeholder="Reason (optional)"
+                        value={dncReason}
+                        onChange={(e) => setDncReason(e.target.value)}
+                        className="mt-3 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500"
+                      />
+                    </>
+                  )}
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowDncConfirm(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleDncToggle}
+                  className="bg-red-600 hover:bg-red-700 text-white"
+                  disabled={dncLoading}
+                >
+                  {dncLoading ? "Processing..." : showDncConfirm === "remove" ? "Remove" : "Block"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           <Tabs defaultValue="overview" className="space-y-4">
             <TabsList>
@@ -305,6 +415,20 @@ export default function LeadDetailPage() {
                       />
                     </CardContent>
                   </Card>
+
+                  {/* DNC Action */}
+                  {!lead.dnc_blocked && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full border-red-500/30 text-red-400 hover:bg-red-500/10"
+                      onClick={() => setShowDncConfirm("add")}
+                      disabled={dncLoading}
+                    >
+                      <ShieldAlert className="mr-1.5 h-3.5 w-3.5" />
+                      Add to Do Not Call List
+                    </Button>
+                  )}
 
                   {/* Aggregated Insights */}
                   <Card>
