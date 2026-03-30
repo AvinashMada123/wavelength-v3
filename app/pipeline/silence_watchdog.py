@@ -11,6 +11,7 @@ import asyncio
 import time
 
 import structlog
+from app.config import settings
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -122,7 +123,20 @@ class SilenceWatchdog(FrameProcessor):
                 self._escalation += 1
 
                 if self._escalation == 1:
-                    if self._total_prompts >= self._max_prompts:
+                    # Pre-conversation fast exit: if user has NEVER spoken,
+                    # skip the "Hello?" prompt and go straight to goodbye.
+                    if (
+                        settings.PRECONV_FAST_EXIT
+                        and self._call_guard
+                        and not self._call_guard.user_has_spoken
+                    ):
+                        logger.info(
+                            "silence_watchdog_preconv_fast_exit",
+                            call_sid=self._call_sid,
+                            elapsed_s=round(elapsed, 1),
+                        )
+                        self._escalation = 2  # Fall through to goodbye
+                    elif self._total_prompts >= self._max_prompts:
                         # Hard cap reached — skip to goodbye
                         self._escalation = 2
                     else:

@@ -83,6 +83,16 @@ class Settings(BaseSettings):
     BACKCHANNEL_SUPPRESSION: bool = True
     WATCHDOG_MAX_PROMPTS: int = 2
 
+    # --- Pre-conversation fast exit (voicemail/hold/IVR) ---
+    # Fix 1: Skip prompt and go straight to goodbye if user has never spoken
+    PRECONV_FAST_EXIT: bool = True
+    # Fix 2: Hard ceiling — hang up if no user speech within N seconds of greeting
+    EARLY_HANGUP_ENABLED: bool = True
+    EARLY_HANGUP_TIMEOUT: float = 25.0
+    # Fix 3: Detect hold music (VAD active but no STT transcripts)
+    HOLD_MUSIC_DETECTION: bool = True
+    HOLD_MUSIC_TIMEOUT: float = 15.0
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 

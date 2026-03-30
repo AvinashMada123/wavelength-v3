@@ -35,6 +35,8 @@ app/                              — FastAPI backend
     call_guard.py                 — Call validation and filtering
     session_limiter.py            — Concurrent call limits
     silence_watchdog.py           — Silence detection and handling
+    early_hangup.py               — Pre-conversation no-speech hangup timer
+    hold_music_detector.py        — Hold music detection (VAD without STT)
     idle_handler.py               — Idle timeout management
     phrase_aggregator.py          — Adaptive phrase aggregation
 

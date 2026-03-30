@@ -2090,7 +2090,7 @@ async def build_pipeline(
     # --- Silence watchdog ---
     # Replaces deprecated UserIdleProcessor which fails to fire with Sarvam STT.
     # Uses polling-based timer: 1st timeout → "Hello?", 2nd → goodbye + hangup.
-    silence_timeout = max(float(call_context.silence_timeout_secs), 12.0)
+    silence_timeout = float(call_context.silence_timeout_secs)
     silence_watchdog = SilenceWatchdog(
         timeout=silence_timeout,
         call_sid=call_context.call_sid,
@@ -2102,6 +2102,23 @@ async def build_pipeline(
         import json
         goal_cfg = json.loads(goal_cfg)
     call_guard = CallGuard(call_sid=call_context.call_sid, goal_config=goal_cfg)
+
+    # --- Pre-conversation fast exit processors ---
+    early_hangup = None
+    if settings.EARLY_HANGUP_ENABLED:
+        from app.pipeline.early_hangup import EarlyHangupTimer
+        early_hangup = EarlyHangupTimer(
+            timeout=settings.EARLY_HANGUP_TIMEOUT,
+            call_sid=call_context.call_sid,
+        )
+
+    hold_music_detector = None
+    if settings.HOLD_MUSIC_DETECTION:
+        from app.pipeline.hold_music_detector import HoldMusicDetector
+        hold_music_detector = HoldMusicDetector(
+            timeout=settings.HOLD_MUSIC_TIMEOUT,
+            call_sid=call_context.call_sid,
+        )
 
     # --- Latency trackers ---
     tracker_post_stt = LatencyTracker(position="post_stt", call_sid=call_context.call_sid,
@@ -2160,6 +2177,8 @@ async def build_pipeline(
             greeting_guard,
             hello_guard,      # Backchannel suppression during bot speech
             call_guard,
+            *([early_hangup] if early_hangup else []),
+            *([hold_music_detector] if hold_music_detector else []),
             tracker_post_stt,
             silence_watchdog,
             context_aggregator.user(),
@@ -2192,5 +2211,11 @@ async def build_pipeline(
     _task_ref[0] = task
     silence_watchdog.set_task(task)
     silence_watchdog.set_call_guard(call_guard)
+    if early_hangup:
+        early_hangup.set_task(task)
+        early_hangup.set_call_guard(call_guard)
+    if hold_music_detector:
+        hold_music_detector.set_task(task)
+        hold_music_detector.set_call_guard(call_guard)
 
     return task, transport, context, call_guard

@@ -129,6 +129,7 @@ class CallGuard(FrameProcessor):
         self._ended = False
         self.llm_end_reason: str | None = None
         self._termination_source: str | None = None
+        self._user_has_spoken: bool = False
 
         # Custom keyword-based red flags from goal_config (realtime only)
         self._custom_realtime_flags: list[dict] = []
@@ -153,6 +154,11 @@ class CallGuard(FrameProcessor):
     @property
     def termination_source(self) -> str | None:
         return self._termination_source
+
+    @property
+    def user_has_spoken(self) -> bool:
+        """True once a real user transcript arrives after bot has spoken."""
+        return self._user_has_spoken
 
     def set_termination_source(self, source: str) -> None:
         """Write-once setter — first caller wins to avoid race conditions."""
@@ -185,6 +191,7 @@ class CallGuard(FrameProcessor):
                 if self._bot_has_spoken:
                     self._user_turn_count += 1
                     self._bot_has_spoken = False
+                    self._user_has_spoken = True
                 await self._check_transcript(text)
 
         await self.push_frame(frame, direction)
