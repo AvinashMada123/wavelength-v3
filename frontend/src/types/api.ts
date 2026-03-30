@@ -81,6 +81,8 @@ export interface BotConfig {
   callback_window_end: number;
   callback_schedule: CallbackSchedule | null;
   max_concurrent_calls: number;
+  ambient_sound: string | null;
+  ambient_sound_volume: number | null;
   call_memory_enabled: boolean;
   call_memory_count: number;
   bot_switch_targets: Array<{ id: string; target_bot_id: string; description: string }>;
@@ -168,6 +170,8 @@ export interface UpdateBotConfigRequest {
   goal_config?: GoalConfig | null;
   circuit_breaker_enabled?: boolean | null;
   circuit_breaker_threshold?: number | null;
+  ambient_sound?: string | null;
+  ambient_sound_volume?: number | null;
   is_active?: boolean | null;
 }
 

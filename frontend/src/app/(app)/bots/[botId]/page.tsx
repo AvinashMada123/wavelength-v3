@@ -130,6 +130,7 @@ interface BotForm {
   max_concurrent_calls: number;
   circuit_breaker_enabled: boolean;
   circuit_breaker_threshold: number;
+  ambient_sound_enabled: boolean;
   callback_enabled: boolean;
   callback_retry_delay_hours: number;
   callback_max_retries: number;
@@ -182,6 +183,7 @@ const EMPTY_FORM: BotForm = {
   max_concurrent_calls: 5,
   circuit_breaker_enabled: true,
   circuit_breaker_threshold: 3,
+  ambient_sound_enabled: true,
   callback_enabled: false,
   callback_retry_delay_hours: 2,
   callback_max_retries: 3,
@@ -269,6 +271,7 @@ function botToForm(bot: BotConfig): BotForm {
     max_concurrent_calls: bot.max_concurrent_calls ?? 5,
     circuit_breaker_enabled: bot.circuit_breaker_enabled ?? true,
     circuit_breaker_threshold: bot.circuit_breaker_threshold ?? 3,
+    ambient_sound_enabled: bot.ambient_sound != null,
     callback_enabled: bot.callback_enabled ?? false,
     callback_retry_delay_hours: bot.callback_retry_delay_hours ?? 2,
     callback_max_retries: bot.callback_max_retries ?? 3,
@@ -808,6 +811,16 @@ export default function BotEditorPage() {
           payload[k] = v;
         }
       }
+
+      // Transform ambient toggle to API fields
+      if (form.ambient_sound_enabled) {
+        payload.ambient_sound = "office_hum";
+        payload.ambient_sound_volume = 0.18;
+      } else {
+        payload.ambient_sound = null;
+        payload.ambient_sound_volume = null;
+      }
+      delete payload.ambient_sound_enabled;
 
       // Include goal_config in payload — sanitize enum fields
       if (goalConfig) {
@@ -2392,6 +2405,32 @@ export default function BotEditorPage() {
                             </div>
                           </div>
                         )}
+                      </Section>
+
+                      <Separator />
+
+                      <Section
+                        title="Background Office Noise"
+                        description="Add subtle office ambience to calls for a more natural, human-like experience."
+                      >
+                        <div className="flex items-center justify-between rounded-lg border p-4">
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium">
+                              Office Background Noise
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Plays subtle office ambience (keyboard sounds, distant
+                              murmur, air conditioning) throughout the call. Disable
+                              if callers report audio issues.
+                            </p>
+                          </div>
+                          <Switch
+                            checked={form.ambient_sound_enabled}
+                            onCheckedChange={(v) =>
+                              setField("ambient_sound_enabled", v)
+                            }
+                          />
+                        </div>
                       </Section>
 
                       <Separator />
