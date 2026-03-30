@@ -217,7 +217,7 @@ class CreateBotConfigRequest(BaseModel):
     language: str = "en-IN"
     allowed_languages: list[str] = Field(default_factory=list)
     system_prompt_template: str
-    context_variables: dict[str, str] = Field(default_factory=dict)
+    context_variables: dict = Field(default_factory=dict)
     silence_timeout_secs: int = 5
     ghl_webhook_url: str | None = None
     ghl_api_key: str | None = None
@@ -270,7 +270,7 @@ class UpdateBotConfigRequest(BaseModel):
     language: str | None = None
     allowed_languages: list[str] | None = None
     system_prompt_template: str | None = None
-    context_variables: dict[str, str] | None = None
+    context_variables: dict | None = None
     silence_timeout_secs: int | None = None
     ghl_webhook_url: str | None = None
     ghl_api_key: str | None = None
@@ -333,7 +333,7 @@ class BotConfigResponse(BaseModel):
     language: str
     allowed_languages: list[str]
     system_prompt_template: str
-    context_variables: dict[str, str]
+    context_variables: dict
     silence_timeout_secs: int
     ghl_webhook_url: str | None
     ghl_api_key: str | None
