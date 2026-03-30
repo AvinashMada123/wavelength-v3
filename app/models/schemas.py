@@ -359,6 +359,8 @@ class BotConfigResponse(BaseModel):
     bot_switch_targets: list[dict]
     sequence_template_id: uuid.UUID | None = None
     max_concurrent_calls: int
+    ambient_sound: str | None = None
+    ambient_sound_volume: float | None = None
     call_memory_enabled: bool
     call_memory_count: int
     is_active: bool
