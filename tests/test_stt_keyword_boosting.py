@@ -172,6 +172,27 @@ class TestBuildDeepgramKeywords:
         kw = build_deepgram_keywords(bot)
         assert "Sneha:5" in kw  # Should not crash
 
+    def test_dynamic_contact_name(self):
+        bot = _make_bot()
+        ctx = SimpleNamespace(contact_name="Chankapure Rajasekhar")
+        kw = build_deepgram_keywords(bot, call_context=ctx)
+        assert "Chankapure Rajasekhar:5" in kw
+        assert "Chankapure:3" in kw
+        assert "Rajasekhar:3" in kw
+        # Contact name should come FIRST (highest priority)
+        assert kw[0] == "Chankapure Rajasekhar:5"
+
+    def test_contact_name_unknown_skipped(self):
+        bot = _make_bot()
+        ctx = SimpleNamespace(contact_name="Unknown")
+        kw = build_deepgram_keywords(bot, call_context=ctx)
+        assert not any("unknown" in k.lower().split(":")[0] for k in kw)
+
+    def test_no_call_context(self):
+        bot = _make_bot()
+        kw = build_deepgram_keywords(bot, call_context=None)
+        assert "Sneha:5" in kw  # Still works without call_context
+
 
 # ===========================================================================
 # build_entity_hint_suffix

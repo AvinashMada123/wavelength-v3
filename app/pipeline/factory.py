@@ -66,14 +66,23 @@ _DEFAULT_STYLE_PROMPT = (
 )
 
 
-def build_deepgram_keywords(bot_config) -> list[str]:
+def build_deepgram_keywords(bot_config, call_context=None) -> list[str]:
     """Build keyword boost list from bot config for Deepgram STT.
 
-    Extracts names from agent_name, company_name, event_name and any
-    custom keywords in context_variables.stt_keywords.
+    Extracts names from agent_name, company_name, event_name, the lead's
+    contact_name (dynamic per call), and any custom keywords in
+    context_variables.stt_keywords.
     Returns deduplicated list in "word:boost" format.
     """
     keywords: list[str] = []
+    # Dynamic: lead's name for this specific call
+    if call_context and getattr(call_context, "contact_name", None):
+        name = call_context.contact_name.strip()
+        if name and name.lower() not in ("unknown", ""):
+            keywords.append(f"{name}:5")
+            for part in name.split():
+                if len(part) > 2:
+                    keywords.append(f"{part}:3")
     if getattr(bot_config, "agent_name", None):
         keywords.append(f"{bot_config.agent_name}:5")
         for part in bot_config.agent_name.split():
@@ -1649,7 +1658,7 @@ async def build_pipeline(
         # nova-3: "unknown" → "multi" (auto-detect), otherwise respect user's choice
         deepgram_language = "multi" if stt_language == "unknown" else stt_language
 
-        unique_kw = build_deepgram_keywords(bot_config)
+        unique_kw = build_deepgram_keywords(bot_config, call_context)
 
         stt = DeepgramSTTService(
             api_key=settings.DEEPGRAM_API_KEY,
