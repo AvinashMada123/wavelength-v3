@@ -288,6 +288,12 @@ async def fire_n8n_automations(
     """
     try:
         automations = getattr(bot_config, "n8n_automations", None) or []
+        if isinstance(automations, str):
+            try:
+                automations = json.loads(automations)
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("n8n_automations_json_parse_error", timing=timing)
+                return
         if not isinstance(automations, list):
             logger.warning("n8n_automations_invalid_type", type=type(automations).__name__, timing=timing)
             return
