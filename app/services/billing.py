@@ -74,7 +74,7 @@ async def bill_completed_call(
     reported_duration_seconds: int | None = None,
 ) -> bool:
     """Record a single usage transaction for a completed call."""
-    if provider_status != "completed":
+    if provider_status not in ("completed", "picked_up"):
         return False
 
     duration_seconds = resolve_call_duration_seconds(call_log, reported_duration_seconds)
