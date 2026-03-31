@@ -289,7 +289,21 @@ async def fire_n8n_automations(
     try:
         automations = getattr(bot_config, "n8n_automations", None) or []
         if not isinstance(automations, list):
+            logger.warning("n8n_automations_invalid_type", type=type(automations).__name__, timing=timing)
             return
+
+        bot_id = getattr(bot_config, "id", "unknown")
+        if not automations:
+            logger.info("n8n_no_automations_configured", bot_id=str(bot_id), timing=timing)
+            return
+
+        logger.info(
+            "n8n_fire_automations_start",
+            bot_id=str(bot_id),
+            timing=timing,
+            automation_count=len(automations),
+            call_sid=call_data.get("call_sid"),
+        )
 
         bot_config_data = _extract_bot_config_data(bot_config)
 
@@ -302,12 +316,17 @@ async def fire_n8n_automations(
         for auto in automations:
             if not isinstance(auto, dict):
                 continue
+            auto_id = auto.get("id", "unknown")
+            auto_name = auto.get("name", "unnamed")
+
             if auto.get("timing") != timing:
+                logger.debug("n8n_automation_timing_skip", automation_id=auto_id, expected=timing, actual=auto.get("timing"))
                 continue
             if not auto.get("enabled", True):
+                logger.info("n8n_automation_disabled", automation_id=auto_id, automation_name=auto_name)
                 continue
             if not auto.get("webhook_url"):
-                logger.warning("n8n_automation_missing_url", automation_id=auto.get("id"))
+                logger.warning("n8n_automation_missing_url", automation_id=auto_id)
                 continue
 
             # Evaluate conditions (only meaningful for post_call with analysis data)
@@ -316,10 +335,21 @@ async def fire_n8n_automations(
             if timing == "post_call" and conditions and not evaluate_conditions(conditions, condition_logic, eval_data):
                 logger.info(
                     "n8n_conditions_not_met",
-                    automation_id=auto.get("id"),
-                    automation_name=auto.get("name"),
+                    automation_id=auto_id,
+                    automation_name=auto_name,
+                    conditions=conditions,
+                    eval_data_keys=list(eval_data.keys()),
+                    goal_outcome=eval_data.get("goal_outcome"),
                 )
                 continue
+
+            logger.info(
+                "n8n_automation_firing",
+                automation_id=auto_id,
+                automation_name=auto_name,
+                webhook_url=auto["webhook_url"][:60],
+                contact_name=contact.get("contact_name") if contact else None,
+            )
 
             payload = build_payload(
                 automation=auto,
@@ -329,9 +359,11 @@ async def fire_n8n_automations(
                 bot_config_data=bot_config_data,
                 transcript=transcript,
             )
-            tasks.append(_send_webhook(auto["webhook_url"], payload, auto.get("id", "unknown")))
+            tasks.append(_send_webhook(auto["webhook_url"], payload, auto_id))
 
-        if tasks:
+        if not tasks:
+            logger.info("n8n_no_automations_matched", bot_id=str(bot_id), timing=timing)
+        else:
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
