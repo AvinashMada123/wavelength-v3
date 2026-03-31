@@ -1984,7 +1984,7 @@ async def build_pipeline(
                 language=tts_lang,
                 min_buffer_size=50,
                 max_chunk_length=150,
-                temperature=0.65,
+                temperature=0.63,
             ),
         )
         logger.info("tts_sarvam_init", voice=call_context.tts_voice, model="bulbul:v3",
