@@ -109,6 +109,7 @@ async def _synthesize_greeting(
                     min_buffer_size=30,
                     max_chunk_length=100,
                     temperature=0.4,
+                    pace=1.1,
                 ),
             )
         elif tts_provider == "elevenlabs":
