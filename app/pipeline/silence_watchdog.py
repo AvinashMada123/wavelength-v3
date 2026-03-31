@@ -23,6 +23,24 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserStartedSpeakingFrame,
 )
+
+# Language-specific silence prompts and goodbye messages
+_SILENCE_PROMPTS = {
+    "en": ("Hello? Can you hear me?", "Looks like this is not a good time. I will try again later. Take care!"),
+    "hi": ("Hello? Kya aap sun sakte hain?", "Lagta hai abhi acha samay nahi hai. Main baad mein dobara try karungi. Dhanyavaad!"),
+    "ta": ("Hello? Ungalukku ketkkirathaa?", "Ippo nalla neram illai pola irukku. Naan pinnadi try pannuven. Nandri!"),
+    "te": ("Hello? Meeku vinipistundaa?", "Ippudu manchhi samayam kaadu anipistundi. Nenu tarvata try chestanu. Dhanyavaadaalu!"),
+    "kn": ("Hello? Nimge kelsuttideyaa?", "Eeega olleya samaya alla ansutte. Naanu aamele try maadtini. Dhanyavaadagalu!"),
+    "ml": ("Hello? Ningalkku kelkkunundo?", "Ippo nalla samayam alla enn thonnunnu. Njan pinne try cheyyaam. Nanni!"),
+    "bn": ("Hello? Apni ki shunte paachchen?", "Mone hochche ekhon bhalo somoy noy. Ami pore abar try korbo. Dhonnobad!"),
+    "mr": ("Hello? Tumhala aikoo yeta ka?", "Atta vatto ki atta changlo velo nay. Hanv fuddem parat try kortam. Dhanyavaad!"),
+}
+
+
+def _get_silence_texts(language):
+    """Return (prompt_text, goodbye_text) for the given BCP-47 language code."""
+    lang_prefix = language.split("-")[0].lower() if language else "en"
+    return _SILENCE_PROMPTS.get(lang_prefix, _SILENCE_PROMPTS["en"])
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 logger = structlog.get_logger(__name__)

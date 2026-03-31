@@ -15,8 +15,11 @@ logger = structlog.get_logger(__name__)
 
 
 class IdleEscalationHandler:
-    def __init__(self, silence_timeout: int = 5):
+    def __init__(self, silence_timeout: int = 5, prompt_text: str = "Hello? Can you hear me?",
+                 goodbye_text: str = "Looks like this is not a good time. I will try again later. Take care!"):
         self._silence_timeout = silence_timeout
+        self._prompt_text = prompt_text
+        self._goodbye_text = goodbye_text
 
     async def on_idle(self, processor, retry_count: int) -> bool:
         """Called by UserIdleProcessor when user is idle.
@@ -31,12 +34,12 @@ class IdleEscalationHandler:
         logger.info("user_idle_escalation", level=retry_count, timeout=self._silence_timeout)
 
         if retry_count == 1:
-            await processor.push_frame(TTSSpeakFrame(text="Hello? Can you hear me?"))
+            await processor.push_frame(TTSSpeakFrame(text=self._prompt_text))
             return True
 
         if retry_count >= 2:
             await processor.push_frame(
-                TTSSpeakFrame(text="Looks like this is not a good time. I will try again later. Take care!")
+                TTSSpeakFrame(text=self._goodbye_text)
             )
             await processor.push_frame(EndFrame())
             return False

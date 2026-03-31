@@ -2094,9 +2094,15 @@ async def build_pipeline(
     # Replaces deprecated UserIdleProcessor which fails to fire with Sarvam STT.
     # Uses polling-based timer: 1st timeout → "Hello?", 2nd → goodbye + hangup.
     silence_timeout = float(call_context.silence_timeout_secs)
+    from app.pipeline.silence_watchdog import _get_silence_texts
+    silence_prompt, silence_goodbye = _get_silence_texts(
+        getattr(call_context, "language", "en-IN") or "en-IN"
+    )
     silence_watchdog = SilenceWatchdog(
         timeout=silence_timeout,
         call_sid=call_context.call_sid,
+        prompt_text=silence_prompt,
+        goodbye_text=silence_goodbye,
     )
 
     # --- Call guard (voicemail / hold / DND detection + custom red flags) ---
