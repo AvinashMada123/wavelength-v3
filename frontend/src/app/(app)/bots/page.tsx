@@ -220,10 +220,15 @@ export default function BotsPage() {
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-destructive"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                deleteConfirm === bot.id ? handleDelete(bot.id) : setDeleteConfirm(bot.id);
+                              onSelect={(e) => {
+                                if (deleteConfirm !== bot.id) {
+                                  e.preventDefault(); // Keep dropdown open for confirm
+                                  setDeleteConfirm(bot.id);
+                                } else {
+                                  handleDelete(bot.id);
+                                }
                               }}
+                              onClick={(e) => e.stopPropagation()}
                             >
                               <Trash2 className="mr-2 h-4 w-4" />
                               {deleteConfirm === bot.id ? "Click to confirm" : "Delete"}
