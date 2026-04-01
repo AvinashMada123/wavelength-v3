@@ -527,6 +527,7 @@ async def _process_single_call(loader: BotConfigLoader, queue_id, bot_id):
                     phone_number=queued_call.contact_phone,
                     contact_name=queued_call.contact_name,
                     ghl_contact_id=queued_call.ghl_contact_id,
+                    contact_email=getattr(queued_call, "contact_email", None),
                     extra_vars=queued_call.extra_vars,
                 )
                 lead_id = lead.id

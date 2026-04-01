@@ -19,6 +19,7 @@ async def find_or_create_lead(
     phone_number: str,
     contact_name: str,
     ghl_contact_id: str | None = None,
+    contact_email: str | None = None,
     source: str = "auto_call",
     extra_vars: dict[str, str] | None = None,
 ) -> Lead:
@@ -41,6 +42,9 @@ async def find_or_create_lead(
         # Update ghl_contact_id if we have one and lead doesn't
         if ghl_contact_id and not lead.ghl_contact_id:
             lead.ghl_contact_id = ghl_contact_id
+        # Update email if we have one and lead doesn't
+        if contact_email and not lead.email:
+            lead.email = contact_email
         # Merge new extra_vars into existing custom_fields (new values win)
         if extra_vars:
             merged = dict(lead.custom_fields or {})
@@ -58,6 +62,7 @@ async def find_or_create_lead(
         org_id=org_id,
         phone_number=phone_number,
         contact_name=contact_name,
+        email=contact_email,
         ghl_contact_id=ghl_contact_id,
         custom_fields=extra_vars or {},
         source=source,

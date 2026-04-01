@@ -562,12 +562,7 @@ export default function LeadsPage() {
                       </TableHead>
                       <TableHead>Name</TableHead>
                       <TableHead>Phone</TableHead>
-                      <TableHead className="hidden md:table-cell">
-                        Email
-                      </TableHead>
-                      <TableHead className="hidden lg:table-cell">
-                        Company
-                      </TableHead>
+                      <TableHead>Email</TableHead>
                       <TableHead className="hidden xl:table-cell">
                         Tags
                       </TableHead>
@@ -621,11 +616,8 @@ export default function LeadsPage() {
                         <TableCell className="text-muted-foreground">
                           {lead.phone_number}
                         </TableCell>
-                        <TableCell className="hidden md:table-cell text-muted-foreground">
+                        <TableCell className="text-muted-foreground truncate max-w-[200px]">
                           {lead.email || "\u2014"}
-                        </TableCell>
-                        <TableCell className="hidden lg:table-cell text-muted-foreground">
-                          {lead.company || "\u2014"}
                         </TableCell>
                         <TableCell className="hidden xl:table-cell">
                           {lead.tags && lead.tags.length > 0 ? (

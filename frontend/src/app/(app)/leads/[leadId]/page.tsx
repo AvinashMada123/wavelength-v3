@@ -402,8 +402,6 @@ export default function LeadDetailPage() {
                       <Separator />
                       <InfoRow icon={Mail} label="Email" value={lead.email} />
                       <Separator />
-                      <InfoRow icon={Building2} label="Company" value={lead.company} />
-                      <Separator />
                       <InfoRow icon={MapPin} label="Location" value={lead.location} />
                       <Separator />
                       <InfoRow icon={Tag} label="Source" value={lead.source} />
