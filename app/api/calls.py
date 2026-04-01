@@ -94,6 +94,7 @@ async def list_calls(
             or_(
                 CallLog.contact_name.ilike(q),
                 CallLog.contact_phone.ilike(q),
+                CallLog.contact_email.ilike(q),
                 CallLog.summary.ilike(q),
             )
         )
@@ -185,6 +186,7 @@ async def export_calls(
             or_(
                 CallLog.contact_name.ilike(q),
                 CallLog.contact_phone.ilike(q),
+                CallLog.contact_email.ilike(q),
                 CallLog.summary.ilike(q),
             )
         )

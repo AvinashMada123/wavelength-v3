@@ -522,7 +522,7 @@ function CallLogsPageInner() {
                     <Input
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search by name, phone, or summary..."
+                      placeholder="Search by name, phone, email, or summary..."
                       className="pl-8 h-9"
                     />
                     {searchQuery && (
@@ -791,7 +791,10 @@ function CallLogsPageInner() {
                             <p className="font-medium">{call.contact_name}</p>
                           </TableCell>
                           <TableCell className="text-muted-foreground">
-                            {formatPhoneNumber(call.contact_phone)}
+                            <p>{formatPhoneNumber(call.contact_phone)}</p>
+                            {call.contact_email && (
+                              <p className="text-xs text-muted-foreground/70 truncate max-w-[180px]">{call.contact_email}</p>
+                            )}
                           </TableCell>
                           <TableCell>
                             {(call.bot_name || botNameMap.get(call.bot_id)) ? (

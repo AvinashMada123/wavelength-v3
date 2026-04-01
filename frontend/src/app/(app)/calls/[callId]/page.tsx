@@ -534,8 +534,14 @@ export default function CallDetailPage() {
                     </Button>
                   )}
                 </div>
-                <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
+                <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground flex-wrap">
                   <span>{formatPhoneNumber(call.contact_phone)}</span>
+                  {call.contact_email && (
+                    <>
+                      <span className="text-muted-foreground/40">|</span>
+                      <span>{call.contact_email}</span>
+                    </>
+                  )}
                   <span className="text-muted-foreground/40">|</span>
                   <span>{formatDate(call.created_at)}</span>
                   {call.call_duration != null && (

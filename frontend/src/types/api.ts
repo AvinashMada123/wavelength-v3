@@ -383,6 +383,7 @@ export interface CallLog {
   call_sid: string;
   contact_name: string;
   contact_phone: string;
+  contact_email: string | null;
   ghl_contact_id: string | null;
   status: string;
   outcome: string | null;

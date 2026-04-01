@@ -416,6 +416,7 @@ class CallLogListResponse(BaseModel):
     call_sid: str
     contact_name: str
     contact_phone: str
+    contact_email: str | None = None
     ghl_contact_id: str | None
     status: str
     outcome: str | None
@@ -450,6 +451,7 @@ class CallLogResponse(BaseModel):
     call_sid: str
     contact_name: str
     contact_phone: str
+    contact_email: str | None = None
     ghl_contact_id: str | None
     status: str
     outcome: str | None
