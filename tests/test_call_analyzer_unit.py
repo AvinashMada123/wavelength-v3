@@ -338,3 +338,109 @@ class TestAnalyzeFieldValidation:
     async def test_sentiment_score_non_int_becomes_none(self):
         result = await self._run_analyze({"sentiment_score": "high"})
         assert result.sentiment_score is None
+
+    @pytest.mark.asyncio
+    async def test_captured_data_with_email_flows_through(self):
+        """Email field in captured_data should survive the analyze pipeline."""
+        self._extraction_result = {
+            "red_flags": [],
+            "captured_data": {"email": "user@example.com", "profession": "engineer"},
+            "objections": None,
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }
+        result = await self._run_analyze({})
+        assert result.captured_data["email"] == "user@example.com"
+        assert result.captured_data["profession"] == "engineer"
+
+    @pytest.mark.asyncio
+    async def test_captured_data_email_null_when_not_mentioned(self):
+        """Email field should be null when not mentioned in transcript."""
+        self._extraction_result = {
+            "red_flags": [],
+            "captured_data": {"email": None, "profession": "teacher"},
+            "objections": None,
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }
+        result = await self._run_analyze({})
+        assert result.captured_data["email"] is None
+        assert result.captured_data["profession"] == "teacher"
+
+
+# ---------------------------------------------------------------------------
+# _extract_structured_data prompt building
+# ---------------------------------------------------------------------------
+
+class TestExtractStructuredDataPrompt:
+    """Test that data capture fields correctly appear in the extraction prompt."""
+
+    def setup_method(self):
+        self.analyzer = CallAnalyzer()
+
+    @pytest.mark.asyncio
+    async def test_email_field_included_in_prompt(self):
+        """Email data capture field should appear in the extraction prompt."""
+        from app.models.schemas import GoalConfig
+
+        goal_config = GoalConfig(**{
+            "goal_type": "Event Invitation",
+            "goal_description": "test",
+            "success_criteria": [{"id": "confirmed", "label": "Confirmed", "is_primary": True}],
+            "data_capture_fields": [
+                {"id": "email", "type": "string", "label": "Email Address",
+                 "description": "Customer's email address if mentioned during the call"},
+                {"id": "profession", "type": "string", "label": "Profession"},
+            ],
+        })
+
+        transcript = [
+            {"role": "assistant", "content": "What do you do?"},
+            {"role": "user", "content": "I'm an engineer. My email is test@example.com"},
+        ]
+
+        # Mock the Gemini call to capture the prompt
+        captured_prompts = []
+
+        async def mock_gemini(prompt, **kwargs):
+            captured_prompts.append(prompt)
+            return SimpleNamespace(text='{"red_flags": [], "captured_data": {"email": "test@example.com", "profession": "engineer"}, "objections": []}')
+
+        with patch.object(self.analyzer, "_gemini_call", side_effect=mock_gemini):
+            result = await self.analyzer._extract_structured_data(transcript, goal_config, "test-call")
+
+        prompt = captured_prompts[0]
+        assert '"email": Email Address' in prompt
+        assert "Customer's email address if mentioned during the call" in prompt
+        assert '"profession": Profession' in prompt
+        assert result["captured_data"]["email"] == "test@example.com"
+
+    @pytest.mark.asyncio
+    async def test_enum_field_includes_valid_values(self):
+        """Enum data capture fields should list valid values in the prompt."""
+        from app.models.schemas import GoalConfig
+
+        goal_config = GoalConfig(**{
+            "goal_type": "test",
+            "goal_description": "test",
+            "success_criteria": [{"id": "done", "label": "Done", "is_primary": True}],
+            "data_capture_fields": [
+                {"id": "experience", "type": "enum", "label": "AI Experience",
+                 "enum_values": ["none", "basic", "intermediate", "advanced"]},
+            ],
+        })
+
+        captured_prompts = []
+
+        async def mock_gemini(prompt, **kwargs):
+            captured_prompts.append(prompt)
+            return SimpleNamespace(text='{"red_flags": [], "captured_data": {"experience": "basic"}, "objections": []}')
+
+        with patch.object(self.analyzer, "_gemini_call", side_effect=mock_gemini):
+            await self.analyzer._extract_structured_data(
+                [{"role": "user", "content": "I know a bit of AI"}], goal_config, "test"
+            )
+
+        prompt = captured_prompts[0]
+        assert "MUST be one of:" in prompt
+        assert "none" in prompt and "advanced" in prompt
