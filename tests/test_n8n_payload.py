@@ -16,7 +16,7 @@ sys.modules.setdefault(
     ),
 )
 
-from app.services.n8n_webhook import build_payload
+from app.services.n8n_webhook import build_payload, _parse_json_field, _extract_bot_config_data
 
 
 # ---------------------------------------------------------------------------
@@ -397,3 +397,83 @@ class TestPayloadEnvelope:
         # Timestamp should be a valid ISO string
         assert "T" in result["timestamp"]
         assert result["wavelength_version"] == "v3"
+
+
+# ---------------------------------------------------------------------------
+# _parse_json_field
+# ---------------------------------------------------------------------------
+
+
+class TestParseJsonField:
+    def test_string_json_parsed(self):
+        result = _parse_json_field('{"key": "value"}')
+        assert result == {"key": "value"}
+
+    def test_dict_returned_unchanged(self):
+        d = {"key": "value"}
+        assert _parse_json_field(d) is d
+
+    def test_list_returned_unchanged(self):
+        lst = [1, 2, 3]
+        assert _parse_json_field(lst) is lst
+
+    def test_none_returned_unchanged(self):
+        assert _parse_json_field(None) is None
+
+    def test_invalid_json_string_returned_as_is(self):
+        assert _parse_json_field("not json") == "not json"
+
+    def test_nested_json_string(self):
+        result = _parse_json_field('{"event_host": "Avinash", "webinar_link": "https://zoom.us/123"}')
+        assert result["event_host"] == "Avinash"
+        assert result["webinar_link"] == "https://zoom.us/123"
+
+    def test_json_array_string(self):
+        result = _parse_json_field('[{"id": "a"}, {"id": "b"}]')
+        assert isinstance(result, list)
+        assert len(result) == 2
+
+
+# ---------------------------------------------------------------------------
+# _extract_bot_config_data — JSON field parsing
+# ---------------------------------------------------------------------------
+
+
+class TestExtractBotConfigData:
+    def test_string_context_variables_parsed(self):
+        bot = SimpleNamespace(
+            agent_name="Test Bot",
+            company_name="Test Co",
+            context_variables='{"event_host": "Avinash", "webinar_link": "https://zoom.us/123"}',
+            goal_config='{"goal_type": "Event Invitation"}',
+            language="en-IN",
+        )
+        result = _extract_bot_config_data(bot)
+        assert isinstance(result["context_variables"], dict)
+        assert result["context_variables"]["event_host"] == "Avinash"
+        assert result["context_variables"]["webinar_link"] == "https://zoom.us/123"
+        assert isinstance(result["goal_config"], dict)
+        assert result["goal_config"]["goal_type"] == "Event Invitation"
+
+    def test_already_parsed_dict_unchanged(self):
+        bot = SimpleNamespace(
+            agent_name="Test Bot",
+            company_name="Test Co",
+            context_variables={"event_host": "Avinash"},
+            goal_config={"goal_type": "Event Invitation"},
+            language="en-IN",
+        )
+        result = _extract_bot_config_data(bot)
+        assert result["context_variables"] == {"event_host": "Avinash"}
+
+    def test_none_fields_stay_none(self):
+        bot = SimpleNamespace(
+            agent_name="Test Bot",
+            company_name="Test Co",
+            context_variables=None,
+            goal_config=None,
+            language="en-IN",
+        )
+        result = _extract_bot_config_data(bot)
+        assert result["context_variables"] is None
+        assert result["goal_config"] is None

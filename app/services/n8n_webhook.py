@@ -262,13 +262,23 @@ async def _send_webhook(
 # ---------------------------------------------------------------------------
 
 
+def _parse_json_field(value: Any) -> Any:
+    """Parse a JSON string field if needed. Returns the value unchanged if already parsed."""
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return value
+    return value
+
+
 def _extract_bot_config_data(bot_config: Any) -> dict:
     """Extract relevant fields from bot_config ORM object for payload."""
     return {
         "agent_name": getattr(bot_config, "agent_name", None),
         "company_name": getattr(bot_config, "company_name", None),
-        "context_variables": getattr(bot_config, "context_variables", None),
-        "goal_config": getattr(bot_config, "goal_config", None),
+        "context_variables": _parse_json_field(getattr(bot_config, "context_variables", None)),
+        "goal_config": _parse_json_field(getattr(bot_config, "goal_config", None)),
         "language": getattr(bot_config, "language", None),
     }
 
