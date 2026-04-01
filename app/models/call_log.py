@@ -30,6 +30,7 @@ class CallLog(Base):
     call_sid: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     contact_name: Mapped[str] = mapped_column(Text, nullable=False)
     contact_phone: Mapped[str] = mapped_column(Text, nullable=False)
+    contact_email: Mapped[str | None] = mapped_column(Text)
     ghl_contact_id: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="initiated")
     outcome: Mapped[str | None] = mapped_column(Text)

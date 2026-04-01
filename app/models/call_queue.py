@@ -28,6 +28,7 @@ class QueuedCall(Base):
     )
     contact_name: Mapped[str] = mapped_column(Text, nullable=False)
     contact_phone: Mapped[str] = mapped_column(Text, nullable=False)
+    contact_email: Mapped[str | None] = mapped_column(Text)
     ghl_contact_id: Mapped[str | None] = mapped_column(Text)
     extra_vars: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     source: Mapped[str] = mapped_column(Text, nullable=False, server_default="webhook")

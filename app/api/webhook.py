@@ -25,6 +25,70 @@ def set_dependencies(loader: BotConfigLoader):
     bot_config_loader = loader
 
 
+def _parse_webhook_payload(body: dict) -> dict:
+    """Parse GHL or standard webhook payload into a normalized dict.
+
+    Returns dict with keys: phone_number, contact_name, bot_config_id,
+    ghl_contact_id, contact_email, custom_overrides.
+    """
+    phone_number: str | None = None
+    contact_name: str | None = None
+    bot_config_id: str | None = None
+    ghl_contact_id: str | None = None
+    contact_email: str | None = None
+    custom_overrides: dict[str, str] = {}
+
+    if body.get("customData") and isinstance(body["customData"], dict) and body["customData"].get("botConfigId"):
+        # GHL webhook format
+        cd = body["customData"]
+        phone_number = cd.get("phoneNumber")
+        contact_name = cd.get("contactName")
+        bot_config_id = cd.get("botConfigId")
+        ghl_contact_id = body.get("contact_id")
+        contact_email = cd.get("contactEmail") or body.get("email")
+
+        # Extract cv* prefixed fields as variable overrides
+        for key, value in cd.items():
+            if key.startswith("cv") and len(key) > 2 and value:
+                var_name = key[2:3].lower() + key[3:]
+                custom_overrides[var_name] = str(value)
+
+        # Fallback to top-level GHL contact fields
+        if not phone_number:
+            phone_number = body.get("phone")
+        if not contact_name:
+            contact_name = body.get("full_name") or " ".join(
+                filter(None, [body.get("first_name"), body.get("last_name")])
+            )
+
+        logger.info(
+            "webhook_ghl_payload",
+            phone=phone_number,
+            bot_config=bot_config_id,
+            ghl_contact=ghl_contact_id,
+            contact_email=contact_email,
+            custom_overrides=custom_overrides,
+            cd_keys=list(cd.keys()),
+        )
+    else:
+        # Standard format
+        phone_number = body.get("phoneNumber")
+        contact_name = body.get("contactName")
+        bot_config_id = body.get("botConfigId")
+        ghl_contact_id = body.get("ghlContactId")
+        contact_email = body.get("contactEmail")
+        custom_overrides = body.get("customVariableOverrides") or {}
+
+    return {
+        "phone_number": phone_number,
+        "contact_name": contact_name,
+        "bot_config_id": bot_config_id,
+        "ghl_contact_id": ghl_contact_id,
+        "contact_email": contact_email,
+        "custom_overrides": custom_overrides,
+    }
+
+
 def _verify_api_key(request: Request) -> None:
     """Verify x-api-key header or ?key= query param against WEBHOOK_API_KEY."""
     from app.config import settings
@@ -65,51 +129,14 @@ async def webhook_trigger_call(request: Request):
     _verify_api_key(request)
 
     body = await request.json()
+    parsed = _parse_webhook_payload(body)
 
-    # --- Parse payload (GHL customData vs standard) ---
-    phone_number: str | None = None
-    contact_name: str | None = None
-    bot_config_id: str | None = None
-    ghl_contact_id: str | None = None
-    custom_overrides: dict[str, str] = {}
-
-    if body.get("customData") and isinstance(body["customData"], dict) and body["customData"].get("botConfigId"):
-        # GHL webhook format
-        cd = body["customData"]
-        phone_number = cd.get("phoneNumber")
-        contact_name = cd.get("contactName")
-        bot_config_id = cd.get("botConfigId")
-        ghl_contact_id = body.get("contact_id")
-
-        # Extract cv* prefixed fields as variable overrides
-        for key, value in cd.items():
-            if key.startswith("cv") and len(key) > 2 and value:
-                var_name = key[2:3].lower() + key[3:]
-                custom_overrides[var_name] = str(value)
-
-        # Fallback to top-level GHL contact fields
-        if not phone_number:
-            phone_number = body.get("phone")
-        if not contact_name:
-            contact_name = body.get("full_name") or " ".join(
-                filter(None, [body.get("first_name"), body.get("last_name")])
-            )
-
-        logger.info(
-            "webhook_ghl_payload",
-            phone=phone_number,
-            bot_config=bot_config_id,
-            ghl_contact=ghl_contact_id,
-            custom_overrides=custom_overrides,
-            cd_keys=list(cd.keys()),
-        )
-    else:
-        # Standard format
-        phone_number = body.get("phoneNumber")
-        contact_name = body.get("contactName")
-        bot_config_id = body.get("botConfigId")
-        ghl_contact_id = body.get("ghlContactId")
-        custom_overrides = body.get("customVariableOverrides") or {}
+    phone_number = parsed["phone_number"]
+    contact_name = parsed["contact_name"]
+    bot_config_id = parsed["bot_config_id"]
+    ghl_contact_id = parsed["ghl_contact_id"]
+    contact_email = parsed["contact_email"]
+    custom_overrides = parsed["custom_overrides"]
 
     # --- Validate ---
     if not phone_number:
@@ -143,6 +170,7 @@ async def webhook_trigger_call(request: Request):
             bot_id=bot_config.id,
             contact_name=contact_name,
             contact_phone=phone_number,
+            contact_email=contact_email,
             ghl_contact_id=ghl_contact_id,
             extra_vars=custom_overrides,
             source="webhook",

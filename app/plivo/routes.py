@@ -384,6 +384,7 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
             contact={
                 "contact_name": ctx.contact_name,
                 "contact_phone": getattr(call_log, "contact_phone", ""),
+                "contact_email": getattr(ctx, "contact_email", None),
                 "ghl_contact_id": ctx.ghl_contact_id,
             },
         ))
@@ -726,6 +727,7 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
                 contact={
                     "contact_name": ctx.contact_name,
                     "contact_phone": getattr(existing_log, "contact_phone", ""),
+                    "contact_email": getattr(ctx, "contact_email", None),
                     "ghl_contact_id": ctx.ghl_contact_id,
                 },
                 transcript=transcript_entries if transcript_entries else None,
@@ -796,6 +798,7 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
             contact={
                 "contact_name": ctx.contact_name,
                 "contact_phone": "",
+                "contact_email": getattr(ctx, "contact_email", None),
                 "ghl_contact_id": ctx.ghl_contact_id,
             },
         ))
@@ -862,7 +865,7 @@ async def plivo_event(call_sid: str, request: Request):
             await bill_completed_call(
                 db,
                 call_log,
-                provider_status=mapped_status,
+                provider_status=call_log.status or mapped_status,
                 reported_duration_seconds=duration_val,
             )
 

@@ -167,6 +167,7 @@ def build_payload(
         payload["contact"] = {
             "contact_name": contact.get("contact_name"),
             "contact_phone": contact.get("contact_phone"),
+            "contact_email": contact.get("contact_email"),
             "ghl_contact_id": contact.get("ghl_contact_id"),
             "lead_id": contact.get("lead_id"),
         }

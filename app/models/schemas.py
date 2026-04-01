@@ -142,6 +142,7 @@ class TriggerCallRequest(BaseModel):
     bot_id: uuid.UUID
     contact_name: str
     contact_phone: str
+    contact_email: str | None = None
     ghl_contact_id: str | None = None
     extra_vars: dict[str, str] = Field(default_factory=dict)
 
@@ -540,11 +541,13 @@ class CallContext:
         stream_id: str | None = None,
         # Full bot config for credentials
         bot_config: object | None = None,
+        contact_email: str | None = None,
     ):
         self.call_sid = call_sid
         self.filled_prompt = filled_prompt
         self.contact_name = contact_name
         self.ghl_contact_id = ghl_contact_id
+        self.contact_email = contact_email
         self.ghl_webhook_url = ghl_webhook_url
         self.tts_provider = tts_provider
         self.tts_voice = tts_voice
@@ -565,6 +568,7 @@ class CallContext:
             filled_prompt=cd.get("filled_prompt", ""),
             contact_name=cd.get("contact_name", call_log.contact_name),
             ghl_contact_id=cd.get("ghl_contact_id", call_log.ghl_contact_id),
+            contact_email=cd.get("contact_email", getattr(call_log, "contact_email", None)),
             ghl_webhook_url=cd.get("ghl_webhook_url"),
             tts_provider=cd.get("tts_provider", "sarvam"),
             tts_voice=cd.get("tts_voice", "priya"),

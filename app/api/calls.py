@@ -276,6 +276,7 @@ async def trigger_call(
         bot_id=bot_config.id,
         contact_name=req.contact_name,
         contact_phone=normalized_phone,
+        contact_email=req.contact_email,
         ghl_contact_id=req.ghl_contact_id,
         extra_vars=req.merged_extra_vars(),
         source="api",
