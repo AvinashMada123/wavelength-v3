@@ -719,7 +719,7 @@ async def plivo_websocket(websocket: WebSocket, call_sid: str):
                 bot_config=bot_config,
                 call_data={
                     "call_sid": call_sid,
-                    "call_duration": existing_meta.get("call_metrics", {}).get("total_duration_s"),
+                    "call_duration": int((datetime.now(timezone.utc) - _pipeline_start).total_seconds()),
                     "outcome": "completed",
                     "recording_url": existing_meta.get("recording_url"),
                 },
